@@ -1,0 +1,38 @@
+.DS_Store
+
+# Xcode user and generated data
+build/
+DerivedData/
+*.xcuserstate
+xcuserdata/
+*.xcarchive/
+*.xcodeproj/project.xcworkspace/xcuserdata/
+*.xcodeproj/xcuserdata/
+
+# Local release artifacts and QA output
+dist/
+deliverables/
+tmp/
+Backups/
+*.mojibackup
+
+# Local configuration and environment files
+.env
+.env.*
+!.env.example
+Config/Local.xcconfig
+
+# Signing credentials and provisioning profiles
+*.cer
+*.key
+*.mobileprovision
+*.p12
+*.p8
+*.pem
+*.pfx
+
+# Swift/Xcode tooling caches
+.build/
+.swiftpm/
+*.xccheckout
+*.xcscmblueprint
