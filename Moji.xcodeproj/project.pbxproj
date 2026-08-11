@@ -1,0 +1,717 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 77;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		F0A100000000000000000001 /* JFZSKSealScript_V3.ttf in Resources */ = {isa = PBXBuildFile; fileRef = F0A200000000000000000001 /* JFZSKSealScript_V3.ttf */; };
+		F0A100000000000000000002 /* JFZSKSealScript-OFL.txt in Resources */ = {isa = PBXBuildFile; fileRef = F0A200000000000000000002 /* JFZSKSealScript-OFL.txt */; };
+		F0A100000000000000000003 /* JFZSKSealScript_V3.ttf in Resources */ = {isa = PBXBuildFile; fileRef = F0A200000000000000000001 /* JFZSKSealScript_V3.ttf */; };
+		F0A100000000000000000004 /* JFZSKSealScript-OFL.txt in Resources */ = {isa = PBXBuildFile; fileRef = F0A200000000000000000002 /* JFZSKSealScript-OFL.txt */; };
+		05650B734E6B30835EAA3C49 /* MojiWidgetBundle.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8240E8498D11F4B5708787B4 /* MojiWidgetBundle.swift */; };
+		0B80E7661AA6B38CD9E4CD5B /* FocusQuickWidget.swift in Sources */ = {isa = PBXBuildFile; fileRef = FC26EF5582069AF138BC6F34 /* FocusQuickWidget.swift */; };
+		0C40AA93072DCEE92F1813A0 /* PlanComponents.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3031F1974303AA100DC26D4C /* PlanComponents.swift */; };
+		B30A00000000000000000001 /* MemosView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B30A00000000000000000002 /* MemosView.swift */; };
+		C1D2E3F4A5B60718293A4B5D /* ExternalBackupService.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1D2E3F4A5B60718293A4B5C /* ExternalBackupService.swift */; };
+		A1B2C3D4E5F60718293A4B5D /* PomodoroEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F60718293A4B5C /* PomodoroEngine.swift */; };
+		0F034D1F67025CDCD6E6AB74 /* MojiWidget.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = 5F60FAAFFBFA7A793D5F772A /* MojiWidget.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		22085A836B772F051B239668 /* CountdownsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E5C5DC093575A77E94395CC0 /* CountdownsView.swift */; };
+		235FE8487A4D3BFE3360804F /* PlanModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3AB07C47179E6508BCA19298 /* PlanModels.swift */; };
+		342558AA459EADB37A56A105 /* PlanModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3AB07C47179E6508BCA19298 /* PlanModels.swift */; };
+		46C203E07603B963A8D7C3FD /* PlanColors.swift in Sources */ = {isa = PBXBuildFile; fileRef = 59A82384D309BAD4708FCF1F /* PlanColors.swift */; };
+		5C49DE2AA0B407FCC52DD0AB /* RecordEditorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1332B79C776C13B6E05C488F /* RecordEditorView.swift */; };
+		5DF49C4AEDFC2B4C6D792B22 /* MojiCoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0A5F22E4258D7B0BE5D0D26 /* MojiCoreTests.swift */; };
+		63B9E500D034EDE8B38987F5 /* DashboardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = EE74EA9095AF45FB08C7EFE6 /* DashboardView.swift */; };
+		773ADA2BBDED4457E388AF65 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8345810D2752DD61637A598B /* ContentView.swift */; };
+		79473FAA219882CA76A8809D /* PlanColors.swift in Sources */ = {isa = PBXBuildFile; fileRef = 59A82384D309BAD4708FCF1F /* PlanColors.swift */; };
+		86795DBC134A9CA2B19ACC4E /* SharedPersistence.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3CF703C26466C2387B8C7374 /* SharedPersistence.swift */; };
+		903E63178A5D215F022C4E4B /* WidgetActions.swift in Sources */ = {isa = PBXBuildFile; fileRef = 79A42A5AC2425610F728B4B2 /* WidgetActions.swift */; };
+		9CB6568DC199EE263BEC07A4 /* WeeklySummaryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1E62E6F123A8660D45E5C1E /* WeeklySummaryView.swift */; };
+		A7C14E2B93D84F21A114C001 /* PlanCalendarView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A7C14E2B93D84F21A114C002 /* PlanCalendarView.swift */; };
+		A4C45DBADFADC405C7D7BDD7 /* MojiApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 84580816F4D8CAF4177EDE67 /* MojiApp.swift */; };
+		B2170E6E222C38105D3AAFDE /* ImportantCountdownWidget.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5F71C1E9E247373BA18E99AF /* ImportantCountdownWidget.swift */; };
+		C3F84366081E440414909A54 /* SharedPersistence.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3CF703C26466C2387B8C7374 /* SharedPersistence.swift */; };
+		CBB93044BEBF2B1F8ABB3D49 /* PlanStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4A2FAE32E2172B2B0843064D /* PlanStore.swift */; };
+		D45AA6445ED9780CF4DF6154 /* RecordsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 68B3E5FEE2F221CD05840D75 /* RecordsView.swift */; };
+		D949915FBB0859B0BABFD5EE /* WidgetActions.swift in Sources */ = {isa = PBXBuildFile; fileRef = 79A42A5AC2425610F728B4B2 /* WidgetActions.swift */; };
+		DEFB7D309ADF487732E96126 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = A23B3EFF893E2C4DE2B049C7 /* Assets.xcassets */; };
+		F7BF76C0B0DD6C3FFBB8F392 /* CountdownEditorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CA2AE43696652CD78FBD2D3B /* CountdownEditorView.swift */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		01E420CC4AB265CE816721A2 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 83AB06D4B42D83DA29C865C5 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 0E2002A018EC37D581B377EA;
+			remoteInfo = MojiWidget;
+		};
+		EAC004E582A394999A672420 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 83AB06D4B42D83DA29C865C5 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 2E26630A6AC0E46C03FF5699;
+			remoteInfo = Moji;
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXCopyFilesBuildPhase section */
+		892F3FE026D23B4B10D04599 /* Embed Foundation Extensions */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 13;
+			files = (
+				0F034D1F67025CDCD6E6AB74 /* MojiWidget.appex in Embed Foundation Extensions */,
+			);
+			name = "Embed Foundation Extensions";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXCopyFilesBuildPhase section */
+
+/* Begin PBXFileReference section */
+		F0A200000000000000000001 /* JFZSKSealScript_V3.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = JFZSKSealScript_V3.ttf; sourceTree = "<group>"; };
+		F0A200000000000000000002 /* JFZSKSealScript-OFL.txt */ = {isa = PBXFileReference; lastKnownFileType = text; path = "JFZSKSealScript-OFL.txt"; sourceTree = "<group>"; };
+		0B701438954AE234DF88C25B /* Moji.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = Moji.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		1332B79C776C13B6E05C488F /* RecordEditorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecordEditorView.swift; sourceTree = "<group>"; };
+		B30A00000000000000000002 /* MemosView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MemosView.swift; sourceTree = "<group>"; };
+		3031F1974303AA100DC26D4C /* PlanComponents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlanComponents.swift; sourceTree = "<group>"; };
+		C1D2E3F4A5B60718293A4B5C /* ExternalBackupService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExternalBackupService.swift; sourceTree = "<group>"; };
+		A1B2C3D4E5F60718293A4B5C /* PomodoroEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PomodoroEngine.swift; sourceTree = "<group>"; };
+		3AB07C47179E6508BCA19298 /* PlanModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlanModels.swift; sourceTree = "<group>"; };
+		3CF703C26466C2387B8C7374 /* SharedPersistence.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SharedPersistence.swift; sourceTree = "<group>"; };
+		43932251CF5E7CA8DAE1246D /* MojiTests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = MojiTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		4A2FAE32E2172B2B0843064D /* PlanStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlanStore.swift; sourceTree = "<group>"; };
+		59A82384D309BAD4708FCF1F /* PlanColors.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlanColors.swift; sourceTree = "<group>"; };
+		5F60FAAFFBFA7A793D5F772A /* MojiWidget.appex */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = "wrapper.app-extension"; path = MojiWidget.appex; sourceTree = BUILT_PRODUCTS_DIR; };
+		5F71C1E9E247373BA18E99AF /* ImportantCountdownWidget.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImportantCountdownWidget.swift; sourceTree = "<group>"; };
+		68B3E5FEE2F221CD05840D75 /* RecordsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecordsView.swift; sourceTree = "<group>"; };
+		79A42A5AC2425610F728B4B2 /* WidgetActions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WidgetActions.swift; sourceTree = "<group>"; };
+		8240E8498D11F4B5708787B4 /* MojiWidgetBundle.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MojiWidgetBundle.swift; sourceTree = "<group>"; };
+		8345810D2752DD61637A598B /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
+		84580816F4D8CAF4177EDE67 /* MojiApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MojiApp.swift; sourceTree = "<group>"; };
+		A0A5F22E4258D7B0BE5D0D26 /* MojiCoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MojiCoreTests.swift; sourceTree = "<group>"; };
+		A1E62E6F123A8660D45E5C1E /* WeeklySummaryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WeeklySummaryView.swift; sourceTree = "<group>"; };
+		A7C14E2B93D84F21A114C002 /* PlanCalendarView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlanCalendarView.swift; sourceTree = "<group>"; };
+		A23B3EFF893E2C4DE2B049C7 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		CA2AE43696652CD78FBD2D3B /* CountdownEditorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CountdownEditorView.swift; sourceTree = "<group>"; };
+		E5C5DC093575A77E94395CC0 /* CountdownsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CountdownsView.swift; sourceTree = "<group>"; };
+		EE74EA9095AF45FB08C7EFE6 /* DashboardView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DashboardView.swift; sourceTree = "<group>"; };
+		FC26EF5582069AF138BC6F34 /* FocusQuickWidget.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FocusQuickWidget.swift; sourceTree = "<group>"; };
+/* End PBXFileReference section */
+
+/* Begin PBXGroup section */
+		0545F7D04759630F4E835F3E /* MojiWidget */ = {
+			isa = PBXGroup;
+			children = (
+				FC26EF5582069AF138BC6F34 /* FocusQuickWidget.swift */,
+				5F71C1E9E247373BA18E99AF /* ImportantCountdownWidget.swift */,
+				8240E8498D11F4B5708787B4 /* MojiWidgetBundle.swift */,
+			);
+			path = MojiWidget;
+			sourceTree = "<group>";
+		};
+		11F0BADA9D46B8BA753AD8FA /* Countdowns */ = {
+			isa = PBXGroup;
+			children = (
+				CA2AE43696652CD78FBD2D3B /* CountdownEditorView.swift */,
+				E5C5DC093575A77E94395CC0 /* CountdownsView.swift */,
+			);
+			path = Countdowns;
+			sourceTree = "<group>";
+		};
+		259620B176B274467EAC20E4 /* Dashboard */ = {
+			isa = PBXGroup;
+			children = (
+				EE74EA9095AF45FB08C7EFE6 /* DashboardView.swift */,
+				A7C14E2B93D84F21A114C002 /* PlanCalendarView.swift */,
+			);
+			path = Dashboard;
+			sourceTree = "<group>";
+		};
+		408D14888BBA8A2339A167DF /* Moji */ = {
+			isa = PBXGroup;
+			children = (
+				965651B8580B977C7F0B37E0 /* App */,
+				A9BD1395A97AD8B702286C52 /* Views */,
+				A23B3EFF893E2C4DE2B049C7 /* Assets.xcassets */,
+			);
+			path = Moji;
+			sourceTree = "<group>";
+		};
+		5979772CF077184620F45F96 = {
+			isa = PBXGroup;
+			children = (
+				408D14888BBA8A2339A167DF /* Moji */,
+				CF3C98FE7D31251269259510 /* MojiTests */,
+				0545F7D04759630F4E835F3E /* MojiWidget */,
+				FEF2089649EFE430342A4C9D /* Shared */,
+				6C4A0F12FB2F663982CDD8EA /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		6C4A0F12FB2F663982CDD8EA /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				0B701438954AE234DF88C25B /* Moji.app */,
+				43932251CF5E7CA8DAE1246D /* MojiTests.xctest */,
+				5F60FAAFFBFA7A793D5F772A /* MojiWidget.appex */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		73092AEEF37CC8521A90C860 /* Records */ = {
+			isa = PBXGroup;
+			children = (
+				1332B79C776C13B6E05C488F /* RecordEditorView.swift */,
+				68B3E5FEE2F221CD05840D75 /* RecordsView.swift */,
+				A1E62E6F123A8660D45E5C1E /* WeeklySummaryView.swift */,
+			);
+			path = Records;
+			sourceTree = "<group>";
+		};
+		B30A00000000000000000003 /* Memos */ = {
+			isa = PBXGroup;
+			children = (
+				B30A00000000000000000002 /* MemosView.swift */,
+			);
+			path = Memos;
+			sourceTree = "<group>";
+		};
+		965651B8580B977C7F0B37E0 /* App */ = {
+			isa = PBXGroup;
+			children = (
+				C1D2E3F4A5B60718293A4B5C /* ExternalBackupService.swift */,
+				A1B2C3D4E5F60718293A4B5C /* PomodoroEngine.swift */,
+				8345810D2752DD61637A598B /* ContentView.swift */,
+				84580816F4D8CAF4177EDE67 /* MojiApp.swift */,
+				4A2FAE32E2172B2B0843064D /* PlanStore.swift */,
+			);
+			path = App;
+			sourceTree = "<group>";
+		};
+		A9BD1395A97AD8B702286C52 /* Views */ = {
+			isa = PBXGroup;
+			children = (
+				D05D8716354D7A153C9F916F /* Components */,
+				11F0BADA9D46B8BA753AD8FA /* Countdowns */,
+				259620B176B274467EAC20E4 /* Dashboard */,
+				B30A00000000000000000003 /* Memos */,
+				73092AEEF37CC8521A90C860 /* Records */,
+			);
+			path = Views;
+			sourceTree = "<group>";
+		};
+		CF3C98FE7D31251269259510 /* MojiTests */ = {
+			isa = PBXGroup;
+			children = (
+				A0A5F22E4258D7B0BE5D0D26 /* MojiCoreTests.swift */,
+			);
+			path = MojiTests;
+			sourceTree = "<group>";
+		};
+		D05D8716354D7A153C9F916F /* Components */ = {
+			isa = PBXGroup;
+			children = (
+				3031F1974303AA100DC26D4C /* PlanComponents.swift */,
+			);
+			path = Components;
+			sourceTree = "<group>";
+		};
+		FEF2089649EFE430342A4C9D /* Shared */ = {
+			isa = PBXGroup;
+			children = (
+				F0A300000000000000000001 /* Fonts */,
+				59A82384D309BAD4708FCF1F /* PlanColors.swift */,
+				3AB07C47179E6508BCA19298 /* PlanModels.swift */,
+				3CF703C26466C2387B8C7374 /* SharedPersistence.swift */,
+				79A42A5AC2425610F728B4B2 /* WidgetActions.swift */,
+			);
+			path = Shared;
+			sourceTree = "<group>";
+		};
+		F0A300000000000000000001 /* Fonts */ = {
+			isa = PBXGroup;
+			children = (
+				F0A200000000000000000001 /* JFZSKSealScript_V3.ttf */,
+				F0A200000000000000000002 /* JFZSKSealScript-OFL.txt */,
+			);
+			path = Fonts;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		0E2002A018EC37D581B377EA /* MojiWidget */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 6FEE055BB0651054D016BCDD /* Build configuration list for PBXNativeTarget "MojiWidget" */;
+			buildPhases = (
+				EAE8D698053B7F9A059933B1 /* Sources */,
+				F0A400000000000000000001 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = MojiWidget;
+			packageProductDependencies = (
+			);
+			productName = MojiWidget;
+			productReference = 5F60FAAFFBFA7A793D5F772A /* MojiWidget.appex */;
+			productType = "com.apple.product-type.app-extension";
+		};
+		2E26630A6AC0E46C03FF5699 /* Moji */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = EA4FF50ACFB0B3C3E852EC89 /* Build configuration list for PBXNativeTarget "Moji" */;
+			buildPhases = (
+				E4386C9B6DEAA6A26ECF674E /* Sources */,
+				1F3A9D92B77482822202A797 /* Resources */,
+				892F3FE026D23B4B10D04599 /* Embed Foundation Extensions */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				F07F5D659E76340D4B525F68 /* PBXTargetDependency */,
+			);
+			name = Moji;
+			packageProductDependencies = (
+			);
+			productName = Moji;
+			productReference = 0B701438954AE234DF88C25B /* Moji.app */;
+			productType = "com.apple.product-type.application";
+		};
+		DD1FACE2172AF51E55057F6E /* MojiTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 1161048B00EE7E2D50A96C26 /* Build configuration list for PBXNativeTarget "MojiTests" */;
+			buildPhases = (
+				5FE45E420E8617876E9F3C4C /* Sources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				FAE6ACD55EC71FB872082674 /* PBXTargetDependency */,
+			);
+			name = MojiTests;
+			packageProductDependencies = (
+			);
+			productName = MojiTests;
+			productReference = 43932251CF5E7CA8DAE1246D /* MojiTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		83AB06D4B42D83DA29C865C5 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = YES;
+				LastUpgradeCheck = 1430;
+				TargetAttributes = {
+					0E2002A018EC37D581B377EA = {
+						DevelopmentTeam = "";
+						ProvisioningStyle = Automatic;
+					};
+					2E26630A6AC0E46C03FF5699 = {
+						DevelopmentTeam = "";
+						ProvisioningStyle = Automatic;
+					};
+					DD1FACE2172AF51E55057F6E = {
+						DevelopmentTeam = "";
+						ProvisioningStyle = Automatic;
+					};
+				};
+			};
+			buildConfigurationList = B759D3A72FB6ED3D18B510D3 /* Build configuration list for PBXProject "Moji" */;
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				Base,
+				en,
+			);
+			mainGroup = 5979772CF077184620F45F96;
+			minimizedProjectReferenceProxies = 1;
+			preferredProjectObjectVersion = 77;
+			productRefGroup = 6C4A0F12FB2F663982CDD8EA /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				2E26630A6AC0E46C03FF5699 /* Moji */,
+				0E2002A018EC37D581B377EA /* MojiWidget */,
+				DD1FACE2172AF51E55057F6E /* MojiTests */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		1F3A9D92B77482822202A797 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				DEFB7D309ADF487732E96126 /* Assets.xcassets in Resources */,
+				F0A100000000000000000001 /* JFZSKSealScript_V3.ttf in Resources */,
+				F0A100000000000000000002 /* JFZSKSealScript-OFL.txt in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		F0A400000000000000000001 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				F0A100000000000000000003 /* JFZSKSealScript_V3.ttf in Resources */,
+				F0A100000000000000000004 /* JFZSKSealScript-OFL.txt in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		5FE45E420E8617876E9F3C4C /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				5DF49C4AEDFC2B4C6D792B22 /* MojiCoreTests.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		E4386C9B6DEAA6A26ECF674E /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				773ADA2BBDED4457E388AF65 /* ContentView.swift in Sources */,
+				F7BF76C0B0DD6C3FFBB8F392 /* CountdownEditorView.swift in Sources */,
+				22085A836B772F051B239668 /* CountdownsView.swift in Sources */,
+				63B9E500D034EDE8B38987F5 /* DashboardView.swift in Sources */,
+				B30A00000000000000000001 /* MemosView.swift in Sources */,
+				A7C14E2B93D84F21A114C001 /* PlanCalendarView.swift in Sources */,
+				A4C45DBADFADC405C7D7BDD7 /* MojiApp.swift in Sources */,
+				79473FAA219882CA76A8809D /* PlanColors.swift in Sources */,
+				0C40AA93072DCEE92F1813A0 /* PlanComponents.swift in Sources */,
+				C1D2E3F4A5B60718293A4B5D /* ExternalBackupService.swift in Sources */,
+				A1B2C3D4E5F60718293A4B5D /* PomodoroEngine.swift in Sources */,
+				235FE8487A4D3BFE3360804F /* PlanModels.swift in Sources */,
+				CBB93044BEBF2B1F8ABB3D49 /* PlanStore.swift in Sources */,
+				5C49DE2AA0B407FCC52DD0AB /* RecordEditorView.swift in Sources */,
+				D45AA6445ED9780CF4DF6154 /* RecordsView.swift in Sources */,
+				C3F84366081E440414909A54 /* SharedPersistence.swift in Sources */,
+				9CB6568DC199EE263BEC07A4 /* WeeklySummaryView.swift in Sources */,
+				D949915FBB0859B0BABFD5EE /* WidgetActions.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		EAE8D698053B7F9A059933B1 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				0B80E7661AA6B38CD9E4CD5B /* FocusQuickWidget.swift in Sources */,
+				B2170E6E222C38105D3AAFDE /* ImportantCountdownWidget.swift in Sources */,
+				05650B734E6B30835EAA3C49 /* MojiWidgetBundle.swift in Sources */,
+				46C203E07603B963A8D7C3FD /* PlanColors.swift in Sources */,
+				342558AA459EADB37A56A105 /* PlanModels.swift in Sources */,
+				86795DBC134A9CA2B19ACC4E /* SharedPersistence.swift in Sources */,
+				903E63178A5D215F022C4E4B /* WidgetActions.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		F07F5D659E76340D4B525F68 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 0E2002A018EC37D581B377EA /* MojiWidget */;
+			targetProxy = 01E420CC4AB265CE816721A2 /* PBXContainerItemProxy */;
+		};
+		FAE6ACD55EC71FB872082674 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 2E26630A6AC0E46C03FF5699 /* Moji */;
+			targetProxy = EAC004E582A394999A672420 /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
+
+/* Begin XCBuildConfiguration section */
+		1EE8955E8EF8C2FC8259E223 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = Moji/Moji.entitlements;
+				CODE_SIGN_IDENTITY = "iPhone Developer";
+				INFOPLIST_FILE = Moji/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.raydon.minuteplan;
+				PRODUCT_NAME = Moji;
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+		5DCB46774F100389B393CD4B /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = Moji/Moji.entitlements;
+				CODE_SIGN_IDENTITY = "iPhone Developer";
+				INFOPLIST_FILE = Moji/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.raydon.minuteplan;
+				PRODUCT_NAME = Moji;
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		7117797FDED24639A882F68B /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				APPLICATION_EXTENSION_API_ONLY = YES;
+				CODE_SIGN_ENTITLEMENTS = MojiWidget/MojiWidget.entitlements;
+				INFOPLIST_FILE = MojiWidget/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.raydon.minuteplan.widget;
+				PRODUCT_NAME = MojiWidget;
+				SDKROOT = iphoneos;
+				SKIP_INSTALL = YES;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+		795CF7740CB1312DC432DA34 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				APPLICATION_EXTENSION_API_ONLY = YES;
+				CODE_SIGN_ENTITLEMENTS = MojiWidget/MojiWidget.entitlements;
+				INFOPLIST_FILE = MojiWidget/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.raydon.minuteplan.widget;
+				PRODUCT_NAME = MojiWidget;
+				SDKROOT = iphoneos;
+				SKIP_INSTALL = YES;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		7BC653F64421AB0416280EB3 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				CODE_SIGN_STYLE = Automatic;
+				COPY_PHASE_STRIP = NO;
+			CURRENT_PROJECT_VERSION = 37;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				DEVELOPMENT_TEAM = "";
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"$(inherited)",
+					"DEBUG=1",
+				);
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+			MARKETING_VERSION = 1.3.1;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SUPPORTS_MACCATALYST = NO;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				SWIFT_VERSION = 5.9;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		82C99E77851B6380B028E7A2 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				GENERATE_INFOPLIST_FILE = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.raydon.moji.tests;
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Moji.app/Moji";
+			};
+			name = Release;
+		};
+		9DA3B79149A60116D06AC350 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				GENERATE_INFOPLIST_FILE = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.raydon.moji.tests;
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Moji.app/Moji";
+			};
+			name = Debug;
+		};
+		DF6CF6414DC2EC0F6269D1E5 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				CODE_SIGN_STYLE = Automatic;
+				COPY_PHASE_STRIP = NO;
+			CURRENT_PROJECT_VERSION = 37;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				DEVELOPMENT_TEAM = "";
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+			MARKETING_VERSION = 1.3.1;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				MTL_FAST_MATH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SUPPORTS_MACCATALYST = NO;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+				SWIFT_VERSION = 5.9;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		1161048B00EE7E2D50A96C26 /* Build configuration list for PBXNativeTarget "MojiTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				9DA3B79149A60116D06AC350 /* Debug */,
+				82C99E77851B6380B028E7A2 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		6FEE055BB0651054D016BCDD /* Build configuration list for PBXNativeTarget "MojiWidget" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				795CF7740CB1312DC432DA34 /* Debug */,
+				7117797FDED24639A882F68B /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		B759D3A72FB6ED3D18B510D3 /* Build configuration list for PBXProject "Moji" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				7BC653F64421AB0416280EB3 /* Debug */,
+				DF6CF6414DC2EC0F6269D1E5 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		EA4FF50ACFB0B3C3E852EC89 /* Build configuration list for PBXNativeTarget "Moji" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				5DCB46774F100389B393CD4B /* Debug */,
+				1EE8955E8EF8C2FC8259E223 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+/* End XCConfigurationList section */
+	};
+	rootObject = 83AB06D4B42D83DA29C865C5 /* Project object */;
+}
