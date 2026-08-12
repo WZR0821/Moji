@@ -9,6 +9,8 @@ derived_data="$build_root/DerivedData"
 payload_dir="$build_root/Payload"
 dist_dir="$project_root/dist"
 latest_ipa_path="$dist_dir/Moji-unsigned.ipa"
+marketing_version="$(sed -n 's/^versionName=//p' "$project_root/version.properties")"
+build_number="$(sed -n 's/^versionCode=//p' "$project_root/version.properties")"
 
 if [[ -z "${DEVELOPER_DIR:-}" ]]; then
   for candidate in \
@@ -50,6 +52,8 @@ xcodebuild \
   CODE_SIGNING_ALLOWED=NO \
   CODE_SIGNING_REQUIRED=NO \
   CODE_SIGN_IDENTITY="" \
+  MARKETING_VERSION="$marketing_version" \
+  CURRENT_PROJECT_VERSION="$build_number" \
   build
 
 app_path="$derived_data/Build/Products/Release-iphoneos/Moji.app"
