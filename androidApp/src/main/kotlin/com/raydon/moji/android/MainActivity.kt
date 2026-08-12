@@ -3,6 +3,8 @@ package com.raydon.moji.android
 import android.Manifest
 import android.os.Bundle
 import androidx.activity.ComponentActivity
+import androidx.activity.SystemBarStyle
+import androidx.activity.enableEdgeToEdge
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
@@ -35,6 +37,10 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        enableEdgeToEdge(
+            statusBarStyle = SystemBarStyle.auto(0xFFF7F4ED.toInt(), 0xFF11100E.toInt()),
+            navigationBarStyle = SystemBarStyle.auto(0xFFF7F4ED.toInt(), 0xFF11100E.toInt()),
+        )
         setContent {
             val systemDark = isSystemInDarkTheme()
             val dark = when (viewModel.appearance) {
