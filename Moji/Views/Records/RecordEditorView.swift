@@ -558,7 +558,11 @@ struct CheckInEditorView: View {
             reminderMinutesBefore: kind == .planned && reminderMinutesBefore >= 0
                 ? reminderMinutesBefore
                 : nil,
-            plannedDurationEnabled: kind == .planned ? plannedDurationEnabled : false
+            generatedFromOccurrenceID: item?.generatedFromOccurrenceID,
+            plannedDurationEnabled: kind == .planned ? plannedDurationEnabled : false,
+            isArchived: item?.isArchived,
+            sourceMemoID: item?.sourceMemoID,
+            sourceMemoChecklistItemID: item?.sourceMemoChecklistItemID
         )
 
         if

@@ -2,6 +2,134 @@ import XCTest
 import UniformTypeIdentifiers
 @testable import Moji
 
+final class MojiWorkflowTests: XCTestCase {
+    private var calendar: Calendar { var c = Calendar(identifier: .gregorian); c.timeZone = TimeZone(identifier: "Asia/Tokyo")!; return c }
+    private func date(_ value: String) -> Date { ISO8601DateFormatter().date(from: value)! }
+    private var now: Date { date("2026-10-06T00:00:00Z") }
+    private func plan() -> CheckInItem { CheckInItem(title: "阅读", category: .study, scheduledStart: date("2026-10-06T05:30:00Z"), plannedMinutes: 45, plannedDurationEnabled: true) }
+    func testConversionRetainsMemoAndDeduplicatesWholeAndItems() {
+        let a = MemoChecklistItem(text: "车票", isCompleted: true)
+        let b = MemoChecklistItem(text: "充电器")
+        let memo = MemoItem(title: "出行", mode: .checklist, checklistItems: [a, b])
+        var state = PlanSnapshot(memos: [memo])
+        let first = PlanWorkflow.convertMemo(in: &state, memoID: memo.id, day: now)
+        XCTAssertEqual(first, PlanWorkflow.convertMemo(in: &state, memoID: memo.id, day: now))
+        let single = PlanWorkflow.convertMemo(in: &state, memoID: memo.id, itemID: a.id, day: now)
+        XCTAssertEqual(single, PlanWorkflow.convertMemo(in: &state, memoID: memo.id, itemID: a.id, day: now))
+        XCTAssertEqual(state.checkInItems.count, 2); XCTAssertEqual(state.memos, [memo])
+        XCTAssertTrue(state.checkInItems[0].note.contains("☑ 车票"))
+        XCTAssertEqual(state.checkInItems[1].title, "车票")
+    }
+    func testMissingAndEmptyConversionAreNotCreated() {
+        let memo = MemoItem(title: "", content: "")
+        var state = PlanSnapshot(memos: [memo])
+        XCTAssertNil(PlanWorkflow.convertMemo(in: &state, memoID: memo.id, day: now))
+        XCTAssertNil(PlanWorkflow.convertMemo(in: &state, memoID: UUID(), day: now))
+        XCTAssertTrue(state.checkInItems.isEmpty)
+    }
+    func testArchivedConversionRemainsLinked() {
+        let memo = MemoItem(title: "出行", content: "车票")
+        var state = PlanSnapshot(memos: [memo])
+        let id = PlanWorkflow.convertMemo(in: &state, memoID: memo.id, day: now)
+        state.checkInItems[0].isArchived = true
+        XCTAssertEqual(id, PlanWorkflow.convertMemo(in: &state, memoID: memo.id, day: now))
+        XCTAssertEqual(state.checkInItems.count, 1)
+    }
+    func testCopyResetsCompletionHistoryAndSeries() {
+        var source = plan(); source.status = .completed; source.completedAt = now
+        source.repeatRule = .daily; source.seriesID = UUID(); source.sourceMemoID = UUID()
+        source.calendarEventIdentifier = "device"; source.isArchived = true
+        let copied = PlanWorkflow.copied(source, to: now, calendar: calendar)
+        XCTAssertNotEqual(source.id, copied.id); XCTAssertEqual(copied.status, .planned)
+        XCTAssertEqual(copied.effectiveRepeatRule, .never); XCTAssertNil(copied.seriesID)
+        XCTAssertNil(copied.completedAt); XCTAssertNil(copied.calendarEventIdentifier); XCTAssertNil(copied.sourceMemoID)
+        XCTAssertEqual(copied.isArchived, false); XCTAssertEqual(copied.plannedMinutes, 45)
+    }
+    func testTemplateRetainsFieldsAndInstantiatesIndependentPlans() throws {
+        var original = plan(); original.note = "第一章"; original.reminderMinutesBefore = 10
+        let template = PlanTemplate(from: original, calendar: calendar)
+        let restored = try JSONDecoder().decode(PlanTemplate.self, from: JSONEncoder().encode(template))
+        XCTAssertEqual(template, restored)
+        let one = template.plan(on: now, calendar: calendar), two = template.plan(on: now, calendar: calendar)
+        XCTAssertNotEqual(one.id, two.id); XCTAssertEqual(one.note, "第一章"); XCTAssertEqual(one.reminderMinutesBefore, 10)
+    }
+    func testBatchDatePreservesTimeAndLeavesActiveAndCompletedAlone() {
+        let p = plan(); var active = plan(); active.status = .inProgress
+        var done = plan(); done.status = .completed
+        let source = PlanSnapshot(checkInItems: [p, active, done]); var state = source
+        let undo = PlanWorkflow.batch(in: &state, ids: Set([p.id, active.id, done.id]), day: date("2026-10-10T00:00:00Z"), calendar: calendar)
+        XCTAssertEqual(state.checkInItems[0].scheduledStart, date("2026-10-10T05:30:00Z"))
+        XCTAssertEqual(undo.before.count, 1); undo.apply(to: &state); XCTAssertEqual(state, source)
+    }
+    func testUndoPreservesSubsequentEditsAndOtherCollections() {
+        let p = plan(); var state = PlanSnapshot(checkInItems: [p])
+        let undo = PlanWorkflow.batch(in: &state, ids: [p.id], archived: true)
+        let memo = MemoItem(title: "新备忘"); state.memos.append(memo)
+        XCTAssertEqual(undo.apply(to: &state), 1); XCTAssertEqual(state.memos, [memo])
+        let changed = PlanWorkflow.batch(in: &state, ids: [p.id], category: .work)
+        state.checkInItems[0].title = "后续修改"
+        XCTAssertEqual(changed.apply(to: &state), 0); XCTAssertEqual(state.checkInItems[0].title, "后续修改")
+    }
+    func testPausedFocusPlanIsNotArchived() {
+        let p = plan(); var state = PlanSnapshot(checkInItems: [p])
+        let undo = PlanWorkflow.batch(in: &state, ids: [p.id], archived: true, blockedID: p.id)
+        XCTAssertTrue(undo.before.isEmpty); XCTAssertEqual(state.checkInItems, [p])
+    }
+    func testUndoAlsoProtectsPausedLinkedFocus() {
+        let p = plan(); var state = PlanSnapshot(checkInItems: [p])
+        let undo = PlanWorkflow.batch(in: &state, ids: [p.id], category: .work)
+        XCTAssertEqual(undo.apply(to: &state, blockedID: p.id), 0)
+        XCTAssertEqual(state.checkInItems[0].category, .work)
+    }
+    func testUntitledMemoUsesFirstNonblankLine() {
+        let memo = MemoItem(content: "\n  \n阅读一章\n整理笔记")
+        var state = PlanSnapshot(memos: [memo])
+        _ = PlanWorkflow.convertMemo(in: &state, memoID: memo.id, day: now)
+        XCTAssertEqual(state.checkInItems.first?.title, "阅读一章")
+    }
+    func testSubminuteFocusIsRoundedOnceAfterAggregation() {
+        let records = (1...4).map { _ in TimeRecord(title: "阅读", category: .study, startDate: now, endDate: now.addingTimeInterval(45)) }
+        XCTAssertEqual(WorkflowWeekSummary.make(snapshot: PlanSnapshot(records: records), week: now, calendar: calendar).actualMinutes, 3)
+    }
+    func testNextWeekMovesSameOccurrenceAndRetainsSeries() {
+        var p = plan(); p.repeatRule = .daily; p.seriesID = UUID()
+        var state = PlanSnapshot(checkInItems: [p])
+        let undo = PlanWorkflow.batch(in: &state, ids: [p.id], nextWeekOf: now, calendar: calendar)
+        XCTAssertEqual(state.checkInItems.count, 1); XCTAssertEqual(state.checkInItems[0].id, p.id)
+        XCTAssertEqual(state.checkInItems[0].scheduledStart, date("2026-10-13T05:30:00Z"))
+        XCTAssertEqual(state.checkInItems[0].seriesID, p.seriesID); undo.apply(to: &state); XCTAssertEqual(state.checkInItems, [p])
+    }
+    func testCheckedCompletionHasNoInventedActualDuration() {
+        var p = plan(); p.status = .completed; p.completedAt = now
+        let result = WorkflowWeekSummary.make(snapshot: PlanSnapshot(checkInItems: [p]), week: now, calendar: calendar)
+        XCTAssertEqual(result.completed.count, 1); XCTAssertEqual(result.untrackedCount, 1)
+        XCTAssertEqual(result.actualMinutes, 0); XCTAssertEqual(result.estimatedMinutes, 45)
+    }
+    func testFocusMinutesAreClippedAndCategoryFiltered() {
+        let records = [TimeRecord(title: "阅读", category: .study, startDate: date("2026-10-04T14:30:00Z"), endDate: date("2026-10-04T15:30:00Z")),
+                       TimeRecord(title: "工作", category: .work, startDate: date("2026-10-05T00:00:00Z"), endDate: date("2026-10-05T01:00:00Z"))]
+        let result = WorkflowWeekSummary.make(snapshot: PlanSnapshot(records: records), week: now, category: .study, calendar: calendar)
+        XCTAssertEqual(result.actualMinutes, 30)
+    }
+    func testSchema12UpgradeAndNewDataRoundTrip() throws {
+        let legacy = Data("{\"schemaVersion\":12,\"records\":[],\"countdowns\":[],\"lastUpdated\":\"2026-10-06T00:00:00Z\"}".utf8)
+        let decoder = JSONDecoder(); decoder.dateDecodingStrategy = .iso8601
+        var state = try decoder.decode(PlanSnapshot.self, from: legacy)
+        XCTAssertTrue(state.planTemplates.isEmpty); XCTAssertTrue(state.weeklyGoals.isEmpty)
+        state.planTemplates = [PlanTemplate(from: plan())]
+        state.weeklyGoals = [WeeklyGoal(weekStart: "2026-10-05", targetCount: 4, targetMinutes: 120)]
+        state.weeklyReflections = [WeeklyReflection(weekStart: "2026-10-05", note: "保持节奏", nextFocus: "读完一章")]
+        let encoder = JSONEncoder(); encoder.dateEncodingStrategy = .iso8601
+        let result = try decoder.decode(PlanSnapshot.self, from: encoder.encode(state))
+        XCTAssertEqual(result.weeklyGoals[0].targetCount, 4); XCTAssertEqual(result.weeklyReflections[0].nextFocus, "读完一章")
+    }
+    func testWeekKeysAndInvalidGoals() {
+        XCTAssertEqual(PlanWorkflow.weekKey(date("2026-01-01T00:00:00Z"), calendar: calendar), "2025-12-29")
+        XCTAssertTrue(PlanWorkflow.validWeekKey("2026-10-05")); XCTAssertFalse(PlanWorkflow.validWeekKey("2026-10-06"))
+        XCTAssertFalse(PlanWorkflow.validWeekKey("2026-02-30"))
+    }
+}
+
 final class MojiCoreTests: XCTestCase {
     func testBackupPickerAcceptsAutomaticAndManualBackupFiles() {
         let types = MojiBackupFile.readableContentTypes
@@ -15,6 +143,82 @@ final class MojiCoreTests: XCTestCase {
             UTType(filenameExtension: "mojibackup")?.identifier,
             MojiBackupFile.identifier
         )
+    }
+
+    private func contractBackup(_ snapshot: PlanSnapshot) throws -> Data {
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        let object = try JSONSerialization.jsonObject(with: encoder.encode(snapshot))
+        return try JSONSerialization.data(withJSONObject: [
+            "formatVersion": 1, "appIdentifier": "com.raydon.moji", "appVersion": "1.4.0",
+            "exportedAt": "2026-10-05T09:00:00.123456789Z", "snapshot": object
+        ])
+    }
+
+    func testBackupRejectsUnrelatedJsonAndBrokenArchives() {
+        for json in ["{}", "[]", "null", "{\"notMoji\":true}", "{\"formatVersion\":1,\"snapshot\":{}}"] {
+            XCTAssertThrowsError(try SharedPersistence.previewBackup(Data(json.utf8)))
+        }
+    }
+
+    func testBackupRejectsWrongIdentityAndMissingArchiveFields() throws {
+        var archive = try XCTUnwrap(JSONSerialization.jsonObject(with: contractBackup(.empty)) as? [String: Any])
+        archive["appIdentifier"] = "other.app"
+        XCTAssertThrowsError(try SharedPersistence.previewBackup(JSONSerialization.data(withJSONObject: archive)))
+        archive.removeValue(forKey: "appIdentifier")
+        XCTAssertThrowsError(try SharedPersistence.previewBackup(JSONSerialization.data(withJSONObject: archive)))
+    }
+
+    func testBackupSupportsFractionalDatesAndLegacyCompletedKind() throws {
+        let date = Date(timeIntervalSince1970: 1_791_190_800)
+        let item = CheckInItem(title: "旧安卓记录", category: .study, kind: .completedLog, scheduledStart: date, plannedMinutes: 25)
+        let data = try contractBackup(PlanSnapshot(checkInItems: [item], lastUpdated: date))
+        let json = try XCTUnwrap(String(data: data, encoding: .utf8))
+            .replacingOccurrences(of: "completedLog", with: "completed")
+        let preview = try SharedPersistence.previewBackup(Data(json.utf8))
+        XCTAssertEqual(preview.checkInItems.first?.kind, .completedLog)
+        // Android timestamps can carry subsecond precision in every date field.
+        var archive = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        var snapshot = try XCTUnwrap(archive["snapshot"] as? [String: Any])
+        snapshot["lastUpdated"] = "2026-10-05T09:00:00.123Z"
+        archive["snapshot"] = snapshot
+        let fractional = try SharedPersistence.previewBackup(JSONSerialization.data(withJSONObject: archive))
+        XCTAssertEqual(fractional.lastUpdated.timeIntervalSince1970.truncatingRemainder(dividingBy: 1), 0.123, accuracy: 0.001)
+    }
+
+    func testBackupPreservesNonPreciseZeroDurationAndRejectsInvalidPreciseRecord() throws {
+        let date = Date(timeIntervalSince1970: 1000)
+        let record = TimeRecord(title: "全天完成", category: .study, startDate: date, endDate: date, scheduleKind: .allDay)
+        let preview = try SharedPersistence.previewBackup(contractBackup(PlanSnapshot(records: [record])))
+        XCTAssertEqual(preview.records, [record])
+        var precise = record
+        precise.scheduleKind = .exactTime
+        XCTAssertThrowsError(try SharedPersistence.previewBackup(contractBackup(PlanSnapshot(records: [precise]))))
+    }
+
+    func testBackupRejectsDuplicateIdsBeforeNormalization() throws {
+        let date = Date(timeIntervalSince1970: 1000)
+        let record = TimeRecord(title: "重复", category: .study, startDate: date, endDate: date.addingTimeInterval(60))
+        XCTAssertThrowsError(try SharedPersistence.previewBackup(contractBackup(PlanSnapshot(records: [record, record]))))
+    }
+
+    func testImportedBackupClearsDeviceCalendarIdentifiers() throws {
+        var item = CheckInItem(title: "计划", category: .study, scheduledStart: Date(), plannedMinutes: 25)
+        item.calendarEventIdentifier = "123"
+        var event = CountdownEvent(title: "纪念日", targetDate: Date())
+        event.calendarEventIdentifier = "456"
+        let preview = try SharedPersistence.previewBackup(contractBackup(PlanSnapshot(checkInItems: [item], countdowns: [event])))
+        XCTAssertNil(preview.checkInItems.first?.calendarEventIdentifier)
+        XCTAssertNil(preview.countdowns.first?.calendarEventIdentifier)
+        XCTAssertEqual(item.calendarEventIdentifier, "123")
+    }
+
+    func testInvalidBackupCannotChangeDataOrPreferences() throws {
+        let before = SharedPersistence.load()
+        let focus = SharedPersistence.sharedDefaults.object(forKey: PomodoroStorageKeys.focusMinutes) as? Int
+        XCTAssertThrowsError(try SharedPersistence.importBackup(Data("{\"notMoji\":true}".utf8)))
+        XCTAssertEqual(SharedPersistence.load(), before)
+        XCTAssertEqual(SharedPersistence.sharedDefaults.object(forKey: PomodoroStorageKeys.focusMinutes) as? Int, focus)
     }
 
     func testWeeklySummarySeparatesStudyAndWorkMinutes() throws {

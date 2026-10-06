@@ -24,7 +24,7 @@ enum PlanEntityCatalog {
         let calendar = Calendar.current
         let earliest = calendar.date(byAdding: .day, value: -7, to: now) ?? now
         return SharedPersistence.load().checkInItems
-            .filter { $0.kind == .planned && $0.scheduledStart >= earliest }
+            .filter { $0.kind == .planned && $0.isArchived != true && $0.scheduledStart >= earliest }
             .sorted { $0.scheduledStart < $1.scheduledStart }
             .prefix(60)
             .map { $0 }

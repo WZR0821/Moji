@@ -10,6 +10,14 @@ plugins {
     alias(libs.plugins.ksp) apply false
 }
 
+// Optional local build cache outside cloud-synced Documents. Source/release
+// identity stays unchanged; only generated intermediates move.
+allprojects {
+    providers.gradleProperty("mojiBuildRoot").orNull?.let { root ->
+        layout.buildDirectory.set(file("$root/${project.name}"))
+    }
+}
+
 val syncIosVersion by tasks.registering {
     val source = layout.projectDirectory.file("version.properties")
     val target = layout.projectDirectory.file("Config/Version.xcconfig")

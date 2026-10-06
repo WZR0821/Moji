@@ -13,5 +13,6 @@
     <LinearLayout android:id="@+id/widget_actions" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="8dp" android:orientation="horizontal" android:visibility="gone">
         <Button android:id="@+id/widget_primary_action" android:layout_width="0dp" android:layout_height="36dp" android:layout_weight="1" android:backgroundTint="@color/vermilion" android:textColor="#FFFFFFFF" android:textSize="11sp" />
         <Button android:id="@+id/widget_secondary_action" android:layout_width="0dp" android:layout_height="36dp" android:layout_marginStart="6dp" android:layout_weight="1" android:backgroundTint="#FF716B60" android:textColor="#FFFFFFFF" android:textSize="11sp" />
+        <Button android:id="@+id/widget_third_action" android:layout_width="0dp" android:layout_height="36dp" android:layout_marginStart="6dp" android:layout_weight="1" android:backgroundTint="#FF716B60" android:textColor="#FFFFFFFF" android:textSize="11sp" />
     </LinearLayout>
 </LinearLayout>

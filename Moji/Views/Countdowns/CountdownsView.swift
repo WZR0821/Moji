@@ -163,6 +163,13 @@ struct CountdownsView: View {
             .onChange(of: mode) { _, _ in
                 isReordering = false
             }
+#if DEBUG
+            .onAppear {
+                if ProcessInfo.processInfo.environment["MOJI_QA_SCENARIO"] == "workflow-moment-editor" {
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { editingEvent = store.countdowns.first }
+                }
+            }
+#endif
             .onReceive(
                 NotificationCenter.default.publisher(for: .mojiOpenPomodoro)
             ) { _ in

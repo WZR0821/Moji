@@ -56,6 +56,7 @@ android {
         buildConfig = true
     }
     sourceSets.getByName("main").assets.directories.add("../Moji/Assets.xcassets")
+    sourceSets.getByName("debug").assets.directories.add("../Scripts/fixtures")
     packaging { resources.excludes += "/META-INF/{AL2.0,LGPL2.1}" }
 }
 

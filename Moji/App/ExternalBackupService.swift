@@ -354,7 +354,7 @@ final class ExternalBackupService: ObservableObject {
     // MARK: - Reading
 
     /// Reads a backup the user picked from the Files app.
-    static func readBackup(at url: URL) throws -> Data {
+    nonisolated static func readBackup(at url: URL) throws -> Data {
         let didAccess = url.startAccessingSecurityScopedResource()
         defer {
             if didAccess { url.stopAccessingSecurityScopedResource() }

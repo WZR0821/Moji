@@ -1,7 +1,12 @@
 package com.raydon.moji.android.data
 
 import android.content.Context
+import android.content.SharedPreferences
 import com.raydon.moji.core.PlanPreferencesArchive
+import com.raydon.moji.core.MojiJson
+import com.raydon.moji.core.QuickPlanPresetArchive
+import kotlinx.serialization.encodeToString
+import kotlinx.serialization.decodeFromString
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 
@@ -15,10 +20,20 @@ data class PomodoroState(
     val title: String = "番茄专注",
     val category: String = "study",
     val linkedPlanId: String = "",
+    val phaseDurationSeconds: Int = 1500,
+    val durationIsPlanOwned: Boolean = false,
+    val pendingNextPhase: String? = null,
+    val completedPhase: String? = null,
 )
 
 class AndroidSettings(context: Context) {
     private val prefs = context.getSharedPreferences("moji.settings", Context.MODE_PRIVATE)
+    val revision = MutableStateFlow(0L)
+    private val listener = SharedPreferences.OnSharedPreferenceChangeListener { _, _ -> revision.value++ }
+    init { prefs.registerOnSharedPreferenceChangeListener(listener) }
+    var customCategories: List<String>
+        get() = prefs.getStringSet("customCategories.local", emptySet()).orEmpty().sorted()
+        set(value) { prefs.edit().putStringSet("customCategories.local", value.toSet()).apply() }
     private val _pomodoro = MutableStateFlow(readPomodoro())
     val pomodoro: StateFlow<PomodoroState> = _pomodoro
 
@@ -28,15 +43,38 @@ class AndroidSettings(context: Context) {
     var carriesOver: Boolean
         get() = prefs.getBoolean("carryOver", true)
         set(value) { prefs.edit().putBoolean("carryOver", value).apply() }
+    fun countdownSort(scope: String): String = prefs.getString("countdown.sort.$scope", "manual") ?: "manual"
+    fun setCountdownSort(scope: String, value: String) { prefs.edit().putString("countdown.sort.$scope", value).apply() }
+    var defaultCategory: String
+        get() = prefs.getString("defaultCategory", "study") ?: "study"
+        set(value) { prefs.edit().putString("defaultCategory", value).apply() }
+    var defaultScheduleKind: String
+        get() = prefs.getString("defaultScheduleKind", "allDay") ?: "allDay"
+        set(value) { prefs.edit().putString("defaultScheduleKind", value).apply() }
+    var defaultPlannedDurationEnabled: Boolean
+        get() = prefs.getBoolean("defaultPlannedDurationEnabled", false)
+        set(value) { prefs.edit().putBoolean("defaultPlannedDurationEnabled", value).apply() }
+    var defaultPlannedMinutes: Int
+        get() = prefs.getInt("defaultPlannedMinutes", 25)
+        set(value) { prefs.edit().putInt("defaultPlannedMinutes", value.coerceIn(5, 480)).apply() }
+    var allDayReminderHour: Int
+        get() = prefs.getInt("allDayReminderHour", 9)
+        set(value) { prefs.edit().putInt("allDayReminderHour", value.coerceIn(0, 23)).apply() }
+    var paperTextureEnabled: Boolean
+        get() = prefs.getBoolean("paperTextureEnabled", true)
+        set(value) { prefs.edit().putBoolean("paperTextureEnabled", value).apply() }
+    var inkMotionLevel: String
+        get() = prefs.getString("inkMotionLevel", "full") ?: "full"
+        set(value) { prefs.edit().putString("inkMotionLevel", value).apply() }
     var focusMinutes: Int
         get() = prefs.getInt("focusMinutes", 25)
-        set(value) { prefs.edit().putInt("focusMinutes", value.coerceIn(1, 180)).apply() }
+        set(value) { prefs.edit().putInt("focusMinutes", value.coerceIn(1, 120)).apply() }
     var shortBreakMinutes: Int
         get() = prefs.getInt("shortBreakMinutes", 5)
-        set(value) { prefs.edit().putInt("shortBreakMinutes", value.coerceIn(1, 60)).apply() }
+        set(value) { prefs.edit().putInt("shortBreakMinutes", value.coerceIn(1, 30)).apply() }
     var longBreakMinutes: Int
         get() = prefs.getInt("longBreakMinutes", 15)
-        set(value) { prefs.edit().putInt("longBreakMinutes", value.coerceIn(1, 90)).apply() }
+        set(value) { prefs.edit().putInt("longBreakMinutes", value.coerceIn(1, 60)).apply() }
     var longBreakInterval: Int
         get() = prefs.getInt("longBreakInterval", 4)
         set(value) { prefs.edit().putInt("longBreakInterval", value.coerceIn(1, 12)).apply() }
@@ -68,6 +106,16 @@ class AndroidSettings(context: Context) {
         get() = prefs.getInt("backupRetentionDays", 180)
         set(value) { prefs.edit().putInt("backupRetentionDays", value.coerceIn(7, 3650)).apply() }
 
+    fun presetButton(index: Int): String = prefs.getString("preset.$index.button", listOf("今日学习", "处理工作", "整理备忘").getOrElse(index) { "快速添加" }) ?: "快速添加"
+    fun presetTitle(index: Int): String = prefs.getString("preset.$index.title", listOf("今日学习", "处理重要工作", "整理今日备忘").getOrElse(index) { "新计划" }) ?: "新计划"
+    fun presetCategory(index: Int): String = prefs.getString("preset.$index.category", if (index == 1) "work" else "study") ?: "study"
+    fun setPreset(index: Int, button: String, title: String, category: String) {
+        prefs.edit().putString("preset.$index.button", button).putString("preset.$index.title", title).putString("preset.$index.category", category).apply()
+    }
+    fun resetPresets() {
+        prefs.edit().also { editor -> (0..2).forEach { index -> editor.remove("preset.$index.button").remove("preset.$index.title").remove("preset.$index.category") } }.apply()
+    }
+
     fun updatePomodoro(state: PomodoroState) {
         prefs.edit()
             .putString("pomodoro.phase", state.phase)
@@ -79,6 +127,10 @@ class AndroidSettings(context: Context) {
             .putString("pomodoro.title", state.title)
             .putString("pomodoro.category", state.category)
             .putString("pomodoro.linkedPlanId", state.linkedPlanId)
+            .putInt("pomodoro.phaseDuration", state.phaseDurationSeconds)
+            .putBoolean("pomodoro.durationIsPlanOwned", state.durationIsPlanOwned)
+            .putString("pomodoro.pendingNextPhase", state.pendingNextPhase)
+            .putString("pomodoro.completedPhase", state.completedPhase)
             .apply()
         _pomodoro.value = state
     }
@@ -98,7 +150,8 @@ class AndroidSettings(context: Context) {
         pomodoroTitle = pomodoro.value.title,
         pomodoroCategory = pomodoro.value.category,
         linkedPlanID = pomodoro.value.linkedPlanId,
-        pomodoroPhaseDuration = durationFor(pomodoro.value.phase),
+        pomodoroPhaseDuration = pomodoro.value.phaseDurationSeconds,
+        pomodoroPhaseDurationIsPlanOwned = pomodoro.value.durationIsPlanOwned,
         planNotificationsEnabled = notificationsEnabled,
         notificationSoundEnabled = soundEnabled,
         hapticsEnabled = hapticsEnabled,
@@ -107,11 +160,32 @@ class AndroidSettings(context: Context) {
         autoStartFocus = autoStartFocus,
         keepScreenAwake = keepScreenAwake,
         appearanceMode = appearance,
+        defaultCategory = defaultCategory,
+        customCategories = MojiJson.codec.encodeToString(customCategories),
+        quickPlanPresets = MojiJson.codec.encodeToString((0..2).map { index ->
+            QuickPlanPresetArchive("android-$index", presetButton(index), presetTitle(index), presetCategory(index))
+        }),
+        defaultScheduleKind = defaultScheduleKind,
+        defaultPlannedDurationEnabled = defaultPlannedDurationEnabled,
+        defaultPlannedMinutes = defaultPlannedMinutes,
+        allDayReminderHour = allDayReminderHour,
+        inkMotionLevel = inkMotionLevel,
+        paperTextureEnabled = paperTextureEnabled,
         backupRetentionDays = backupRetentionDays,
         backupFolderName = backupTreeUri?.substringAfterLast('/'),
     )
 
     fun restore(archive: PlanPreferencesArchive) {
+        // Parse nested JSON before changing any preference.
+        val categories = archive.customCategories?.let { MojiJson.codec.decodeFromString<List<String>>(it) }
+        val presets = archive.quickPlanPresets?.let { MojiJson.codec.decodeFromString<List<QuickPlanPresetArchive>>(it) }
+        categories?.let { customCategories = it }
+        if (presets != null) {
+            resetPresets()
+            presets.take(3).forEachIndexed { index, preset ->
+                setPreset(index, preset.buttonTitle, preset.planTitle, preset.category ?: archive.defaultCategory ?: "study")
+            }
+        }
         focusMinutes = archive.focusMinutes
         shortBreakMinutes = archive.shortBreakMinutes
         longBreakMinutes = archive.longBreakMinutes
@@ -124,6 +198,13 @@ class AndroidSettings(context: Context) {
         autoStartFocus = archive.autoStartFocus ?: false
         keepScreenAwake = archive.keepScreenAwake ?: false
         appearance = archive.appearanceMode ?: "system"
+        defaultCategory = archive.defaultCategory ?: "study"
+        defaultScheduleKind = archive.defaultScheduleKind ?: "allDay"
+        defaultPlannedDurationEnabled = archive.defaultPlannedDurationEnabled ?: false
+        defaultPlannedMinutes = archive.defaultPlannedMinutes ?: 25
+        allDayReminderHour = archive.allDayReminderHour ?: 9
+        inkMotionLevel = archive.inkMotionLevel ?: "full"
+        paperTextureEnabled = archive.paperTextureEnabled ?: true
         backupRetentionDays = archive.backupRetentionDays ?: 180
         updatePomodoro(
             PomodoroState(
@@ -136,6 +217,8 @@ class AndroidSettings(context: Context) {
                 title = archive.pomodoroTitle,
                 category = archive.pomodoroCategory,
                 linkedPlanId = archive.linkedPlanID,
+                phaseDurationSeconds = archive.pomodoroPhaseDuration ?: durationFor(archive.pomodoroPhase),
+                durationIsPlanOwned = archive.pomodoroPhaseDurationIsPlanOwned ?: false,
             )
         )
     }
@@ -156,5 +239,9 @@ class AndroidSettings(context: Context) {
         title = prefs.getString("pomodoro.title", "番茄专注") ?: "番茄专注",
         category = prefs.getString("pomodoro.category", "study") ?: "study",
         linkedPlanId = prefs.getString("pomodoro.linkedPlanId", "") ?: "",
+        phaseDurationSeconds = prefs.getInt("pomodoro.phaseDuration", durationFor(prefs.getString("pomodoro.phase", "focus") ?: "focus")),
+        durationIsPlanOwned = prefs.getBoolean("pomodoro.durationIsPlanOwned", false),
+        pendingNextPhase = prefs.getString("pomodoro.pendingNextPhase", null),
+        completedPhase = prefs.getString("pomodoro.completedPhase", null),
     )
 }

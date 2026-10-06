@@ -71,6 +71,7 @@ final class PlanNotificationService {
 
         for item in items {
             guard
+                item.isArchived != true,
                 item.status == .planned || item.status == .inProgress,
                 let reminderMinutes = item.reminderMinutesBefore
             else { continue }
@@ -304,6 +305,8 @@ final class CalendarSyncService {
 @MainActor
 final class PlanStore: ObservableObject {
     @Published private(set) var snapshot: PlanSnapshot
+    @Published private(set) var workflowUndo: PlanWorkflowUndo?
+    @Published var workflowNotice: String?
     private var planNotificationSyncTask: Task<Void, Never>?
 
     init(snapshot: PlanSnapshot? = nil) {
@@ -315,6 +318,98 @@ final class PlanStore: ObservableObject {
     var countdowns: [CountdownEvent] { snapshot.countdowns }
     var memos: [MemoItem] { snapshot.memos }
     var activeSession: ActiveSession? { snapshot.activeSession }
+
+    func mutateWorkflow(_ change: (inout PlanSnapshot) -> Void) {
+        snapshot = SharedPersistence.mutate(change)
+        refreshPlanNotifications()
+        reloadWidgets()
+    }
+
+    @discardableResult
+    func convertMemo(id: UUID, itemID: UUID? = nil, day: Date, category: RecordCategory) -> UUID? {
+        var planID: UUID?
+        mutateWorkflow { state in
+            planID = PlanWorkflow.convertMemo(in: &state, memoID: id, itemID: itemID, day: day, category: category)
+        }
+        return planID
+    }
+
+    func copyPlan(_ id: UUID, to day: Date) {
+        mutateWorkflow { state in
+            guard let item = state.checkInItems.first(where: { $0.id == id }) else { return }
+            state.checkInItems.append(PlanWorkflow.copied(item, to: day))
+        }
+        workflowNotice = "已复制为新的计划"
+    }
+
+    func saveTemplate(from id: UUID) {
+        mutateWorkflow { state in
+            guard let item = state.checkInItems.first(where: { $0.id == id }) else { return }
+            let candidate = PlanTemplate(from: item)
+            guard !state.planTemplates.contains(where: {
+                $0.title == candidate.title && $0.category == candidate.category && $0.note == candidate.note &&
+                $0.scheduleKind == candidate.scheduleKind && $0.hour == candidate.hour && $0.minute == candidate.minute &&
+                $0.plannedMinutes == candidate.plannedMinutes && $0.plannedDurationEnabled == candidate.plannedDurationEnabled &&
+                $0.reminderMinutesBefore == candidate.reminderMinutesBefore
+            }) else { return }
+            state.planTemplates.append(candidate)
+        }
+        workflowNotice = "已保存到计划模板"
+    }
+
+    func applyTemplate(_ id: UUID, on day: Date) {
+        mutateWorkflow { state in
+            guard let template = state.planTemplates.first(where: { $0.id == id }) else { return }
+            state.checkInItems.append(template.plan(on: day))
+        }
+        workflowNotice = "已从模板添加计划"
+    }
+
+    func deleteTemplate(_ id: UUID) {
+        mutateWorkflow { $0.planTemplates.removeAll { $0.id == id } }
+    }
+
+    func batchPlans(_ ids: Set<UUID>, day: Date? = nil, category: RecordCategory? = nil,
+                    archived: Bool? = nil, nextWeekOf: Date? = nil) {
+        var result: PlanWorkflowUndo?
+        let blocked = UUID(uuidString: SharedPersistence.sharedDefaults.string(forKey: PomodoroStorageKeys.linkedPlanID) ?? "")
+        mutateWorkflow { state in
+            result = PlanWorkflow.batch(in: &state, ids: ids, day: day, category: category,
+                archived: archived, nextWeekOf: nextWeekOf, blockedID: isPomodoroFocusActive ? blocked : nil)
+        }
+        workflowUndo = result?.before.isEmpty == false ? result : nil
+        workflowNotice = result?.before.isEmpty == false ? "已整理 \(result?.before.count ?? 0) 个计划，可撤销" : "没有可整理的计划，专注中的计划不会移动"
+    }
+
+    func undoWorkflow() {
+        guard let undo = workflowUndo else { return }
+        var count = 0
+        let blocked = isPomodoroFocusActive ? UUID(uuidString: SharedPersistence.sharedDefaults.string(forKey: PomodoroStorageKeys.linkedPlanID) ?? "") : nil
+        mutateWorkflow { count = undo.apply(to: &$0, blockedID: blocked) }
+        workflowUndo = nil
+        workflowNotice = "已撤销 \(count) 个计划的整理；后续已修改的计划保持不变"
+    }
+
+    func saveWeeklyGoal(_ goal: WeeklyGoal) {
+        guard PlanWorkflow.validWeekKey(goal.weekStart),
+              goal.targetCount.map({ $0 > 0 }) ?? true,
+              goal.targetMinutes.map({ $0 > 0 }) ?? true,
+              goal.targetCount != nil || goal.targetMinutes != nil else { return }
+        mutateWorkflow { state in
+            state.weeklyGoals.removeAll { $0.id == goal.id || ($0.weekStart == goal.weekStart && $0.category == goal.category) }
+            state.weeklyGoals.append(goal)
+        }
+    }
+
+    func deleteWeeklyGoal(_ id: UUID) { mutateWorkflow { $0.weeklyGoals.removeAll { $0.id == id } } }
+
+    func saveWeeklyReflection(_ reflection: WeeklyReflection) {
+        guard PlanWorkflow.validWeekKey(reflection.weekStart) else { return }
+        mutateWorkflow { state in
+            state.weeklyReflections.removeAll { $0.weekStart == reflection.weekStart }
+            state.weeklyReflections.append(reflection)
+        }
+    }
 
     /// A pomodoro focus counts as something already in progress, even though it
     /// is stored outside the snapshot.
@@ -857,6 +952,9 @@ final class PlanStore: ObservableObject {
             && snapshot.records.isEmpty
             && snapshot.countdowns.isEmpty
             && snapshot.memos.isEmpty
+            && snapshot.planTemplates.isEmpty
+            && snapshot.weeklyGoals.isEmpty
+            && snapshot.weeklyReflections.isEmpty
     }
 
     private func refreshPlanNotifications() {

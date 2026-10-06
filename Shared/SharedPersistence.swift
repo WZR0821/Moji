@@ -190,6 +190,21 @@ private struct PlanPreferencesArchive: Codable {
         backupFolderName = defaults.string(forKey: "minuteplan.backup.folderName")
     }
 
+    func validate() throws {
+        guard (1...180).contains(focusMinutes), (1...60).contains(shortBreakMinutes),
+              (1...90).contains(longBreakMinutes), (1...12).contains(longBreakInterval),
+              pomodoroRemaining >= 0, pomodoroAccumulated >= 0, pomodoroCompleted >= 0,
+              ["focus", "shortBreak", "longBreak"].contains(pomodoroPhase) else {
+            throw SharedPersistenceError.invalidBackup
+        }
+        if let customCategories {
+            _ = try JSONDecoder().decode([String].self, from: Data(customCategories.utf8))
+        }
+        if let quickPlanPresets {
+            _ = try JSONDecoder().decode([QuickPlanPreset].self, from: Data(quickPlanPresets.utf8))
+        }
+    }
+
     func restore(to defaults: UserDefaults) {
         defaults.set(focusMinutes, forKey: PomodoroStorageKeys.focusMinutes)
         defaults.set(shortBreakMinutes, forKey: PomodoroStorageKeys.shortBreakMinutes)
@@ -364,7 +379,7 @@ enum SharedPersistence {
                 appIdentifier: "com.raydon.moji",
                 appVersion: Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "unknown",
                 exportedAt: Date(),
-                snapshot: loadUnlocked(),
+                snapshot: portableSnapshot(loadUnlocked()),
                 preferences: PlanPreferencesArchive(defaults: sharedDefaults)
             )
             let backupEncoder = encoder
@@ -377,33 +392,86 @@ enum SharedPersistence {
         }
     }
 
-    @discardableResult
-    static func importBackup(_ data: Data) throws -> PlanSnapshot {
-        let imported = try withPersistenceLock {
-            var imported: PlanSnapshot
-            var preferences: PlanPreferencesArchive?
-            if let archive = try? decoder.decode(PlanBackupArchive.self, from: data) {
-                guard archive.formatVersion <= backupFormatVersion else {
+    /// Validation is side-effect free so callers can show an accurate preview.
+    static func previewBackup(_ data: Data) throws -> PlanSnapshot {
+        try decodeBackup(data).snapshot
+    }
+
+    private static func decodeBackup(_ data: Data) throws -> (snapshot: PlanSnapshot, preferences: PlanPreferencesArchive?) {
+        guard let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            throw SharedPersistenceError.invalidBackup
+        }
+        let imported: PlanSnapshot
+        var preferences: PlanPreferencesArchive?
+        let isArchive = ["snapshot", "formatVersion", "appIdentifier", "preferences"].contains { root[$0] != nil }
+        do {
+            if isArchive {
+                let archive = try decoder.decode(PlanBackupArchive.self, from: data)
+                guard archive.formatVersion == backupFormatVersion else {
                     throw SharedPersistenceError.unsupportedBackup
+                }
+                guard archive.appIdentifier == "com.raydon.moji" else {
+                    throw SharedPersistenceError.invalidBackup
                 }
                 imported = archive.snapshot
                 preferences = archive.preferences
-            } else if let legacySnapshot = try? decoder.decode(PlanSnapshot.self, from: data) {
-                imported = legacySnapshot
+                try preferences?.validate()
             } else {
-                throw SharedPersistenceError.invalidBackup
+                imported = try decoder.decode(PlanSnapshot.self, from: data)
             }
+        } catch let error as SharedPersistenceError {
+            throw error
+        } catch {
+            throw SharedPersistenceError.invalidBackup
+        }
+        guard (1...PlanSnapshot.currentSchemaVersion).contains(imported.schemaVersion) else {
+            throw SharedPersistenceError.unsupportedBackup
+        }
+        func unique(_ ids: [UUID]) -> Bool { Set(ids).count == ids.count }
+        guard unique(imported.records.map(\.id)), unique(imported.checkInItems.map(\.id)),
+              unique(imported.countdowns.map(\.id)), unique(imported.memos.map(\.id)),
+              unique(imported.planTemplates.map(\.id)), unique(imported.weeklyGoals.map(\.id)), unique(imported.weeklyReflections.map(\.id)),
+              Set(imported.weeklyGoals.map { "\($0.weekStart):\($0.category?.rawValue ?? "all")" }).count == imported.weeklyGoals.count,
+              Set(imported.weeklyReflections.map(\.weekStart)).count == imported.weeklyReflections.count,
+              imported.planTemplates.allSatisfy({ !$0.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && (0...23).contains($0.hour) && (0...59).contains($0.minute) && $0.plannedMinutes > 0 }),
+              imported.weeklyGoals.allSatisfy({ PlanWorkflow.validWeekKey($0.weekStart) && ($0.targetCount != nil || $0.targetMinutes != nil) && ($0.targetCount.map { $0 > 0 } ?? true) && ($0.targetMinutes.map { $0 > 0 } ?? true) }),
+              imported.weeklyReflections.allSatisfy({ PlanWorkflow.validWeekKey($0.weekStart) }),
+              imported.memos.allSatisfy({ unique($0.checklistItems.map(\.id)) }),
+              imported.records.allSatisfy({ $0.hasPreciseTime ? $0.endDate > $0.startDate : $0.endDate >= $0.startDate }) else {
+            throw SharedPersistenceError.invalidBackup
+        }
+        return (portableSnapshot(imported), preferences)
+    }
 
-            // Validate everything before changing either settings or user data.
-            guard imported.schemaVersion <= PlanSnapshot.currentSchemaVersion else {
-                throw SharedPersistenceError.unsupportedBackup
+    private static func portableSnapshot(_ snapshot: PlanSnapshot) -> PlanSnapshot {
+        var result = snapshot
+        for index in result.checkInItems.indices { result.checkInItems[index].calendarEventIdentifier = nil }
+        for index in result.countdowns.indices { result.countdowns[index].calendarEventIdentifier = nil }
+        return result
+    }
+
+    @discardableResult
+    static func importBackup(_ data: Data) throws -> PlanSnapshot {
+        // Decode and validate outside the lock; malformed archives never reach mutation.
+        let decoded = try decodeBackup(data)
+        return try withPersistenceLock {
+            var imported = decoded.snapshot
+            // Retain a recovery copy independently of the rolling persistence fallback.
+            if let directory = storageDirectoryURL {
+                try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+                let previous = PlanBackupArchive(
+                    formatVersion: backupFormatVersion, appIdentifier: "com.raydon.moji",
+                    appVersion: Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "unknown",
+                    exportedAt: Date(), snapshot: loadUnlocked(),
+                    preferences: PlanPreferencesArchive(defaults: sharedDefaults)
+                )
+                try encoder.encode(previous).write(to: directory.appendingPathComponent("before-restore.mojibackup"), options: .atomic)
             }
             imported.normalize()
-            preferences?.restore(to: sharedDefaults)
+            decoded.preferences?.restore(to: sharedDefaults)
             saveUnlocked(imported)
             return imported
         }
-        return imported
     }
 
     private static func loadUnlocked() -> PlanSnapshot {
@@ -423,9 +491,11 @@ enum SharedPersistence {
         ]
 
         var decoded: [(snapshot: PlanSnapshot, isPrimaryDefaults: Bool)] = []
+        var seen = Set<Data>()
+        let snapshotDecoder = decoder
         for (candidate, isPrimaryDefaults) in candidates {
-            guard let candidate else { continue }
-            guard let snapshot = try? decoder.decode(PlanSnapshot.self, from: candidate) else {
+            guard let candidate, seen.insert(candidate).inserted else { continue }
+            guard let snapshot = try? snapshotDecoder.decode(PlanSnapshot.self, from: candidate) else {
                 if isPrimaryDefaults {
                     sharedDefaults.set(candidate, forKey: "\(snapshotKey).corrupt-backup")
                 }
@@ -556,7 +626,16 @@ enum SharedPersistence {
 
     private static var decoder: JSONDecoder {
         let decoder = JSONDecoder()
-        decoder.dateDecodingStrategy = .iso8601
+        let wholeSeconds = Date.ISO8601FormatStyle()
+        let fractionalSeconds = Date.ISO8601FormatStyle(includingFractionalSeconds: true)
+        decoder.dateDecodingStrategy = .custom { decoder in
+            let container = try decoder.singleValueContainer()
+            let value = try container.decode(String.self)
+            guard let date = (try? fractionalSeconds.parse(value)) ?? (try? wholeSeconds.parse(value)) else {
+                throw DecodingError.dataCorruptedError(in: container, debugDescription: "Invalid ISO-8601 date")
+            }
+            return date
+        }
         return decoder
     }
 }

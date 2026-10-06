@@ -11,6 +11,9 @@ import androidx.activity.viewModels
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.SideEffect
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.raydon.moji.ui.MojiTheme
 
 class MainActivity : ComponentActivity() {
@@ -18,15 +21,10 @@ class MainActivity : ComponentActivity() {
 
     private val exportBackup = registerForActivityResult(ActivityResultContracts.CreateDocument("application/json")) { uri ->
         uri ?: return@registerForActivityResult
-        runCatching {
-            contentResolver.openOutputStream(uri, "wt")?.bufferedWriter()?.use { it.write(viewModel.exportJson()) }
-        }.onSuccess { viewModel.message.value = "备份已导出" }
-            .onFailure { viewModel.message.value = "导出失败：${it.message}" }
+        viewModel.exportBackup(uri)
     }
     private val importBackup = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
-        uri ?: return@registerForActivityResult
-        runCatching { contentResolver.openInputStream(uri)?.bufferedReader()?.use { it.readText() } }
-            .getOrNull()?.let(viewModel::importJson)
+        uri?.let(viewModel::prepareRestore)
     }
     private val backupFolder = registerForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
         uri?.let(viewModel::setBackupTree)
@@ -37,16 +35,27 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        handleNavigationIntent(intent)
+        if (BuildConfig.DEBUG && intent.getBooleanExtra("moji_qa_seed", false)) viewModel.seedVisualQa(intent.getStringExtra("moji_qa_route").orEmpty())
         enableEdgeToEdge(
             statusBarStyle = SystemBarStyle.auto(0xFFF7F4ED.toInt(), 0xFF11100E.toInt()),
             navigationBarStyle = SystemBarStyle.auto(0xFFF7F4ED.toInt(), 0xFF11100E.toInt()),
         )
         setContent {
             val systemDark = isSystemInDarkTheme()
-            val dark = when (viewModel.appearance) {
+            val appearance by viewModel.appearanceMode.collectAsStateWithLifecycle()
+            val dark = when (appearance) {
                 "dark" -> true
                 "light" -> false
                 else -> systemDark
+            }
+            SideEffect {
+                val lightSurface = 0xFFF7F4ED.toInt()
+                val darkSurface = 0xFF11100E.toInt()
+                enableEdgeToEdge(
+                    statusBarStyle = if (dark) SystemBarStyle.dark(darkSurface) else SystemBarStyle.light(lightSurface, lightSurface),
+                    navigationBarStyle = if (dark) SystemBarStyle.dark(darkSurface) else SystemBarStyle.light(lightSurface, lightSurface),
+                )
             }
             MojiTheme(dark) {
                 Surface(color = MaterialTheme.colorScheme.background) {
@@ -57,16 +66,26 @@ class MainActivity : ComponentActivity() {
                         onChooseBackupFolder = { backupFolder.launch(null) },
                         onRequestPermissions = {
                             permissions.launch(
-                                arrayOf(
-                                    Manifest.permission.POST_NOTIFICATIONS,
-                                    Manifest.permission.READ_CALENDAR,
-                                    Manifest.permission.WRITE_CALENDAR,
-                                )
+                                buildList {
+                                    if (android.os.Build.VERSION.SDK_INT >= 33) add(Manifest.permission.POST_NOTIFICATIONS)
+                                    add(Manifest.permission.READ_CALENDAR)
+                                    add(Manifest.permission.WRITE_CALENDAR)
+                                }.toTypedArray()
                             )
                         },
                     )
                 }
             }
         }
+    }
+
+    override fun onNewIntent(intent: android.content.Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        handleNavigationIntent(intent)
+    }
+
+    private fun handleNavigationIntent(intent: android.content.Intent) {
+        when (intent.data?.host) { "pomodoro" -> viewModel.openFocus(); "plans" -> viewModel.openPlans() }
     }
 }

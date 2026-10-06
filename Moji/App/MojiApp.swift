@@ -21,6 +21,27 @@ struct MojiApp: App {
     private var appearanceModeRaw = AppAppearanceMode.system.rawValue
 
     init() {
+#if DEBUG
+        // Explicit opt-in, used only inside the disposable visual-QA simulator.
+        if ProcessInfo.processInfo.environment["MOJI_QA_SEED"] == "1",
+           let directory = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first,
+           let data = try? Data(contentsOf: directory.appendingPathComponent("MojiVisualQA.json")),
+           let fixture = try? SharedPersistence.previewBackup(data) {
+            SharedPersistence.replace(with: fixture)
+            SharedPersistence.sharedDefaults.set("[\"生活\"]", forKey: PlanSettingsKeys.customCategories)
+            let defaults = SharedPersistence.sharedDefaults
+            defaults.set(AppAppearanceMode.system.rawValue, forKey: PlanSettingsKeys.appearanceMode)
+            for key in [PomodoroStorageKeys.phase, PomodoroStorageKeys.running,
+                        PomodoroStorageKeys.remaining, PomodoroStorageKeys.target,
+                        PomodoroStorageKeys.segmentStart, PomodoroStorageKeys.accumulated,
+                        PomodoroStorageKeys.completed, PomodoroStorageKeys.title,
+                        PomodoroStorageKeys.category, PomodoroStorageKeys.linkedPlanID,
+                        PomodoroStorageKeys.phaseDuration, PomodoroStorageKeys.phaseDurationIsPlanOwned,
+                        PomodoroStorageKeys.liveActivityVisible] {
+                defaults.removeObject(forKey: key)
+            }
+        }
+#endif
         // The engine holds the store, so both are built here and live for the
         // whole app session. That is what lets the timer keep advancing while
         // the user is on another tab.

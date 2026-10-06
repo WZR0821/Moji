@@ -26,6 +26,9 @@ data class CheckInItem(
     val reminderMinutesBefore: Int? = null,
     val generatedFromOccurrenceID: String? = null,
     val plannedDurationEnabled: Boolean? = null,
+    val isArchived: Boolean? = false,
+    val sourceMemoID: String? = null,
+    val sourceMemoChecklistItemID: String? = null,
 )
 
 @Serializable
@@ -92,13 +95,50 @@ data class PlanSnapshot(
     val checkInItems: List<CheckInItem> = emptyList(),
     val countdowns: List<CountdownEvent> = emptyList(),
     val memos: List<MemoItem> = emptyList(),
+    val planTemplates: List<PlanTemplate> = emptyList(),
+    val weeklyGoals: List<WeeklyGoal> = emptyList(),
+    val weeklyReflections: List<WeeklyReflection> = emptyList(),
     val activeSession: ActiveSession? = null,
     val lastUpdated: String = "1970-01-01T00:00:00Z",
 ) {
     companion object {
-        const val CURRENT_SCHEMA_VERSION = 12
+        const val CURRENT_SCHEMA_VERSION = 13
     }
 }
+
+@Serializable
+data class PlanTemplate(
+    val id: String,
+    val title: String,
+    val category: String,
+    val note: String = "",
+    val scheduleKind: String = "allDay",
+    val hour: Int = 0,
+    val minute: Int = 0,
+    val plannedMinutes: Int = 25,
+    val plannedDurationEnabled: Boolean = false,
+    val reminderMinutesBefore: Int? = null,
+    val createdAt: String,
+)
+
+@Serializable
+data class WeeklyGoal(
+    val id: String,
+    val weekStart: String,
+    val category: String? = null,
+    val targetCount: Int? = null,
+    val targetMinutes: Int? = null,
+    val updatedAt: String,
+)
+
+@Serializable
+data class WeeklyReflection(
+    val id: String,
+    val weekStart: String,
+    val note: String = "",
+    val nextFocus: String = "",
+    val updatedAt: String,
+)
 
 @Serializable
 data class PlanPreferencesArchive(
@@ -148,4 +188,12 @@ data class PlanBackupArchive(
     val exportedAt: String,
     val snapshot: PlanSnapshot,
     val preferences: PlanPreferencesArchive? = null,
+)
+
+@Serializable
+data class QuickPlanPresetArchive(
+    val id: String,
+    val buttonTitle: String,
+    val planTitle: String,
+    val category: String? = null,
 )

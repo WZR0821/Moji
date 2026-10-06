@@ -8,45 +8,75 @@ import com.raydon.moji.core.PlanSnapshot
 import com.raydon.moji.core.TimeRecord
 import java.time.Instant
 import java.time.ZoneId
-import java.time.ZonedDateTime
-import java.time.temporal.ChronoUnit
 import java.util.UUID
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.retryWhen
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withContext
 
-class MojiRepository(private val database: MojiDatabase) {
-    private val dao = database.snapshotDao()
+class MojiRepository(private val dao: SnapshotDao) {
+    constructor(database: MojiDatabase) : this(database.snapshotDao())
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val mutex = Mutex()
+    val loadError = MutableStateFlow<String?>(null)
 
     val snapshot: StateFlow<PlanSnapshot> = dao.observe()
-        .map { entity -> entity?.let(::decode) ?: emptySnapshot() }
+        .map { entity ->
+            val decoded = entity?.let(::decode) ?: emptySnapshot()
+            loadError.value = null
+            decoded
+        }
+        .retryWhen { _, _ ->
+            loadError.value = "本地数据暂时无法读取，请保留原数据并从备份恢复。"
+            delay(5_000)
+            true
+        }
         .stateIn(scope, SharingStarted.Eagerly, emptySnapshot())
 
-    suspend fun ensureInitialized() {
+    suspend fun ensureInitialized() = mutex.withLock {
         if (dao.get() == null) save(emptySnapshot())
     }
 
-    suspend fun replace(snapshot: PlanSnapshot) = mutex.withLock {
-        MojiJson.validate(snapshot)
-        save(normalize(snapshot))
+    suspend fun freshSnapshot(): PlanSnapshot = withContext(Dispatchers.Default) {
+        dao.get()?.let(::decode) ?: emptySnapshot()
     }
 
-    suspend fun mutate(block: (PlanSnapshot) -> PlanSnapshot) = mutex.withLock {
+    // Used only to preserve unreadable original bytes before an explicit restore.
+    suspend fun rawSnapshotJson(): String? = dao.get()?.json
+
+    suspend fun replace(snapshot: PlanSnapshot) = withContext(Dispatchers.Default) { mutex.withLock {
+        MojiJson.validate(snapshot)
+        save(normalize(snapshot))
+    } }
+
+    suspend fun mutate(block: (PlanSnapshot) -> PlanSnapshot) = withContext(Dispatchers.Default) { mutex.withLock {
         val current = dao.get()?.let(::decode) ?: emptySnapshot()
         if (current.schemaVersion > PlanSnapshot.CURRENT_SCHEMA_VERSION) return@withLock
         save(normalize(block(current)))
-    }
+    } }
 
     suspend fun savePlan(item: CheckInItem) = mutate { state ->
         state.copy(checkInItems = state.checkInItems.filterNot { it.id == item.id } + item)
+    }
+
+    suspend fun saveCompletedPlan(item: CheckInItem, record: TimeRecord) = mutate { state ->
+        val original = state.checkInItems.firstOrNull { it.id == item.id && it.kind == "planned" }
+        val completed = original?.copy(title = item.title, category = item.category, note = item.note,
+            status = "completed", actualStartDate = record.startDate, actualEndDate = record.endDate,
+            completedAt = record.endDate, detailsConfigured = true)
+        val updated = state.copy(
+            records = state.records.filterNot { it.checkInItemID == item.id } + record,
+            checkInItems = state.checkInItems.filterNot { it.id == item.id } + listOfNotNull(completed))
+        if (completed != null) LocalRules.appendSuccessor(updated, completed, Instant.parse(record.endDate)) else updated
     }
 
     suspend fun togglePlan(id: String, now: Instant = Instant.now()) = mutate { state ->
@@ -54,13 +84,13 @@ class MojiRepository(private val database: MojiDatabase) {
         if (original.status == "completed") {
             state.copy(
                 checkInItems = state.checkInItems
-                    .filterNot { it.generatedFromOccurrenceID == id }
-                    .map { if (it.id == id) it.copy(status = "planned", completedAt = null) else it },
+                    .filterNot { it.generatedFromOccurrenceID == id && it.status == "planned" }
+                    .map { if (it.id == id) it.copy(status = "planned", completedAt = null, actualStartDate = null, actualEndDate = null) else it },
                 records = state.records.filterNot { it.checkInItemID == id },
             )
         } else {
             val completed = original.copy(status = "completed", completedAt = now.toString())
-            val successor = recurringSuccessor(completed, now)
+            val successor = LocalRules.successor(completed, now)
             state.copy(
                 checkInItems = state.checkInItems.map { if (it.id == id) completed else it } +
                     listOfNotNull(successor).filter { next -> state.checkInItems.none { it.generatedFromOccurrenceID == id } },
@@ -69,29 +99,43 @@ class MojiRepository(private val database: MojiDatabase) {
     }
 
     suspend fun skipPlan(id: String) = mutate { state ->
-        state.copy(checkInItems = state.checkInItems.map {
-            if (it.id == id) it.copy(status = "skipped") else it
-        })
+        val original = state.checkInItems.firstOrNull { it.id == id } ?: return@mutate state
+        if (original.status == "completed" || original.status == "inProgress") return@mutate state
+        val now = Instant.now()
+        val skipped = original.copy(status = "skipped", completedAt = now.toString())
+        LocalRules.appendSuccessor(state.copy(checkInItems = state.checkInItems.map {
+            if (it.id == id) skipped else it
+        }), skipped, now)
     }
 
     suspend fun postponePlan(id: String, days: Long = 1) = mutate { state ->
         state.copy(checkInItems = state.checkInItems.map { item ->
-            if (item.id != id) item else item.copy(
-                scheduledStart = Instant.parse(item.scheduledStart).plus(days, ChronoUnit.DAYS).toString(),
-                status = "planned",
+            if (item.id != id || item.status == "completed" || item.status == "inProgress") item else item.copy(
+                scheduledStart = Instant.parse(item.scheduledStart).atZone(ZoneId.systemDefault()).plusDays(days).toInstant().toString(),
+                status = "planned", completedAt = null, actualStartDate = null, actualEndDate = null,
             )
         })
     }
 
     suspend fun deletePlan(id: String) = mutate { state ->
         state.copy(
-            checkInItems = state.checkInItems.filterNot { it.id == id || it.generatedFromOccurrenceID == id },
+            checkInItems = state.checkInItems.filterNot { it.id == id },
             records = state.records.filterNot { it.checkInItemID == id },
         )
     }
 
     suspend fun saveMemo(item: MemoItem) = mutate { state ->
         state.copy(memos = state.memos.filterNot { it.id == item.id } + item)
+    }
+
+    suspend fun toggleChecklistItem(memoId: String, itemId: String) = mutate { state ->
+        state.copy(memos = state.memos.map { memo ->
+            if (memo.id != memoId) memo else memo.copy(
+                checklistItems = memo.checklistItems.map { item ->
+                    if (item.id == itemId) item.copy(isCompleted = !item.isCompleted) else item
+                }, updatedAt = Instant.now().toString(),
+            )
+        })
     }
 
     suspend fun deleteMemo(id: String) = mutate { it.copy(memos = it.memos.filterNot { memo -> memo.id == id }) }
@@ -112,6 +156,31 @@ class MojiRepository(private val database: MojiDatabase) {
         state.copy(countdowns = state.countdowns.map { if (it.id == id) it.copy(isPinned = !it.isPinned) else it })
     }
 
+    /** Transfer the local timer's claim atomically so two timers cannot bank
+     * the same minutes. Starting a linked plan mirrors iOS's 进行中 state. */
+    suspend fun beginPomodoroFocus(linkedPlanId: String?, now: Instant = Instant.now()) = mutate { state ->
+        val active = state.activeSession
+        val elapsed = active?.let { java.time.Duration.between(Instant.parse(it.startedAt), now).seconds } ?: 0
+        val banked = if (active != null && elapsed >= 60) listOf(TimeRecord(
+            id = UUID.randomUUID().toString(), title = active.title, category = active.category,
+            startDate = active.startedAt, endDate = now.toString(), note = "由桌面小组件记录",
+            checkInItemID = active.checkInItemID)) else emptyList()
+        state.copy(activeSession = null, records = state.records + banked,
+            checkInItems = state.checkInItems.map { original ->
+                val released = if (original.id == active?.checkInItemID && original.status == "inProgress")
+                    original.copy(status = "planned", actualStartDate = null, actualEndDate = null) else original
+                if (released.id == linkedPlanId && released.status == "planned" && released.isArchived != true)
+                    released.copy(status = "inProgress", actualStartDate = now.toString()) else released
+            })
+    }
+
+    suspend fun releasePomodoroFocus(linkedPlanId: String) = mutate { state ->
+        state.copy(checkInItems = state.checkInItems.map {
+            if (it.id == linkedPlanId && it.status == "inProgress")
+                it.copy(status = "planned", actualStartDate = null, actualEndDate = null) else it
+        })
+    }
+
     suspend fun recordFocus(
         title: String,
         category: String,
@@ -128,17 +197,35 @@ class MojiRepository(private val database: MojiDatabase) {
             endDate = endedAt.toString(),
             checkInItemID = linkedPlanId?.ifBlank { null },
         )
-        state.copy(
+        val updated = state.copy(
             records = state.records + record,
-            checkInItems = if (completePlan && !linkedPlanId.isNullOrBlank()) {
+            checkInItems = if (!linkedPlanId.isNullOrBlank()) {
                 state.checkInItems.map {
-                    if (it.id == linkedPlanId) it.copy(status = "completed", completedAt = endedAt.toString()) else it
+                    if (it.id != linkedPlanId) it
+                    else if (completePlan) it.copy(status = "completed", completedAt = endedAt.toString(), actualStartDate = startedAt.toString(), actualEndDate = endedAt.toString())
+                    else if (it.status == "inProgress") it.copy(status = "planned", actualStartDate = null, actualEndDate = null)
+                    else it
                 }
             } else state.checkInItems,
         )
+        val completed = updated.checkInItems.firstOrNull { it.id == linkedPlanId }
+        if (completePlan && completed != null) LocalRules.appendSuccessor(updated, completed, endedAt) else updated
     }
 
-    suspend fun deleteRecord(id: String) = mutate { it.copy(records = it.records.filterNot { record -> record.id == id }) }
+    suspend fun deleteRecord(id: String) = mutate { state ->
+        val record = state.records.firstOrNull { it.id == id } ?: return@mutate state
+        val remaining = state.records.filterNot { it.id == id }
+        val restore = record.checkInItemID != null &&
+            state.checkInItems.any { it.id == record.checkInItemID && it.status == "completed" } &&
+            remaining.none { it.checkInItemID == record.checkInItemID }
+        state.copy(records = remaining, checkInItems = state.checkInItems
+            .filterNot { restore && it.generatedFromOccurrenceID == record.checkInItemID && it.status == "planned" }
+            .map { if (restore && it.id == record.checkInItemID) it.copy(status = "planned", completedAt = null, actualStartDate = null, actualEndDate = null) else it })
+    }
+
+    suspend fun saveRecord(record: TimeRecord) = mutate { state ->
+        state.copy(records = state.records.filterNot { it.id == record.id } + record)
+    }
 
     private suspend fun save(snapshot: PlanSnapshot) {
         dao.put(
@@ -149,59 +236,29 @@ class MojiRepository(private val database: MojiDatabase) {
         )
     }
 
-    private fun decode(entity: SnapshotEntity): PlanSnapshot = runCatching {
-        MojiJson.codec.decodeFromString(PlanSnapshot.serializer(), entity.json)
-    }.getOrElse { emptySnapshot() }
+    private fun decode(entity: SnapshotEntity): PlanSnapshot =
+        MojiJson.decodeBackupOrSnapshot(entity.json).first
 
     private fun normalize(snapshot: PlanSnapshot): PlanSnapshot = snapshot.copy(
         schemaVersion = PlanSnapshot.CURRENT_SCHEMA_VERSION,
         records = snapshot.records
-            .filter { runCatching { Instant.parse(it.endDate) > Instant.parse(it.startDate) }.getOrDefault(false) }
+            .filter { runCatching {
+                val start = Instant.parse(it.startDate)
+                val end = Instant.parse(it.endDate)
+                end > start || (end == start && (it.scheduleKind ?: "exactTime") != "exactTime")
+            }.getOrDefault(false) }
             .sortedByDescending { it.startDate },
-        checkInItems = snapshot.checkInItems.sortedBy { it.scheduledStart },
-        countdowns = snapshot.countdowns.sortedWith(
-            compareByDescending<CountdownEvent> { it.isPinned }
-                .thenBy { it.sortOrder ?: Int.MAX_VALUE }
-                .thenBy { it.targetDate }
-        ),
+        checkInItems = snapshot.checkInItems.map {
+            if (it.kind == "completed") it.copy(kind = "completedLog") else it
+        }.sortedBy { it.scheduledStart },
+        countdowns = snapshot.countdowns.sortedWith(compareBy<CountdownEvent> { it.sortOrder ?: Int.MAX_VALUE }.thenBy { it.createdAt })
+            .mapIndexed { index, event -> event.copy(sortOrder = index) },
         memos = snapshot.memos.sortedWith(
             compareByDescending<MemoItem> { it.isPinned }.thenByDescending { it.updatedAt }
         ),
         lastUpdated = Instant.now().toString(),
     )
 
-    private fun recurringSuccessor(item: CheckInItem, now: Instant): CheckInItem? {
-        val rule = item.repeatRule ?: "never"
-        if (rule == "never" || item.kind != "planned") return null
-        val zone = ZoneId.systemDefault()
-        val source = ZonedDateTime.ofInstant(Instant.parse(item.scheduledStart), zone)
-        var candidate = source
-        when (rule) {
-            "daily" -> while (!candidate.toLocalDate().isAfter(ZonedDateTime.ofInstant(now, zone).toLocalDate())) candidate = candidate.plusDays(1)
-            "weekdays" -> do candidate = candidate.plusDays(1) while (candidate.dayOfWeek.value > 5 || !candidate.toLocalDate().isAfter(ZonedDateTime.ofInstant(now, zone).toLocalDate()))
-            "weekly" -> while (!candidate.toLocalDate().isAfter(ZonedDateTime.ofInstant(now, zone).toLocalDate())) candidate = candidate.plusWeeks(1)
-            "monthly" -> while (!candidate.toLocalDate().isAfter(ZonedDateTime.ofInstant(now, zone).toLocalDate())) candidate = candidate.plusMonths(1)
-            "customWeekdays" -> {
-                val selected = (item.repeatWeekdays ?: emptyList()).map { if (it == 1) 7 else it - 1 }.toSet()
-                do candidate = candidate.plusDays(1) while (
-                    candidate.dayOfWeek.value !in selected || !candidate.toLocalDate().isAfter(ZonedDateTime.ofInstant(now, zone).toLocalDate())
-                )
-            }
-            else -> return null
-        }
-        return item.copy(
-            id = UUID.randomUUID().toString(),
-            scheduledStart = candidate.toInstant().toString(),
-            status = "planned",
-            completedAt = null,
-            actualStartDate = null,
-            actualEndDate = null,
-            createdAt = now.toString(),
-            seriesID = item.seriesID ?: item.id,
-            generatedFromOccurrenceID = item.id,
-            calendarEventIdentifier = null,
-        )
-    }
 
     companion object {
         fun emptySnapshot() = PlanSnapshot(lastUpdated = Instant.now().toString())

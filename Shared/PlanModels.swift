@@ -196,6 +196,15 @@ enum CheckInKind: String, Codable, CaseIterable, Identifiable {
     case planned
     case completedLog
 
+    init(from decoder: Decoder) throws {
+        let container = try decoder.singleValueContainer()
+        let raw = try container.decode(String.self)
+        guard let value = Self(rawValue: raw == "completed" ? "completedLog" : raw) else {
+            throw DecodingError.dataCorruptedError(in: container, debugDescription: "Unknown plan kind")
+        }
+        self = value
+    }
+
     var id: String { rawValue }
 
     var displayName: String {
@@ -211,6 +220,15 @@ enum CheckInStatus: String, Codable {
     case inProgress
     case completed
     case skipped
+
+    var displayName: String {
+        switch self {
+        case .planned: return "待完成"
+        case .inProgress: return "进行中"
+        case .completed: return "已完成"
+        case .skipped: return "已跳过"
+        }
+    }
 }
 
 enum ScheduleKind: String, Codable, CaseIterable, Identifiable {
@@ -308,6 +326,9 @@ struct CheckInItem: Codable, Identifiable, Equatable {
     var reminderMinutesBefore: Int?
     var generatedFromOccurrenceID: UUID?
     var plannedDurationEnabled: Bool?
+    var isArchived: Bool?
+    var sourceMemoID: UUID?
+    var sourceMemoChecklistItemID: UUID?
 
     init(
         id: UUID = UUID(),
@@ -331,7 +352,10 @@ struct CheckInItem: Codable, Identifiable, Equatable {
         seriesID: UUID? = nil,
         reminderMinutesBefore: Int? = nil,
         generatedFromOccurrenceID: UUID? = nil,
-        plannedDurationEnabled: Bool? = nil
+        plannedDurationEnabled: Bool? = nil,
+        isArchived: Bool? = false,
+        sourceMemoID: UUID? = nil,
+        sourceMemoChecklistItemID: UUID? = nil
     ) {
         self.id = id
         self.title = title
@@ -355,6 +379,9 @@ struct CheckInItem: Codable, Identifiable, Equatable {
         self.reminderMinutesBefore = reminderMinutesBefore
         self.generatedFromOccurrenceID = generatedFromOccurrenceID
         self.plannedDurationEnabled = plannedDurationEnabled
+        self.isArchived = isArchived
+        self.sourceMemoID = sourceMemoID
+        self.sourceMemoChecklistItemID = sourceMemoChecklistItemID
     }
 
     var scheduledEnd: Date {
@@ -443,6 +470,7 @@ struct CheckInItem: Codable, Identifiable, Equatable {
         carriesOverUnfinished: Bool = PlanSettingsKeys.carriesOverUnfinishedPlans,
         calendar: Calendar = .current
     ) -> Bool {
+        guard isArchived != true else { return false }
         if status == .inProgress { return true }
         let plannedDay = calendar.startOfDay(for: scheduledStart)
         let targetDay = calendar.startOfDay(for: date)
@@ -1145,13 +1173,16 @@ struct MemoItem: Codable, Identifiable, Equatable {
 }
 
 struct PlanSnapshot: Codable, Equatable {
-    static let currentSchemaVersion = 12
+    static let currentSchemaVersion = 13
 
     var schemaVersion: Int
     var records: [TimeRecord]
     var checkInItems: [CheckInItem]
     var countdowns: [CountdownEvent]
     var memos: [MemoItem]
+    var planTemplates: [PlanTemplate]
+    var weeklyGoals: [WeeklyGoal]
+    var weeklyReflections: [WeeklyReflection]
     var activeSession: ActiveSession?
     var lastUpdated: Date
 
@@ -1161,6 +1192,9 @@ struct PlanSnapshot: Codable, Equatable {
         checkInItems: [CheckInItem] = [],
         countdowns: [CountdownEvent] = [],
         memos: [MemoItem] = [],
+        planTemplates: [PlanTemplate] = [],
+        weeklyGoals: [WeeklyGoal] = [],
+        weeklyReflections: [WeeklyReflection] = [],
         activeSession: ActiveSession? = nil,
         lastUpdated: Date = Date()
     ) {
@@ -1169,6 +1203,9 @@ struct PlanSnapshot: Codable, Equatable {
         self.checkInItems = checkInItems
         self.countdowns = countdowns
         self.memos = memos
+        self.planTemplates = planTemplates
+        self.weeklyGoals = weeklyGoals
+        self.weeklyReflections = weeklyReflections
         self.activeSession = activeSession
         self.lastUpdated = lastUpdated
     }
@@ -1181,6 +1218,7 @@ struct PlanSnapshot: Codable, Equatable {
         case checkInItems
         case countdowns
         case memos
+        case planTemplates, weeklyGoals, weeklyReflections
         case activeSession
         case lastUpdated
     }
@@ -1188,12 +1226,15 @@ struct PlanSnapshot: Codable, Equatable {
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         schemaVersion = try container.decodeIfPresent(Int.self, forKey: .schemaVersion) ?? 1
-        records = try container.decodeIfPresent([TimeRecord].self, forKey: .records) ?? []
+        records = try container.decode([TimeRecord].self, forKey: .records)
         checkInItems = try container.decodeIfPresent([CheckInItem].self, forKey: .checkInItems) ?? []
-        countdowns = try container.decodeIfPresent([CountdownEvent].self, forKey: .countdowns) ?? []
+        countdowns = try container.decode([CountdownEvent].self, forKey: .countdowns)
         memos = try container.decodeIfPresent([MemoItem].self, forKey: .memos) ?? []
+        planTemplates = try container.decodeIfPresent([PlanTemplate].self, forKey: .planTemplates) ?? []
+        weeklyGoals = try container.decodeIfPresent([WeeklyGoal].self, forKey: .weeklyGoals) ?? []
+        weeklyReflections = try container.decodeIfPresent([WeeklyReflection].self, forKey: .weeklyReflections) ?? []
         activeSession = try container.decodeIfPresent(ActiveSession.self, forKey: .activeSession)
-        lastUpdated = try container.decodeIfPresent(Date.self, forKey: .lastUpdated) ?? Date()
+        lastUpdated = try container.decode(Date.self, forKey: .lastUpdated)
     }
 
     mutating func normalize() {

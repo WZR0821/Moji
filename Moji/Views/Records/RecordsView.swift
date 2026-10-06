@@ -2,6 +2,12 @@ import SwiftUI
 import UniformTypeIdentifiers
 import WidgetKit
 
+#if DEBUG
+private struct WorkflowQARoute: Identifiable {
+    let id: String
+}
+#endif
+
 private enum SummaryRange: String, CaseIterable, Identifiable {
     case week
     case month
@@ -167,11 +173,10 @@ private struct SummaryDetailView: View {
     var body: some View {
         ScrollView {
             if range == .week {
-                WeeklySummaryView(
-                    records: store.records,
-                    checkInItems: store.checkInItems,
-                    anchorDate: $anchorDate
-                )
+                VStack(spacing: 16) {
+                    WeeklySummaryView(records: store.records, checkInItems: store.checkInItems, anchorDate: $anchorDate)
+                    WorkflowWeekSection(store: store, week: anchorDate)
+                }
             } else {
                 MonthlySummaryView(
                     records: store.records,
@@ -285,6 +290,7 @@ struct PersonalView: View {
     @State private var selectedReviewDay: CheckInDaySummary?
 #if DEBUG
     @State private var didRunSettingsQAScenario = false
+    @State private var workflowQARoute: WorkflowQARoute?
 #endif
 
     private var weekSummary: CheckInWeekSummary {
@@ -394,6 +400,14 @@ struct PersonalView: View {
 #if DEBUG
                 guard !didRunSettingsQAScenario else { return }
                 let scenario = ProcessInfo.processInfo.environment["MOJI_QA_SCENARIO"]
+                if let scenario, scenario.hasPrefix("workflow-") {
+                    didRunSettingsQAScenario = true
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+                        if scenario == "workflow-settings" { isPresentingSettings = true }
+                        else if scenario != "workflow-review" { workflowQARoute = WorkflowQARoute(id: scenario) }
+                    }
+                    return
+                }
                 guard
                     scenario == "settings"
                         || scenario == "summary-week"
@@ -412,6 +426,21 @@ struct PersonalView: View {
             .sheet(isPresented: $isPresentingSettings) {
                 SettingsView(store: store)
             }
+#if DEBUG
+            .sheet(item: $workflowQARoute) { route in
+                switch route.id {
+                case "workflow-review-week": NavigationStack { SummaryDetailView(store: store, range: .week) }
+                case "workflow-review-month": NavigationStack { SummaryDetailView(store: store, range: .month) }
+                case "workflow-review-records": NavigationStack { AllRecordsView(store: store) }
+                case "workflow-record-editor": RecordEditorView(store: store, record: store.records.first(where: { $0.hasPreciseTime }))
+                case "workflow-record-untimed": RecordEditorView(store: store, record: store.records.first(where: { !$0.hasPreciseTime }))
+                case "workflow-goal": WeeklyGoalEditor(store: store, week: Date(), goal: store.snapshot.weeklyGoals.first)
+                case "workflow-reflection": WeeklyReflectionEditor(store: store, week: Date(), reflection: store.snapshot.weeklyReflections.first)
+                case "workflow-next-week": NextWeekPlansSheet(store: store, week: Date())
+                default: EmptyView()
+                }
+            }
+#endif
         }
     }
 
@@ -1463,6 +1492,8 @@ private struct BackupSettingsView: View {
     @State private var isExportingBackup = false
     @State private var isImportingBackup = false
     @State private var showsImportConfirmation = false
+    @State private var pendingImportSummary = ""
+    @State private var isReadingBackup = false
     @State private var pendingImportData: Data?
     @State private var pendingImportURL: URL?
     @State private var statusMessage: String?
@@ -1611,6 +1642,8 @@ private struct BackupSettingsView: View {
         .inkFormStyle()
         .background { InkWashBackground() }
         .navigationTitle("数据备份")
+        .disabled(isReadingBackup)
+        .overlay { if isReadingBackup { ProgressView("正在读取备份…").padding().background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12)) } }
         .navigationBarTitleDisplayMode(.inline)
         .fileExporter(
             isPresented: $isExportingBackup,
@@ -1633,9 +1666,23 @@ private struct BackupSettingsView: View {
             do {
                 let url = try result.get().first
                 guard let url else { return }
-                pendingImportData = try ExternalBackupService.readBackup(at: url)
-                pendingImportURL = url
-                showsImportConfirmation = true
+                isReadingBackup = true
+                Task {
+                    defer { isReadingBackup = false }
+                    do {
+                        let (data, preview) = try await Task.detached(priority: .userInitiated) {
+                            let data = try ExternalBackupService.readBackup(at: url)
+                            return (data, try SharedPersistence.previewBackup(data))
+                        }.value
+                        pendingImportSummary = "计划 \(preview.checkInItems.count) 项、记录 \(preview.records.count) 条、时刻 \(preview.countdowns.count) 项、备忘 \(preview.memos.count) 条。"
+                        if preview.checkInItems.isEmpty && preview.records.isEmpty && preview.countdowns.isEmpty && preview.memos.isEmpty {
+                            pendingImportSummary += "这是一份空备份，恢复后当前内容会被清空。"
+                        }
+                        pendingImportData = data
+                        pendingImportURL = url
+                        showsImportConfirmation = true
+                    } catch { statusMessage = error.localizedDescription }
+                }
             } catch {
                 statusMessage = error.localizedDescription
             }
@@ -1653,7 +1700,7 @@ private struct BackupSettingsView: View {
                 pendingImportURL = nil
             }
         } message: {
-            Text("当前数据会先由自动备份保留一份，但建议先手动导出。")
+            Text(pendingImportSummary + "恢复前会在本机保存一份当前数据副本。")
         }
         .alert(
             "数据备份",

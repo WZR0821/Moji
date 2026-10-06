@@ -1,5 +1,13 @@
 package com.raydon.moji.android
 
+import androidx.compose.foundation.layout.safeDrawingPadding
+import androidx.compose.foundation.layout.imePadding
+import androidx.compose.runtime.staticCompositionLocalOf
+import androidx.compose.runtime.SideEffect
+import androidx.compose.ui.window.DialogWindowProvider
+import androidx.compose.ui.graphics.luminance
+import androidx.core.view.WindowCompat
+
 import android.app.DatePickerDialog
 import android.app.TimePickerDialog
 import android.graphics.BitmapFactory
@@ -9,6 +17,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
@@ -26,6 +35,15 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.draw.rotate
+import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.draw.clip
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.graphics.BlendMode
+import androidx.compose.ui.graphics.CompositingStrategy
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.drawscope.clipPath
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ColorFilter
 import androidx.compose.ui.graphics.Path
@@ -35,6 +53,7 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -47,23 +66,82 @@ import com.raydon.moji.ui.MojiPalette
 import java.time.LocalDate
 import java.time.LocalTime
 
+val LocalPaperTexture = staticCompositionLocalOf { true }
+
+val mojiVermilion: Color
+    @Composable get() = if (MaterialTheme.colorScheme.background.luminance() < 0.5f) MojiPalette.VermilionDark else MojiPalette.Vermilion
+
 enum class MojiIcon {
     Checklist, Note, Timer, Chart, Calendar, Plus, Edit, Gear, Search,
     ChevronRight, Ellipsis, Play, Pause, Stop, Pin, Backup, Hand, Grid, Brush, Info,
+    Clock, Sun, Book, Work, Tag, TextLines, Cup, Leaf, Bell,
+}
+
+@Composable
+fun ConfigureDialogWindow() {
+    val view = LocalView.current
+    val window = (view.parent as? DialogWindowProvider)?.window
+    val light = MaterialTheme.colorScheme.background.luminance() > 0.5f
+    SideEffect {
+        if (window != null) {
+            WindowCompat.getInsetsController(window, view).apply {
+                isAppearanceLightStatusBars = light
+                isAppearanceLightNavigationBars = light
+            }
+            if (android.os.Build.VERSION.SDK_INT >= 29) window.isNavigationBarContrastEnforced = false
+        }
+    }
 }
 
 @Composable
 fun MojiScreen(content: @Composable () -> Unit) {
-    Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
+    ConfigureDialogWindow()
+    val window = (LocalView.current.parent as? DialogWindowProvider)?.window
+    if (window != null) {
+        Box(Modifier.fillMaxSize().safeDrawingPadding().imePadding().padding(top = 44.dp)) {
+            Box(Modifier.fillMaxSize().clip(RoundedCornerShape(topStart = 18.dp, topEnd = 18.dp))) {
+                MojiPaperScreen(content)
+            }
+        }
+    } else MojiPaperScreen(content)
+}
+
+@Composable
+private fun MojiPaperScreen(content: @Composable () -> Unit) {
+    BoxWithConstraints(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
+        val dark = MaterialTheme.colorScheme.background.luminance() < 0.5f
+        if (LocalPaperTexture.current) PaperFibers(Modifier.fillMaxSize(), if (dark) 1.08f else 0.92f)
         InkAsset(
             "InkFocusBloom",
-            Modifier.size(410.dp).align(Alignment.TopEnd).offset(x = 175.dp, y = (-180).dp).alpha(0.128f),
+            Modifier.size(maxWidth * 1.10f).offset(x = maxWidth * 0.35f, y = maxHeight * 0.06f - maxWidth * 0.55f).alpha(if (dark) 0.150f else 0.128f),
         )
         InkAsset(
             "InkFocusBloom",
-            Modifier.size(360.dp).align(Alignment.BottomStart).offset(x = (-190).dp, y = 155.dp).alpha(0.092f),
+            Modifier.size(maxWidth * 0.94f).offset(x = maxWidth * -0.41f, y = maxHeight * 0.87f - maxWidth * 0.47f).rotate(24f).alpha(if (dark) 0.108f else 0.092f),
         )
-        content()
+        Box(Modifier.fillMaxSize()) { content() }
+    }
+}
+
+@Composable
+fun PaperFibers(modifier: Modifier = Modifier, intensity: Float = 1f) {
+    val color = MaterialTheme.colorScheme.onSurface
+    Canvas(modifier) {
+        val d = density; val w = size.width / d; val h = size.height / d
+        val count = maxOf(6, (h / 26).toInt())
+        repeat(count) { index ->
+            val y = h * (index + 1) / (count + 1) + kotlin.math.sin(index * 2.13).toFloat() * 2.1f
+            val p = Path(); p.moveTo(-8 * d, y * d)
+            p.cubicTo(w * 0.3f * d, (y - 1.8f) * d, w * 0.71f * d, (y + 2.2f) * d, (w + 8) * d, (y + kotlin.math.cos(index * 1.7).toFloat() * 1.8f) * d)
+            drawPath(p, color.copy(alpha = 0.010f * intensity), style = Stroke((if (index % 4 == 0) 0.48f else 0.24f) * d, cap = StrokeCap.Round))
+        }
+        repeat(maxOf(8, (w * h / 18000).toInt())) { index ->
+            val seed = (index + 7).toDouble()
+            val x = kotlin.math.abs(kotlin.math.sin(seed * 12.9898)).toFloat() * w
+            val y = kotlin.math.abs(kotlin.math.cos(seed * 7.233)).toFloat() * h
+            val length = 4 + kotlin.math.abs(kotlin.math.sin(seed * 3.17)).toFloat() * 12
+            drawLine(color.copy(alpha = 0.012f * intensity), androidx.compose.ui.geometry.Offset(x * d, y * d), androidx.compose.ui.geometry.Offset((x + length) * d, (y + kotlin.math.sin(seed * 4.31).toFloat() * 2.2f) * d), strokeWidth = 0.30f * d, cap = StrokeCap.Round)
+        }
     }
 }
 
@@ -83,16 +161,29 @@ fun InkAsset(
         Image(
             bitmap = it.asImageBitmap(),
             contentDescription = null,
-            modifier = modifier,
-            contentScale = ContentScale.Fit,
+            modifier = modifier.clipToBounds(),
+            contentScale = if (name.contains("Divider") || name in listOf("InkHeaderWash", "InkProgressBar", "InkTaskStrike")) ContentScale.Crop else ContentScale.Fit,
             colorFilter = ColorFilter.tint(tint),
         )
     }
 }
 
 @Composable
-fun InkDivider(modifier: Modifier = Modifier, opacity: Float = 0.30f) {
-    InkAsset("InkThinDivider", modifier.fillMaxWidth().height(7.dp).alpha(opacity))
+fun InkDivider(modifier: Modifier = Modifier, opacity: Float = 0.30f, seed: Long = 0) {
+    val artworks = listOf("InkThinDivider", "InkDividerSweep", "InkDividerEcho", "InkDividerBroken", "InkDividerWash", "InkDividerHook", "InkDividerThread")
+    var hash = (seed * 2654435761L).toULong(); hash = hash xor (hash shr 13); hash *= 0x9E3779B97F4A7C15uL; hash = hash xor (hash shr 7)
+    val rotation = (((hash and 255u).toFloat() / 255 * 2 - 1) * 26 * 0.05f) - 0.5f
+    val opacityScale = 1 + (((hash shr 16) and 255u).toFloat() / 255 * 2 - 1) * 0.16f * 0.05f
+    Box(modifier.fillMaxWidth().height(7.dp).rotate(rotation).alpha(opacity)) {
+        InkAsset("InkThinDivider", Modifier.fillMaxSize().alpha(0.14f))
+        InkAsset(artworks[(seed.toULong() % artworks.size.toUInt()).toInt()], Modifier.fillMaxSize().graphicsLayer { scaleX = if (((hash shr 24) and 1u) == 1uL) -1f else 1f }.alpha(0.50f * opacityScale))
+    }
+}
+
+fun inkSeed(text: String): Long {
+    var hash = 0xCBF29CE484222325uL
+    text.toByteArray(Charsets.UTF_8).forEach { hash = (hash xor it.toUByte().toULong()) * 0x100000001B3uL }
+    return hash.toLong()
 }
 
 @Composable
@@ -104,6 +195,41 @@ fun InkRing(modifier: Modifier = Modifier, active: Boolean = false) {
     )
 }
 
+/** Same authored bitmap and directional reveal as InkBrushRing on iOS. */
+@Composable
+fun PomodoroInkRing(progress: Float, active: Boolean, dryFibers: Boolean, modifier: Modifier = Modifier) {
+    val clamped = progress.coerceIn(0f, 1f)
+    Box(modifier.rotate(3f)) {
+        InkAsset("InkTimerRingDirectional", Modifier.fillMaxSize().graphicsLayer { scaleX = -1f }.alpha(if (active) 0.13f else 0.08f))
+        if (clamped > 0.001f) InkAsset("InkTimerRingDirectional", Modifier.fillMaxSize()
+            .graphicsLayer { compositingStrategy = CompositingStrategy.Offscreen }
+            .drawWithContent {
+                drawContent()
+                val diameter = minOf(size.width, size.height); val radius = diameter * 0.365f
+                val maskWidth = maxOf(diameter * 0.19f, 40.dp.toPx())
+                fun arc(from: Float, to: Float): Path {
+                    val p = Path(); val count = maxOf(2, kotlin.math.ceil((to - from) * 180).toInt())
+                    for (i in 0..count) { val t = from + (to - from) * i / count; val angle = Math.toRadians((-84 + 344 * t).toDouble()); val x = center.x + kotlin.math.cos(angle).toFloat() * radius; val y = center.y + kotlin.math.sin(angle).toFloat() * radius; if (i == 0) p.moveTo(x, y) else p.lineTo(x, y) }
+                    return p
+                }
+                // Build the mask offscreen, then apply it to the shared brush asset.
+                drawContext.canvas.saveLayer(androidx.compose.ui.geometry.Rect(androidx.compose.ui.geometry.Offset.Zero, size), androidx.compose.ui.graphics.Paint().apply { blendMode = BlendMode.DstIn })
+                drawPath(arc(0f, minOf(clamped, 0.012f)), Color.White, style = Stroke(maskWidth * if (dryFibers) 0.96f else 1f, cap = StrokeCap.Round))
+                val transition = maxOf(0f, clamped - if (dryFibers) 0.060f else 0.040f)
+                if (transition > 0.001f) drawPath(arc(0f, transition), Color.White, style = Stroke(maskWidth * if (dryFibers) 0.96f else 1f))
+                val t = ((clamped - 0.86f) / 0.14f).coerceIn(0f, 1f); val smooth = t * t * (3 - 2 * t)
+                val scale = if (dryFibers) 0.78f + (0.44f - 0.78f) * smooth else 0.94f + (0.52f - 0.94f) * smooth
+                val tail = arc(maxOf(0f, transition - if (dryFibers) 0.014f else 0.010f), clamped)
+                if (clamped > 0.82f) {
+                    val isolation = Path(); isolation.moveTo(center.x, center.y)
+                    for (i in 0..80) { val angle = Math.toRadians((-84 + 344 * 0.70 + (344 * 0.30 + 16 * 0.12) * i / 80).toDouble()); val r = diameter * 1.5f; isolation.lineTo(center.x + kotlin.math.cos(angle).toFloat() * r, center.y + kotlin.math.sin(angle).toFloat() * r) }; isolation.close()
+                    clipPath(isolation) { drawPath(tail, Color.White, style = Stroke(maskWidth * scale, cap = StrokeCap.Round)) }
+                } else drawPath(tail, Color.White, style = Stroke(maskWidth * scale, cap = StrokeCap.Round))
+                drawContext.canvas.restore()
+            }.graphicsLayer { scaleX = -1f }.alpha(0.92f))
+    }
+}
+
 @Composable
 fun MojiLargeTitle(
     title: String,
@@ -113,7 +239,7 @@ fun MojiLargeTitle(
 ) {
     Column(Modifier.fillMaxWidth().padding(horizontal = 18.dp)) {
         Row(
-            Modifier.fillMaxWidth().height(54.dp),
+            Modifier.fillMaxWidth().height(44.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             if (leading != null) {
@@ -134,13 +260,13 @@ fun MojiLargeTitle(
                             else -> icon.name
                         }
                     },
-                ) { MojiLineIcon(icon, if (icon == MojiIcon.Plus) 30.dp else 26.dp) }
+                ) { MojiLineIcon(icon, if (icon == MojiIcon.Plus) 23.dp else 22.dp) }
             }
         }
         Text(
             title,
             style = MaterialTheme.typography.headlineLarge,
-            modifier = Modifier.padding(bottom = 17.dp),
+            modifier = Modifier.padding(bottom = 14.dp),
         )
     }
 }
@@ -155,7 +281,7 @@ fun MojiSheetBar(
     trailingEnabled: Boolean = true,
 ) {
     Row(
-        Modifier.fillMaxWidth().height(62.dp).padding(horizontal = 18.dp),
+        Modifier.fillMaxWidth().height(44.dp).padding(horizontal = 18.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Text(
@@ -163,7 +289,7 @@ fun MojiSheetBar(
             modifier = Modifier.weight(1f).clickable(role = Role.Button, onClick = onLeading).padding(vertical = 10.dp),
             fontSize = 17.sp,
         )
-        Text(title, fontSize = 18.sp, fontWeight = FontWeight.SemiBold, textAlign = TextAlign.Center)
+        Text(title, fontSize = 17.sp, fontWeight = FontWeight.SemiBold, textAlign = TextAlign.Center)
         Text(
             trailing,
             modifier = Modifier.weight(1f).alpha(if (trailingEnabled) 1f else 0.35f)
@@ -177,6 +303,7 @@ fun MojiSheetBar(
 
 @Composable
 fun MojiLineIcon(kind: MojiIcon, size: Dp = 26.dp, color: Color = MaterialTheme.colorScheme.onSurface) {
+    val cutout = MaterialTheme.colorScheme.surface
     Canvas(Modifier.size(size)) {
         val w = this.size.width
         val h = this.size.height
@@ -205,6 +332,19 @@ fun MojiLineIcon(kind: MojiIcon, size: Dp = 26.dp, color: Color = MaterialTheme.
             MojiIcon.Grid -> { for(x in listOf(3f,13f)) for(y in listOf(3f,13f)) drawRoundRect(color, androidx.compose.ui.geometry.Offset(x*s,y*s), androidx.compose.ui.geometry.Size(8f*s,8f*s), androidx.compose.ui.geometry.CornerRadius(s),style=stroke) }
             MojiIcon.Brush -> { line(5f,19f,17f,7f); line(15f,5f,19f,9f); circle(5f,19f,2f) }
             MojiIcon.Info -> { circle(12f,12f,9f); circle(12f,7f,1f,true); line(12f,11f,12f,17f) }
+            MojiIcon.Clock -> { circle(12f, 12f, 9f, true); drawLine(cutout, androidx.compose.ui.geometry.Offset(12f*s,5f*s), androidx.compose.ui.geometry.Offset(12f*s,12f*s), strokeWidth = 1.8f*s); drawLine(cutout, androidx.compose.ui.geometry.Offset(12f*s,12f*s), androidx.compose.ui.geometry.Offset(7f*s,12f*s), strokeWidth = 1.8f*s) }
+            MojiIcon.Sun -> { circle(12f,12f,4f,true); repeat(8) { i -> val angle = Math.PI * i / 4; line(12f + kotlin.math.cos(angle).toFloat()*7,12f + kotlin.math.sin(angle).toFloat()*7,12f + kotlin.math.cos(angle).toFloat()*10,12f + kotlin.math.sin(angle).toFloat()*10) } }
+            MojiIcon.Bell -> {
+                val bell = Path(); bell.moveTo(8f*s, 8f*s); bell.quadraticTo(8f*s, 4f*s, 12f*s, 4f*s); bell.quadraticTo(16f*s, 4f*s, 16f*s, 8f*s); bell.lineTo(16f*s, 14f*s); bell.lineTo(18f*s, 17f*s); bell.lineTo(6f*s, 17f*s); bell.lineTo(8f*s, 14f*s); bell.close()
+                drawPath(bell, color, style = stroke); line(10f, 20f, 14f, 20f)
+                val waves = Path(); waves.moveTo(3f*s, 7f*s); waves.quadraticTo(0f, 12f*s, 3f*s, 17f*s); waves.moveTo(21f*s, 7f*s); waves.quadraticTo(24f*s, 12f*s, 21f*s, 17f*s); drawPath(waves, color, style = stroke)
+            }
+            MojiIcon.Book -> { drawRoundRect(color, androidx.compose.ui.geometry.Offset(5f*s,3f*s), androidx.compose.ui.geometry.Size(15f*s,18f*s), androidx.compose.ui.geometry.CornerRadius(2f*s)); line(3f,5f,3f,20f) }
+            MojiIcon.Work -> { drawRoundRect(color, androidx.compose.ui.geometry.Offset(2f*s,7f*s), androidx.compose.ui.geometry.Size(20f*s,14f*s), androidx.compose.ui.geometry.CornerRadius(2f*s)); drawRoundRect(color, androidx.compose.ui.geometry.Offset(8f*s,3f*s), androidx.compose.ui.geometry.Size(8f*s,6f*s), androidx.compose.ui.geometry.CornerRadius(s), style=stroke) }
+            MojiIcon.Tag -> { val p=Path(); p.moveTo(3f*s,3f*s); p.lineTo(12f*s,3f*s); p.lineTo(22f*s,13f*s); p.lineTo(13f*s,22f*s); p.lineTo(3f*s,12f*s);p.close();drawPath(p,color) }
+            MojiIcon.TextLines -> { line(3f,5f,20f,5f); line(3f,10f,15f,10f); line(3f,15f,20f,15f); line(3f,20f,12f,20f) }
+            MojiIcon.Cup -> { drawRoundRect(color, androidx.compose.ui.geometry.Offset(4f*s,6f*s), androidx.compose.ui.geometry.Size(12f*s,12f*s), androidx.compose.ui.geometry.CornerRadius(4f*s)); circle(17f,11f,4f); line(3f,21f,20f,21f) }
+            MojiIcon.Leaf -> { val p=Path(); p.moveTo(3f*s,4f*s); p.cubicTo(18f*s,3f*s,23f*s,10f*s,19f*s,19f*s);p.cubicTo(10f*s,22f*s,5f*s,17f*s,3f*s,4f*s);p.close();drawPath(p,color);drawLine(cutout, androidx.compose.ui.geometry.Offset(7f*s,8f*s), androidx.compose.ui.geometry.Offset(20f*s,19f*s), strokeWidth = s) }
         }
     }
 }
