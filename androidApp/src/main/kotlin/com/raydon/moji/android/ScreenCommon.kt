@@ -1,6 +1,12 @@
 package com.raydon.moji.android
 
 import androidx.compose.foundation.layout.safeDrawingPadding
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.WindowInsetsSides
+import androidx.compose.foundation.layout.only
+import androidx.compose.foundation.layout.safeDrawing
+import androidx.compose.foundation.layout.statusBars
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.runtime.SideEffect
@@ -21,6 +27,7 @@ import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.offset
@@ -53,6 +60,7 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
@@ -72,18 +80,19 @@ val mojiVermilion: Color
     @Composable get() = if (MaterialTheme.colorScheme.background.luminance() < 0.5f) MojiPalette.VermilionDark else MojiPalette.Vermilion
 
 enum class MojiIcon {
-    Checklist, Note, Timer, Chart, Calendar, Plus, Edit, Gear, Search,
+    Checklist, Note, Timer, Chart, Calendar, Plus, Edit, Gear, Search, PencilLine, Sliders, Repeat,
     ChevronRight, Ellipsis, Play, Pause, Stop, Pin, Backup, Hand, Grid, Brush, Info,
     Clock, Sun, Book, Work, Tag, TextLines, Cup, Leaf, Bell,
 }
 
 @Composable
-fun ConfigureDialogWindow() {
+fun ConfigureDialogWindow(dimAmount: Float? = null) {
     val view = LocalView.current
     val window = (view.parent as? DialogWindowProvider)?.window
     val light = MaterialTheme.colorScheme.background.luminance() > 0.5f
     SideEffect {
         if (window != null) {
+            if (dimAmount != null) window.setDimAmount(dimAmount)
             WindowCompat.getInsetsController(window, view).apply {
                 isAppearanceLightStatusBars = light
                 isAppearanceLightNavigationBars = light
@@ -94,20 +103,33 @@ fun ConfigureDialogWindow() {
 }
 
 @Composable
-fun MojiScreen(content: @Composable () -> Unit) {
-    ConfigureDialogWindow()
+fun MojiScreen(sheetFraction: Float? = null, sheetHeight: Dp? = null, content: @Composable () -> Unit) {
+    ConfigureDialogWindow(if (sheetFraction != null || sheetHeight != null) 0.12f else null)
     val window = (LocalView.current.parent as? DialogWindowProvider)?.window
     if (window != null) {
-        Box(Modifier.fillMaxSize().safeDrawingPadding().imePadding().padding(top = 44.dp)) {
-            Box(Modifier.fillMaxSize().clip(RoundedCornerShape(topStart = 18.dp, topEnd = 18.dp))) {
-                MojiPaperScreen(content)
+        val density = LocalDensity.current
+        val topInset = with(density) { WindowInsets.statusBars.getTop(density).toDp() }
+        Box(Modifier.fillMaxSize().padding(top = if (sheetFraction == null && sheetHeight == null) maxOf(70.dp, topInset + 44.dp) else 0.dp), contentAlignment = Alignment.BottomCenter) {
+            val sheetSize = if (sheetHeight != null) Modifier.height(sheetHeight) else Modifier.fillMaxHeight(sheetFraction ?: 1f)
+            Box(Modifier.fillMaxWidth().then(sheetSize).clip(RoundedCornerShape(topStart = 18.dp, topEnd = 18.dp))) {
+                MojiPaperScreen {
+                    Box(Modifier.fillMaxSize()
+                        .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Horizontal + WindowInsetsSides.Bottom))
+                        .imePadding()) { content() }
+                }
             }
         }
-    } else MojiPaperScreen(content)
+    } else {
+        val density = LocalDensity.current
+        val statusInset = with(density) { WindowInsets.statusBars.getTop(density).toDp() }
+        // Keep the app's large-title baseline aligned with the iPhone reference,
+        // even when Android's status bar is shorter than the iOS safe area.
+        Box(Modifier.fillMaxSize().padding(top = maxOf(0.dp, 58.dp - statusInset))) { content() }
+    }
 }
 
 @Composable
-private fun MojiPaperScreen(content: @Composable () -> Unit) {
+fun MojiPaperScreen(content: @Composable () -> Unit) {
     BoxWithConstraints(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
         val dark = MaterialTheme.colorScheme.background.luminance() < 0.5f
         if (LocalPaperTexture.current) PaperFibers(Modifier.fillMaxSize(), if (dark) 1.08f else 0.92f)
@@ -165,6 +187,27 @@ fun InkAsset(
             contentScale = if (name.contains("Divider") || name in listOf("InkHeaderWash", "InkProgressBar", "InkTaskStrike")) ContentScale.Crop else ContentScale.Fit,
             colorFilter = ColorFilter.tint(tint),
         )
+    }
+}
+
+/** The same seeded brush medallion artwork and transform used by iOS. */
+@Composable
+fun InkBrushMedallion(kind: MojiIcon, tint: Color, size: Dp = 31.dp, seed: Long = 0) {
+    var hash = (seed * 2654435761L).toULong()
+    hash = hash xor (hash shr 13)
+    hash *= 0x9E3779B97F4A7C15uL
+    hash = hash xor (hash shr 7)
+    val angle = ((hash and 255u).toFloat() / 255f * 2f - 1f) * 26f
+    val scale = 1f + (((hash shr 8) and 255u).toFloat() / 255f * 2f - 1f) * 0.11f
+    val opacity = 1f + (((hash shr 16) and 255u).toFloat() / 255f * 2f - 1f) * 0.16f
+    val artwork = listOf("InkIconLoop", "InkIconCrescent", "InkIconScholarSquare")[(seed.toULong() % 3u).toInt()]
+    Box(Modifier.size(size), contentAlignment = Alignment.Center) {
+        InkAsset(artwork, Modifier.fillMaxSize().graphicsLayer {
+            rotationZ = angle
+            scaleX = if (((hash shr 24) and 1u) == 1uL) -scale else scale
+            scaleY = scale
+        }, tint.copy(alpha = 0.72f * opacity))
+        MojiLineIcon(kind, size * 0.34f, tint)
     }
 }
 
@@ -236,6 +279,7 @@ fun MojiLargeTitle(
     leading: MojiIcon? = null,
     leadingAction: (() -> Unit)? = null,
     actions: List<Pair<MojiIcon, () -> Unit>> = emptyList(),
+    bottomPadding: Dp = 14.dp,
 ) {
     Column(Modifier.fillMaxWidth().padding(horizontal = 18.dp)) {
         Row(
@@ -266,7 +310,7 @@ fun MojiLargeTitle(
         Text(
             title,
             style = MaterialTheme.typography.headlineLarge,
-            modifier = Modifier.padding(bottom = 14.dp),
+            modifier = Modifier.padding(bottom = bottomPadding),
         )
     }
 }
@@ -279,16 +323,16 @@ fun MojiSheetBar(
     onLeading: () -> Unit,
     onTrailing: () -> Unit,
     trailingEnabled: Boolean = true,
+    leadingIsBack: Boolean = leading == "返回",
 ) {
     Row(
         Modifier.fillMaxWidth().height(44.dp).padding(horizontal = 18.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Text(
-            leading,
-            modifier = Modifier.weight(1f).clickable(role = Role.Button, onClick = onLeading).padding(vertical = 10.dp),
-            fontSize = 17.sp,
-        )
+        Row(Modifier.weight(1f).clickable(enabled = leading.isNotEmpty(), role = Role.Button, onClick = onLeading).padding(vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
+            if (leadingIsBack) Box(Modifier.rotate(180f).padding(end = 4.dp)) { MojiLineIcon(MojiIcon.ChevronRight, 17.dp) }
+            Text(leading, fontSize = 17.sp, maxLines = 1)
+        }
         Text(title, fontSize = 17.sp, fontWeight = FontWeight.SemiBold, textAlign = TextAlign.Center)
         Text(
             trailing,
@@ -319,6 +363,9 @@ fun MojiLineIcon(kind: MojiIcon, size: Dp = 26.dp, color: Color = MaterialTheme.
             MojiIcon.Calendar -> { drawRoundRect(color, androidx.compose.ui.geometry.Offset(3f*s,4.5f*s), androidx.compose.ui.geometry.Size(18f*s,16.5f*s), androidx.compose.ui.geometry.CornerRadius(2f*s), style=stroke); line(3f,9f,21f,9f); line(8f,2f,8f,6.5f); line(16f,2f,16f,6.5f); for(x in listOf(7f,12f,17f)) for(y in listOf(13f,17f)) circle(x,y,0.7f,true) }
             MojiIcon.Plus -> { line(12f,3f,12f,21f); line(3f,12f,21f,12f) }
             MojiIcon.Edit -> { drawRoundRect(color, androidx.compose.ui.geometry.Offset(3f*s,5f*s), androidx.compose.ui.geometry.Size(15f*s,16f*s), androidx.compose.ui.geometry.CornerRadius(2f*s), style=stroke); line(9f,15f,20.5f,3.5f); line(17.5f,3.5f,20.5f,6.5f) }
+            MojiIcon.PencilLine -> { line(4f,17f,16f,5f); line(16f,5f,20f,9f); line(20f,9f,8f,21f); line(4f,17f,4f,21f); line(4f,21f,8f,21f); line(12f,22f,22f,22f) }
+            MojiIcon.Sliders -> { line(3f,6f,21f,6f); line(3f,12f,21f,12f); line(3f,18f,21f,18f); circle(8f,6f,2f,true); circle(16f,12f,2f,true); circle(10f,18f,2f,true) }
+            MojiIcon.Repeat -> { line(4f,8f,20f,8f); line(16f,4f,20f,8f); line(20f,8f,16f,12f); line(20f,16f,4f,16f); line(8f,12f,4f,16f); line(4f,16f,8f,20f) }
             MojiIcon.Gear -> { circle(12f,12f,3.2f); circle(12f,12f,8.4f); line(12f,1f,12f,4f); line(12f,20f,12f,23f); line(1f,12f,4f,12f); line(20f,12f,23f,12f); line(4.2f,4.2f,6.3f,6.3f); line(17.7f,17.7f,19.8f,19.8f); line(19.8f,4.2f,17.7f,6.3f); line(6.3f,17.7f,4.2f,19.8f) }
             MojiIcon.Search -> { circle(10f,10f,6f); line(14.4f,14.4f,21f,21f) }
             MojiIcon.ChevronRight -> { line(9f,4f,16f,12f); line(16f,12f,9f,20f) }

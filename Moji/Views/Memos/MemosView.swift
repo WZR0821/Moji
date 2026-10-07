@@ -471,7 +471,8 @@ private struct MemoEditorView: View {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("取消") { dismiss() }
                 }
-                ToolbarItemGroup(placement: .confirmationAction) {
+                ToolbarItem(placement: .confirmationAction) {
+                    HStack(spacing: 14) {
                     Menu {
                         Button {
                             isPinned.toggle()
@@ -498,6 +499,7 @@ private struct MemoEditorView: View {
                     }
                     .fontWeight(.semibold)
                     .disabled(!canSave)
+                    }
                 }
                 ToolbarItemGroup(placement: .bottomBar) {
                     Button {

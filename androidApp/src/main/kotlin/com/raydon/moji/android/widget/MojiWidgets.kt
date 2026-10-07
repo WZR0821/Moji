@@ -130,7 +130,7 @@ class WidgetActionReceiver : BroadcastReceiver() {
                         val now = Instant.now().toString()
                         app.repository.savePlan(CheckInItem(
                             id = UUID.randomUUID().toString(), title = app.settings.presetTitle(index),
-                            category = app.settings.presetCategory(index), scheduledStart = now, createdAt = now,
+                            category = app.settings.presetCategory(index).ifBlank { app.settings.defaultCategory }, scheduledStart = now, createdAt = now,
                             scheduleKind = "allDay", plannedDurationEnabled = false, detailsConfigured = false))
                     }
                 }

@@ -10,8 +10,11 @@ import java.util.UUID
 
 /** Local interaction rules. Backup serialization is deliberately unchanged. */
 object LocalRules {
-    fun occursOn(event: com.raydon.moji.core.CountdownEvent, date: LocalDate): Boolean {
-        val origin = Instant.parse(event.targetDate).atZone(ZoneId.systemDefault()).toLocalDate()
+    // Zero has the same meaning as iOS BackupRetention.forever.
+    fun backupRetentionDays(value: Int): Int = if (value == 0) 0 else value.coerceIn(7, 3650)
+
+    fun occursOn(event: com.raydon.moji.core.CountdownEvent, date: LocalDate, zone: ZoneId = ZoneId.systemDefault()): Boolean {
+        val origin = Instant.parse(event.targetDate).atZone(zone).toLocalDate()
         val next = com.raydon.moji.core.CountdownPolicy.nextOccurrenceDate(
             kotlinx.datetime.LocalDate.parse(origin.toString()), event.repeatRule ?: "never", kotlinx.datetime.LocalDate.parse(date.toString()))
         return next.toString() == date.toString()

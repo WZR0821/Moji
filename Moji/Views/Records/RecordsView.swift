@@ -403,7 +403,7 @@ struct PersonalView: View {
                 if let scenario, scenario.hasPrefix("workflow-") {
                     didRunSettingsQAScenario = true
                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
-                        if scenario == "workflow-settings" { isPresentingSettings = true }
+                        if scenario.hasPrefix("workflow-settings") { isPresentingSettings = true }
                         else if scenario != "workflow-review" { workflowQARoute = WorkflowQARoute(id: scenario) }
                     }
                     return
@@ -698,6 +698,7 @@ struct PersonalView: View {
 private struct SettingsView: View {
     @ObservedObject var store: PlanStore
     @Environment(\.dismiss) private var dismiss
+    @State private var visualQAPath: [String] = []
 
     @AppStorage(PlanSettingsKeys.defaultCategory, store: SharedPersistence.sharedDefaults)
     private var defaultCategoryRaw = RecordCategory.study.rawValue
@@ -741,7 +742,7 @@ private struct SettingsView: View {
     private var paperTextureEnabled = true
 
     var body: some View {
-        NavigationStack {
+        NavigationStack(path: $visualQAPath) {
             List {
                 Section("偏好") {
                     NavigationLink {
@@ -828,7 +829,7 @@ private struct SettingsView: View {
                 }
 
                 Section {
-                    LabeledContent("开发者", value: "WANG ZIRUI")
+                    LabeledContent("开发者", value: "Jerry Wong")
                         .contentShape(Rectangle())
                 }
             }
@@ -839,6 +840,32 @@ private struct SettingsView: View {
             }
             .navigationTitle("设置")
             .navigationBarTitleDisplayMode(.inline)
+            .navigationDestination(for: String.self) { page in
+                switch page {
+                case "defaults": PlanDefaultsSettingsView()
+                case "widgets": QuickPlanPresetSettingsView()
+                case "widgets:0": QuickPlanPresetEditorView(preset: QuickPlanPresetStore.presets(from: quickPlanPresetsJSON)[0])
+                case "pomodoro": PomodoroSettingsView()
+                case "notifications": NotificationFeedbackSettingsView(store: store)
+                case "appearance": AppearanceSettingsView()
+                case "permissions": PermissionSettingsView()
+                case "backup": BackupSettingsView(store: store)
+                case "about": AboutSettingsView()
+                default: EmptyView()
+                }
+            }
+            .onAppear {
+#if DEBUG
+                if visualQAPath.isEmpty,
+                   let scenario = ProcessInfo.processInfo.environment["MOJI_QA_SCENARIO"],
+                   scenario.hasPrefix("workflow-settings-") {
+                    let page = String(scenario.dropFirst("workflow-settings-".count))
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                        visualQAPath = page == "widgets:0" ? ["widgets", page] : [page]
+                    }
+                }
+#endif
+            }
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) {
                     Button("完成") { dismiss() }
@@ -1777,7 +1804,7 @@ private struct AboutSettingsView: View {
                     "版本",
                     value: "V\(appVersion) 正式版"
                 )
-                LabeledContent("开发者", value: "WANG ZIRUI")
+                LabeledContent("开发者", value: "Jerry Wong")
                 LabeledContent("数据格式", value: "v\(PlanSnapshot.currentSchemaVersion)")
                 LabeledContent("最低系统", value: "iOS 17")
             }

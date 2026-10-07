@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -32,6 +33,7 @@ import java.time.LocalDate
 import java.time.LocalTime
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
+import kotlinx.coroutines.flow.first
 
 @Composable
 fun PlanEditorScreenDialog(
@@ -72,6 +74,9 @@ fun PlanEditorScreenDialog(
     val pickTime = rememberTimePicker { time = it }
     val pickActualStart = rememberTimePicker { actualStart = it }
     val pickActualEnd = rememberTimePicker { actualEnd = it }
+    val listState = rememberLazyListState()
+    val titleFocus = remember { androidx.compose.ui.focus.FocusRequester() }
+    val qaScrollInset = with(androidx.compose.ui.platform.LocalDensity.current) { 44.dp.roundToPx() }
 
     Dialog(
         onDismissRequest = onDismiss,
@@ -109,8 +114,9 @@ fun PlanEditorScreenDialog(
                 )
                 LazyColumn(
                     Modifier.fillMaxSize(),
-                    contentPadding = PaddingValues(top = 24.dp, bottom = 34.dp),
-                    verticalArrangement = Arrangement.spacedBy(28.dp),
+                    state = listState,
+                    contentPadding = PaddingValues(top = 27.dp, bottom = 34.dp),
+                    verticalArrangement = Arrangement.spacedBy(19.dp),
                 ) {
                     item {
                         FormSection("记录方式") {
@@ -124,11 +130,11 @@ fun PlanEditorScreenDialog(
                         }
                     }
                     item {
-                        FormSection("标题") { FormTextField(title, { title = it }, if (kind == "planned") "例如：完成报告第一章" else "例如：整理会议纪要") }
+                        FormSection("标题") { FormTextField(title, { title = it }, if (kind == "planned") "例如：完成报告第一章" else "例如：整理会议纪要", focusRequester = titleFocus) }
                     }
                     item {
                         FormSection("详细说明（可选）", "保存后，展开计划即可直接阅读完整内容。") {
-                            FormTextField(note, { note = it }, "补充背景、步骤或注意事项", singleLine = false, minHeight = 148)
+                            FormTextField(note, { note = it }, "补充背景、步骤或注意事项", singleLine = false, minHeight = 140)
                         }
                     }
                     item {
@@ -175,21 +181,27 @@ fun PlanEditorScreenDialog(
                             if (calendarSync) add("已同步日历")
                         }.joinToString(" · ").ifEmpty { "未设置" }
                         FormSection {
-                            Row(Modifier.fillMaxWidth().clickable { advanced = !advanced }.padding(horizontal = 18.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
-                                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) { Text("高级设置", fontSize = 17.sp, fontWeight = FontWeight.Medium); Text(advancedSummary, fontSize = 12.sp, color = MaterialTheme.colorScheme.secondary) }
+                            Row(Modifier.fillMaxWidth().clickable { advanced = !advanced }.padding(horizontal = 20.dp, vertical = 11.dp), verticalAlignment = Alignment.CenterVertically) {
+                                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) { Text("高级设置", fontSize = 17.sp, fontWeight = FontWeight.Medium); Text(advancedSummary, fontSize = 12.sp, color = if (advancedSummary == "未设置") MaterialTheme.colorScheme.secondary else MaterialTheme.colorScheme.onSurface) }
                                 Box(Modifier.rotate(if (advanced) 90f else 0f)) { MojiLineIcon(MojiIcon.ChevronRight, 14.dp) }
                             }
                             if (advanced) {
+                                FormSeparator()
+                                Column(Modifier.padding(start = 20.dp, top = 15.dp, bottom = 15.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
                                 if (kind == "planned") {
-                                    EditorCaption("投入估算（可选）", true)
-                                    FormToggle("添加预计投入", plannedDurationEnabled, { plannedDurationEnabled = it })
+                                    Column(verticalArrangement = Arrangement.spacedBy(9.dp)) {
+                                    DenseEditorCaption("投入估算（可选）", true)
+                                    FormToggle("添加预计投入", plannedDurationEnabled, { plannedDurationEnabled = it }, minHeight = 32)
                                     if (plannedDurationEnabled) {
-                                        FormStepper("预计投入", editorDuration(plannedMinutes.toLong()), { plannedMinutes = (plannedMinutes - 1).coerceAtLeast(1) }, { plannedMinutes = (plannedMinutes + 1).coerceAtMost(1440) })
-                                        DurationPills { plannedMinutes = it }
+                                        FormStepper("预计投入", editorDuration(plannedMinutes.toLong()), { plannedMinutes = (plannedMinutes - 1).coerceAtLeast(1) }, { plannedMinutes = (plannedMinutes + 1).coerceAtMost(1440) }, valueStyle = MaterialTheme.typography.bodyLarge.copy(color = MaterialTheme.colorScheme.onSurface, fontWeight = FontWeight.SemiBold), minHeight = 32)
+                                        DurationPills(verticalPadding = 0) { plannedMinutes = it }
                                     }
-                                    EditorCaption("预计投入用于番茄钟和周总结，与全天或具体时间相互独立。")
-                                    FormSeparator(); EditorCaption("重复与提醒", true)
-                                    FormChoiceRow("重复", repeatRule, repeatOptions) { repeatRule = it }
+                                    DenseEditorCaption("预计投入用于番茄钟和周总结，与全天或具体时间相互独立。")
+                                    }
+                                    androidx.compose.material3.HorizontalDivider(Modifier.padding(horizontal = 20.dp), color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.1f), thickness = 0.6.dp)
+                                    Column(verticalArrangement = Arrangement.spacedBy(9.dp)) {
+                                    DenseEditorCaption("重复与提醒", true)
+                                    FormChoiceRow("重复", repeatRule, repeatOptions, minHeight = 32) { repeatRule = it }
                                     if (repeatRule == "customWeekdays") {
                                         Row(Modifier.fillMaxWidth().padding(horizontal = 18.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                                             listOf(2, 3, 4, 5, 6, 7, 1).forEachIndexed { index, day ->
@@ -199,16 +211,29 @@ fun PlanEditorScreenDialog(
                                             }
                                         }
                                     }
-                                    FormChoiceRow("提醒", if (reminderEnabled) reminderMinutes.toString() else "-1", reminderOptions + if (reminderOptions.none { it.first == reminderMinutes.toString() }) listOf(reminderMinutes.toString() to "提前 $reminderMinutes 分钟") else emptyList()) { reminderEnabled = it != "-1"; if (reminderEnabled) reminderMinutes = it.toInt() }
-                                    EditorCaption("重复计划会在完成或跳过后生成下一次；提醒只保存在本机。")
-                                    FormSeparator()
+                                    FormChoiceRow("提醒", if (reminderEnabled) reminderMinutes.toString() else "-1", reminderOptions + if (reminderOptions.none { it.first == reminderMinutes.toString() }) listOf(reminderMinutes.toString() to "提前 $reminderMinutes 分钟") else emptyList(), minHeight = 32) { reminderEnabled = it != "-1"; if (reminderEnabled) reminderMinutes = it.toInt() }
+                                    DenseEditorCaption("重复计划会在完成或跳过后生成下一次；提醒只保存在本机。")
+                                    }
+                                    androidx.compose.material3.HorizontalDivider(Modifier.padding(horizontal = 20.dp), color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.1f), thickness = 0.6.dp)
                                 }
-                                FormToggle("添加到系统日历", calendarSync, { calendarSync = it }, enabled = existing?.calendarEventIdentifier == null)
-                                if (existing?.calendarEventIdentifier != null) EditorCaption("已添加到系统日历")
-                                EditorCaption("默认不上传。开启后仅单向添加一次；之后如需修改或删除日历事件，请在系统日历中操作。")
+                                Column(verticalArrangement = Arrangement.spacedBy(9.dp)) {
+                                FormToggle("添加到系统日历", calendarSync, { calendarSync = it }, enabled = existing?.calendarEventIdentifier == null, minHeight = 32)
+                                if (existing?.calendarEventIdentifier != null) DenseEditorCaption("已添加到系统日历")
+                                DenseEditorCaption("默认不上传。开启后仅单向添加一次；之后如需修改或删除日历事件，请在系统日历中操作。")
+                                }
+                                }
                             }
                         }
                     }
+                }
+                androidx.compose.runtime.LaunchedEffect(existing?.id) {
+                    // The Dialog has its own composition. Wait until its list is
+                    // laid out before requesting focus or capturing a deep row.
+                    androidx.compose.runtime.snapshotFlow { listState.layoutInfo.totalItemsCount }.first { it >= 6 }
+                    if (BuildConfig.DEBUG && viewModel.visualQaRoute.value == "plan-editor-advanced") {
+                        listState.scrollToItem(5, -qaScrollInset)
+                    }
+                    if (existing == null) titleFocus.requestFocus()
                 }
             }
         }
@@ -216,8 +241,13 @@ fun PlanEditorScreenDialog(
 }
 
 @Composable
+private fun DenseEditorCaption(text: String, heading: Boolean = false) {
+    Text(text, fontSize = 12.sp, lineHeight = 17.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f), fontWeight = if (heading) FontWeight.SemiBold else FontWeight.Normal, modifier = Modifier.padding(horizontal = 20.dp))
+}
+
+@Composable
 fun EditorCaption(text: String, heading: Boolean = false) {
-    Text(text, fontSize = 12.sp, color = MaterialTheme.colorScheme.secondary, fontWeight = if (heading) FontWeight.SemiBold else FontWeight.Normal, modifier = Modifier.padding(horizontal = 18.dp, vertical = 8.dp))
+    Text(text, fontSize = 13.sp, lineHeight = 18.sp, color = MaterialTheme.colorScheme.secondary, fontWeight = if (heading) FontWeight.SemiBold else FontWeight.Normal, modifier = Modifier.padding(horizontal = 20.dp, vertical = 11.dp))
 }
 
 fun editorDuration(minutes: Long) = when { minutes < 60 -> "$minutes 分钟"; minutes % 60 == 0L -> "${minutes / 60} 小时"; else -> "${minutes / 60} 小时 ${minutes % 60} 分钟" }

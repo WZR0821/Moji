@@ -66,7 +66,12 @@ class MojiViewModel(application: Application) : AndroidViewModel(application) {
     fun openFocus() { showFocus.value = true; selectedTab.value = 2 }
     fun openPlans() { selectedTab.value = 0 }
     val customCategories: List<String> get() = app.settings.customCategories
-    fun addCategory(name: String) { app.settings.customCategories = (customCategories + name.trim()).filter { it.isNotBlank() }.distinct() }
+    fun addCategory(name: String) {
+        val normalized = name.trim().take(24)
+        if (normalized.isBlank()) return
+        app.settings.customCategories = (customCategories + normalized).distinct()
+        app.settings.defaultCategory = "custom:$normalized"
+    }
     fun removeCategory(name: String) {
         app.settings.customCategories = customCategories.filterNot { it == name }
         if (app.settings.defaultCategory == "custom:$name") app.settings.defaultCategory = "study"
@@ -100,6 +105,8 @@ class MojiViewModel(application: Application) : AndroidViewModel(application) {
     val defaultPlannedDurationEnabled: Boolean get() = app.settings.defaultPlannedDurationEnabled
     val defaultPlannedMinutes: Int get() = app.settings.defaultPlannedMinutes
     val backupRetentionDays: Int get() = app.settings.backupRetentionDays
+    val backupFolderName: String? get() = app.settings.backupTreeUri?.let { Uri.parse(it).lastPathSegment?.substringAfter(':')?.substringAfterLast('/') ?: "已选择文件夹" }
+    val lastBackupAt: Long get() = app.settings.lastBackupAt
     val allDayReminderHour: Int get() = app.settings.allDayReminderHour
     val paperTextureEnabled: Boolean get() = app.settings.paperTextureEnabled
     val inkMotionLevel: String get() = app.settings.inkMotionLevel
@@ -525,20 +532,39 @@ class MojiViewModel(application: Application) : AndroidViewModel(application) {
     fun setLongBreakInterval(value: Int) { app.settings.longBreakInterval = value.coerceIn(1, 8) }
     fun setAutoStartBreaks(value: Boolean) { app.settings.autoStartBreaks = value }
     fun setAutoStartFocus(value: Boolean) { app.settings.autoStartFocus = value }
-    fun setKeepScreenAwake(value: Boolean) { app.settings.keepScreenAwake = value }
-    fun setPaperTexture(value: Boolean) { app.settings.paperTextureEnabled = value }
-    fun setInkMotion(value: String) { app.settings.inkMotionLevel = value }
+    fun setKeepScreenAwake(value: Boolean) { app.settings.keepScreenAwake = value; settingsRevision.value++ }
+    fun setPaperTexture(value: Boolean) { app.settings.paperTextureEnabled = value; settingsRevision.value++ }
+    fun setInkMotion(value: String) { app.settings.inkMotionLevel = value; settingsRevision.value++ }
     fun presetButton(index: Int) = app.settings.presetButton(index)
     fun presetTitle(index: Int) = app.settings.presetTitle(index)
     fun presetCategory(index: Int) = app.settings.presetCategory(index)
     fun savePreset(index: Int, button: String, title: String, category: String) { app.settings.setPreset(index, button, title, category); updateAll(app); message.value = "预设已保存" }
     fun resetPresets() { app.settings.resetPresets(); updateAll(app); message.value = "已恢复默认预设" }
+    fun setBackupRetention(value: Int) { app.settings.backupRetentionDays = value; settingsRevision.value++ }
+    fun backupNow() = backupOperation {
+        check(BackupService.writeAutomaticBackup(app)) { "请先选择自动备份文件夹" }
+        settingsRevision.value++
+        backupNotice.value = "已写入最新备份。"
+    }
+    fun stopAutomaticBackup() = backupOperation {
+        val old = app.settings.backupTreeUri
+        app.settings.backupTreeUri = null
+        app.settings.lastBackupAt = 0L
+        if (old != null) withContext(Dispatchers.IO) {
+            runCatching { app.contentResolver.releasePersistableUriPermission(Uri.parse(old), IntentFlags.readWrite) }
+        }
+        settingsRevision.value++
+        backupNotice.value = "已停止自动备份，原文件夹中的备份仍然保留。"
+    }
     fun setBackupTree(uri: Uri) = backupOperation {
         withContext(Dispatchers.IO) {
             app.contentResolver.takePersistableUriPermission(uri, IntentFlags.readWrite)
+            val previous = app.settings.backupTreeUri
             app.settings.backupTreeUri = uri.toString()
-            check(BackupService.writeAutomaticBackup(app)) { "无法写入该文件夹" }
+            try { check(BackupService.writeAutomaticBackup(app)) { "无法写入该文件夹" } }
+            catch (error: Exception) { app.settings.backupTreeUri = previous; throw error }
         }
+        settingsRevision.value++
         backupNotice.value = "自动备份文件夹已设置"
     }
 
@@ -554,7 +580,21 @@ class MojiViewModel(application: Application) : AndroidViewModel(application) {
 
     fun prepareRestore(uri: Uri) = backupOperation {
         pendingBackup.value = null
-        val preview = withContext(Dispatchers.IO) {
+        pendingBackup.value = readBackupPreview(uri)
+    }
+
+    fun prepareRestoreFolder(uri: Uri) = backupOperation {
+        pendingBackup.value = null
+        val latest = withContext(Dispatchers.IO) {
+            val tree = androidx.documentfile.provider.DocumentFile.fromTreeUri(app, uri) ?: error("无法读取备份文件夹")
+            listOf("Moji-latest.mojibackup", "Moji-自动备份.mojibackup", "墨记-自动备份.mojibackup")
+                .firstNotNullOfOrNull { tree.findFile(it)?.takeIf { file -> file.isFile } }
+                ?: error("这个文件夹里没有 Moji 最新备份。请选择存放自动备份的文件夹。")
+        }
+        pendingBackup.value = readBackupPreview(latest.uri)
+    }
+
+    private suspend fun readBackupPreview(uri: Uri): BackupPreview = withContext(Dispatchers.IO) {
             val input = app.contentResolver.openInputStream(uri) ?: error("无法读取备份文件")
             val bytes = input.use { stream ->
                 val output = java.io.ByteArrayOutputStream()
@@ -569,8 +609,6 @@ class MojiViewModel(application: Application) : AndroidViewModel(application) {
             }
             val json = bytes.toString(Charsets.UTF_8)
             BackupPreview(json, MojiJson.decodeBackupOrSnapshot(json).first)
-        }
-        pendingBackup.value = preview
     }
 
     fun cancelRestore() { if (!backupBusy.value) pendingBackup.value = null }

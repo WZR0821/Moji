@@ -85,6 +85,7 @@ struct DashboardView: View {
             ZStack {
                 InkWashBackground()
 
+                ScrollViewReader { proxy in
                 List {
                     if showsRestorePrompt {
                         restorePrompt
@@ -200,8 +201,18 @@ struct DashboardView: View {
                     .spring(response: 0.42, dampingFraction: 0.84),
                     value: pendingItems.map(\.id)
                 )
+#if DEBUG
+                .onChange(of: expandedItemID) { _, id in
+                    if ProcessInfo.processInfo.environment["MOJI_QA_SCENARIO"] == "workflow-plan-expanded-bottom", let id {
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { proxy.scrollTo(id, anchor: .bottom) }
+                    }
+                }
+#endif
+                }
             }
             .navigationTitle("计划")
+            .toolbarBackground(Color.planBackground, for: .navigationBar)
+            .toolbarBackground(.visible, for: .navigationBar)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
                     Button {
@@ -624,12 +635,14 @@ struct DashboardView: View {
             didRunQAScenario = true
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
                 switch route {
-                case "workflow-library", "workflow-templates": showsLibrary = true
-                case "workflow-plan-editor":
-                    if let item = store.checkInItems.first(where: { $0.title == "整理 1.5.0 发布说明" }) { openEditor(for: item) }
-                case "workflow-plan-expanded": expandedItemID = store.checkInItems.first(where: { $0.title == "整理 1.5.0 发布说明" })?.id
+                case "workflow-library", "workflow-templates", "workflow-library-batch": showsLibrary = true
+                case "workflow-plan-new": presentNewEditor(kind: .planned)
+                case "workflow-calendar-month", "workflow-calendar-week", "workflow-calendar-day", "workflow-calendar-jump": showsCalendar = true
+                case "workflow-plan-editor", "workflow-plan-editor-advanced":
+                    if let item = store.checkInItems.first(where: { $0.title == "整理 1.5.1 发布说明" }) { openEditor(for: item) }
+                case "workflow-plan-expanded", "workflow-plan-expanded-bottom", "workflow-plan-inline": expandedItemID = store.checkInItems.first(where: { $0.title == "整理 1.5.1 发布说明" })?.id
                 case "workflow-plan-completed": showsCompleted = true
-                case "workflow-plan-copy": copyingItem = store.checkInItems.first(where: { $0.title == "整理 1.5.0 发布说明" })
+                case "workflow-plan-copy": copyingItem = store.checkInItems.first(where: { $0.title == "整理 1.5.1 发布说明" })
                 default: break
                 }
             }
@@ -973,6 +986,9 @@ private struct MinimalPlanRow: View {
         .sensoryFeedback(.success, trigger: completionFeedback)
         .onAppear {
             synchronizeCompletionInk(isFinished)
+#if DEBUG
+            if isExpanded, ProcessInfo.processInfo.environment["MOJI_QA_SCENARIO"] == "workflow-plan-inline", item.title == "整理 1.5.1 发布说明" { beginInlineEditing() }
+#endif
         }
         .onChange(of: isFinished) { _, newValue in
             synchronizeCompletionInk(newValue)
@@ -981,6 +997,9 @@ private struct MinimalPlanRow: View {
             if !expanded {
                 cancelInlineEditing()
             }
+#if DEBUG
+            if expanded, ProcessInfo.processInfo.environment["MOJI_QA_SCENARIO"] == "workflow-plan-inline", item.title == "整理 1.5.1 发布说明" { beginInlineEditing() }
+#endif
         }
     }
 

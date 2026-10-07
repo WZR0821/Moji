@@ -76,7 +76,14 @@ struct PlanLibraryView: View {
             .sheet(item: $copying) { PlanCopySheet(store: store, item: $0.item) }
             .onChange(of: mode) { _, _ in selected.removeAll(); selecting = false }
 #if DEBUG
-            .onAppear { if ProcessInfo.processInfo.environment["MOJI_QA_SCENARIO"] == "workflow-templates" { mode = 1 } }
+            .onAppear {
+                let scenario = ProcessInfo.processInfo.environment["MOJI_QA_SCENARIO"]
+                if scenario == "workflow-templates" { mode = 1 }
+                if scenario == "workflow-library-batch" {
+                    selected = Set(plans.prefix(2).map(\.id)); selecting = true
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { showBatch = true }
+                }
+            }
 #endif
         }
     }
@@ -324,8 +331,18 @@ struct WeeklyGoalEditor: View {
             Form {
                 Section("\(PlanWorkflow.weekKey(week)) 起的一周") {
                     Picker("目标范围", selection: $category) { Text("全部类型").tag("all"); ForEach(workflowCategories(goal?.category)) { Text($0.displayName).tag($0.rawValue) } }
-                    TextField("完成计划（项，可选）", text: $count).keyboardType(.numberPad)
-                    TextField("实际专注（分钟，可选）", text: $minutes).keyboardType(.numberPad)
+                    HStack {
+                        Text("完成计划（项）")
+                        Spacer()
+                        TextField("可选", text: $count).keyboardType(.numberPad)
+                            .multilineTextAlignment(.trailing).frame(width: 100)
+                    }
+                    HStack {
+                        Text("实际专注（分钟）")
+                        Spacer()
+                        TextField("可选", text: $minutes).keyboardType(.numberPad)
+                            .multilineTextAlignment(.trailing).frame(width: 100)
+                    }
                 }
                 Section { Text("至少填写一项正整数目标（1–100000）。专注目标仅统计真实计时，不把勾选完成换算成分钟。").font(.footnote).foregroundStyle(.secondary) }
                 if let goal { Section { Button("删除目标", role: .destructive) { store.deleteWeeklyGoal(goal.id); dismiss() } } }

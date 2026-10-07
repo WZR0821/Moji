@@ -20,10 +20,10 @@ val scheduleOptions = listOf("allDay" to "全天", "morning" to "上午", "after
 val repeatOptions = listOf("never" to "不重复", "daily" to "每天", "weekdays" to "工作日", "weekly" to "每周", "monthly" to "每月", "customWeekdays" to "自定义星期")
 
 @Composable
-fun FormChoiceRow(title: String, value: String, options: List<Pair<String, String>>, showsValueIcon: Boolean = false, onSelect: (String) -> Unit) {
+fun FormChoiceRow(title: String, value: String, options: List<Pair<String, String>>, showsValueIcon: Boolean = false, minHeight: Int = 44, onSelect: (String) -> Unit) {
     var open by remember { mutableStateOf(false) }
     Box {
-        Row(Modifier.fillMaxWidth().heightIn(min = 44.dp).clickable { open = true }.padding(horizontal = 20.dp), verticalAlignment = Alignment.CenterVertically) {
+        Row(Modifier.fillMaxWidth().heightIn(min = minHeight.dp).clickable { open = true }.padding(horizontal = 20.dp), verticalAlignment = Alignment.CenterVertically) {
             Text(title, fontSize = 17.sp, modifier = Modifier.weight(1f))
             val glyph = when {
                 showsValueIcon && value != "all" -> when (value) { "work" -> MojiIcon.Work; "study" -> MojiIcon.Book; else -> MojiIcon.Tag }
@@ -32,7 +32,15 @@ fun FormChoiceRow(title: String, value: String, options: List<Pair<String, Strin
             }
             if (glyph != null) { MojiLineIcon(glyph, 23.dp); Spacer(Modifier.width(4.dp)) }
             Text(options.firstOrNull { it.first == value }?.second ?: categoryName(value), fontSize = 17.sp, maxLines = 1, modifier = Modifier.widthIn(max = 180.dp))
-            Text("⌃\n⌄", fontSize = 9.sp, lineHeight = 8.sp, modifier = Modifier.padding(start = 8.dp))
+            val chevronColor = MaterialTheme.colorScheme.onSurface
+            androidx.compose.foundation.Canvas(Modifier.padding(start = 8.dp).size(10.dp, 16.dp)) {
+                val d = density
+                val path = androidx.compose.ui.graphics.Path().apply {
+                    moveTo(1*d, 5*d); lineTo(5*d, 1*d); lineTo(9*d, 5*d)
+                    moveTo(1*d, 11*d); lineTo(5*d, 15*d); lineTo(9*d, 11*d)
+                }
+                drawPath(path, chevronColor.copy(alpha = 0.65f), style = androidx.compose.ui.graphics.drawscope.Stroke(1.7f*d, cap = androidx.compose.ui.graphics.StrokeCap.Round, join = androidx.compose.ui.graphics.StrokeJoin.Round))
+            }
         }
         DropdownMenu(open, { open = false }) {
             options.forEach { (raw, label) ->

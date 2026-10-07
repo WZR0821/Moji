@@ -10,6 +10,28 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class LocalInteractionTest {
+    @Test fun calendarPairsCompletedPlanWithItsExactRecordWithoutDuplicate() {
+        val item = CheckInItem(id = "p", title = "计划", scheduledStart = "2026-10-06T00:00:00Z", createdAt = "2026-10-06T00:00:00Z", status = "completed", actualStartDate = "2026-10-07T01:00:00+00:00", actualEndDate = "2026-10-07T01:45:00Z")
+        val exact = TimeRecord(id = "r", title = "计划", startDate = "2026-10-07T01:00:00Z", endDate = "2026-10-07T01:45:00Z", checkInItemID = "p")
+        val extra = exact.copy(id = "extra", startDate = "2026-10-07T03:00:00Z", endDate = "2026-10-07T03:30:00Z")
+        val calendar = LocalCalendar(PlanSnapshot(checkInItems = listOf(item), records = listOf(exact, extra)))
+        val entries = calendar.entriesOn(LocalDate.parse("2026-10-07"), ZoneId.of("UTC"))
+        assertEquals(2, entries.size)
+        assertEquals("r", entries.first { it.plan != null }.record?.id)
+        assertTrue(calendar.entriesOn(LocalDate.parse("2026-10-06"), ZoneId.of("UTC")).isEmpty())
+    }
+    @Test fun untimedCalendarRecordStillAppearsOnItsStartDay() {
+        val record = TimeRecord(id = "untimed", title = "散步", startDate = "2026-10-07T00:00:00Z", endDate = "2026-10-07T00:00:00Z", scheduleKind = "allDay")
+        val entries = LocalCalendar(PlanSnapshot(records = listOf(record))).entriesOn(LocalDate.parse("2026-10-07"), ZoneId.of("UTC"))
+        assertEquals(1, entries.size)
+        assertEquals("allDay", entries.single().schedule)
+    }
+    @Test fun unlimitedBackupRetentionSurvivesNormalization() {
+        assertEquals(0, LocalRules.backupRetentionDays(0))
+        assertEquals(180, LocalRules.backupRetentionDays(180))
+        assertEquals(7, LocalRules.backupRetentionDays(-1))
+        assertEquals(3650, LocalRules.backupRetentionDays(99999))
+    }
     private val now = Instant.parse("2026-09-14T09:00:00Z")
     private val utc = ZoneId.of("UTC")
     private fun plan(id: String = "p", rule: String = "daily") = CheckInItem(

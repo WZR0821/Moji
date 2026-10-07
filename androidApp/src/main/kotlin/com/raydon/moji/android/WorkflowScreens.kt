@@ -55,7 +55,7 @@ fun PlanCopyDialog(item: CheckInItem, viewModel: MojiViewModel, onDismiss: () ->
     var day by remember { mutableStateOf(LocalDate.now()) }
     val pick = rememberDatePicker { day = it }
     WorkflowDialog("复制计划", onDismiss, trailing = "复制", onSave = { viewModel.copyPlan(item.id, day); onDismiss() }) {
-        LazyColumn(contentPadding = PaddingValues(top = 48.dp, bottom = 20.dp), verticalArrangement = Arrangement.spacedBy(24.dp)) {
+        LazyColumn(contentPadding = PaddingValues(top = 45.dp, bottom = 20.dp), verticalArrangement = Arrangement.spacedBy(24.dp)) {
             item { FormSection { FormRow(item.title); FormSeparator(); FormDateRow("目标日期", day) { pick(day) } } }
             item { WorkflowInfoSection("复制为独立的新计划，保留类型、说明、时段和预计投入，不复制完成状态、计时记录或重复序列。") }
         }
@@ -91,8 +91,13 @@ fun PlanLibraryDialog(viewModel: MojiViewModel, onDismiss: () -> Unit) {
         item.kind == "planned" && (query.isBlank() || item.title.contains(query, true) || item.note.contains(query, true)) &&
             (category == "all" || item.category == category) && matchesStatus && matchesPeriod
     }.sortedByDescending { it.scheduledStart }
+    LaunchedEffect(Unit) {
+        if (BuildConfig.DEBUG && viewModel.visualQaRoute.value == "library-batch") {
+            selected = plans.take(2).map { it.id }.toSet(); selecting = true; batch = true
+        }
+    }
     WorkflowDialog("计划库", onDismiss, leading = "", onSave = onDismiss) {
-        LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(top = 48.dp, bottom = 20.dp), verticalArrangement = Arrangement.spacedBy(24.dp)) {
+        LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(top = 45.dp, bottom = 20.dp), verticalArrangement = Arrangement.spacedBy(24.dp)) {
             item {
                 FormSection {
                     FormSegmentedControl(listOf("plans" to "全部计划", "templates" to "计划模板"), mode) { mode = it; selected = emptySet(); selecting = false }
@@ -111,7 +116,7 @@ fun PlanLibraryDialog(viewModel: MojiViewModel, onDismiss: () -> Unit) {
                     }
                 }
                 item {
-                    FormSection {
+                    FormSection(topPadding = 10) {
                         Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {
                             Text("${plans.size} 个计划", fontSize = 15.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f), modifier = Modifier.weight(1f))
                             TextButton(onClick = { selecting = !selecting; selected = emptySet() }) { Text(if (selecting) "取消选择" else "批量选择") }
@@ -145,17 +150,17 @@ fun PlanLibraryDialog(viewModel: MojiViewModel, onDismiss: () -> Unit) {
                     }
                 }
             } else {
-                item { FormSection { FormDateRow("添加到", templateDay) { pickTemplate(templateDay) } } }
+                item { FormSection(topPadding = 10) { FormDateRow("添加到", templateDay) { pickTemplate(templateDay) } } }
                 item {
                     FormSection("计划模板") {
                         if (snapshot.planTemplates.isEmpty()) Text("在计划的更多菜单中选择“保存为模板”", fontSize = 15.sp, modifier = Modifier.padding(16.dp), color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f))
                         snapshot.planTemplates.filter { query.isBlank() || it.title.contains(query, true) || it.note.contains(query, true) }.forEach { template ->
-                            Column(Modifier.padding(horizontal = 16.dp, vertical = 12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Column(Modifier.padding(horizontal = 20.dp, vertical = 11.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                                 Text(template.title, fontSize = 17.sp)
                                 Text("${categoryName(template.category)} · ${scheduleOptions.first { it.first == template.scheduleKind }.second}${if (template.plannedDurationEnabled) " · ${template.plannedMinutes} 分钟" else ""}", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f))
                                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                                    TextButton(onClick = { viewModel.applyTemplate(template.id, templateDay) }) { Text("添加计划") }
-                                    TextButton(onClick = { viewModel.deleteTemplate(template.id) }) { Text("删除", color = mojiDestructive) }
+                                    Text("添加计划", fontSize = 17.sp, modifier = Modifier.heightIn(min = 22.dp).clickable { viewModel.applyTemplate(template.id, templateDay) })
+                                    Text("删除", fontSize = 17.sp, color = mojiDestructive, modifier = Modifier.heightIn(min = 22.dp).clickable { viewModel.deleteTemplate(template.id) })
                                 }
                             }
                             FormSeparator()
@@ -337,8 +342,8 @@ fun WeeklyGoalDialog(viewModel: MojiViewModel, week: LocalDate, goal: WeeklyGoal
         LazyColumn(contentPadding = PaddingValues(vertical = 20.dp), verticalArrangement = Arrangement.spacedBy(24.dp)) {
             item { FormSection("${workflowWeek(week)} 起的一周") {
                 FormChoiceRow("目标范围", category, listOf("all" to "全部类型") + categoryChoices(viewModel, goal?.category)) { category = it }
-                FormSeparator(); FormTextField(count, { count = it }, "完成计划（项，可选）", keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number))
-                FormSeparator(); FormTextField(minutes, { minutes = it }, "实际专注（分钟，可选）", keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number))
+                FormSeparator(); FormLabelledNumberField("完成计划（项）", count) { count = it }
+                FormSeparator(); FormLabelledNumberField("实际专注（分钟）", minutes) { minutes = it }
             } }
             item { WorkflowInfoSection("至少填写一项正整数目标（1–100000）。专注目标仅统计真实计时，不把勾选完成换算成分钟。") }
             if (goal != null) item { FormSection { TextButton(onClick = { viewModel.deleteWeeklyGoal(goal.id); onDismiss() }) { Text("删除目标", color = mojiDestructive) } } }
@@ -352,8 +357,8 @@ fun WeeklyReflectionDialog(viewModel: MojiViewModel, week: LocalDate, reflection
     var nextFocus by remember { mutableStateOf(reflection?.nextFocus ?: "") }
     WorkflowDialog("周复盘", onDismiss, trailing = "保存", onSave = { viewModel.saveWeeklyReflection(WeeklyReflection(reflection?.id ?: UUID.randomUUID().toString(), workflowWeek(week).toString(), note, nextFocus, Instant.now().toString())); onDismiss() }) {
         LazyColumn(contentPadding = PaddingValues(vertical = 20.dp), verticalArrangement = Arrangement.spacedBy(24.dp)) {
-            item { FormSection("本周复盘") { FormTextField(note, { note = it }, "做得好的事、遇到的问题", singleLine = false, minHeight = 124) } }
-            item { FormSection("下周关注") { FormTextField(nextFocus, { nextFocus = it }, "给下周留下一句提醒", singleLine = false, minHeight = 80) } }
+            item { FormSection("本周复盘") { FormTextField(note, { note = it }, "做得好的事、遇到的问题", singleLine = false, minHeight = 132) } }
+            item { FormSection("下周关注") { FormTextField(nextFocus, { nextFocus = it }, "给下周留下一句提醒", singleLine = false, minHeight = 88) } }
         }
     }
 }

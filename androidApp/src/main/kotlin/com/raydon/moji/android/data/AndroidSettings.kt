@@ -104,11 +104,14 @@ class AndroidSettings(context: Context) {
         set(value) { prefs.edit().putString("backupTreeUri", value).apply() }
     var backupRetentionDays: Int
         get() = prefs.getInt("backupRetentionDays", 180)
-        set(value) { prefs.edit().putInt("backupRetentionDays", value.coerceIn(7, 3650)).apply() }
+        set(value) { prefs.edit().putInt("backupRetentionDays", LocalRules.backupRetentionDays(value)).apply() }
+    var lastBackupAt: Long
+        get() = prefs.getLong("lastBackupAt", 0L)
+        set(value) { prefs.edit().putLong("lastBackupAt", value).apply() }
 
-    fun presetButton(index: Int): String = prefs.getString("preset.$index.button", listOf("今日学习", "处理工作", "整理备忘").getOrElse(index) { "快速添加" }) ?: "快速添加"
-    fun presetTitle(index: Int): String = prefs.getString("preset.$index.title", listOf("今日学习", "处理重要工作", "整理今日备忘").getOrElse(index) { "新计划" }) ?: "新计划"
-    fun presetCategory(index: Int): String = prefs.getString("preset.$index.category", if (index == 1) "work" else "study") ?: "study"
+    fun presetButton(index: Int): String = prefs.getString("preset.$index.button", listOf("待办", "学习", "工作").getOrElse(index) { "快速添加" }) ?: "快速添加"
+    fun presetTitle(index: Int): String = prefs.getString("preset.$index.title", listOf("新计划", "学习计划", "工作计划").getOrElse(index) { "新计划" }) ?: "新计划"
+    fun presetCategory(index: Int): String = prefs.getString("preset.$index.category", listOf("", "study", "work").getOrElse(index) { "" }) ?: ""
     fun setPreset(index: Int, button: String, title: String, category: String) {
         prefs.edit().putString("preset.$index.button", button).putString("preset.$index.title", title).putString("preset.$index.category", category).apply()
     }
@@ -163,7 +166,7 @@ class AndroidSettings(context: Context) {
         defaultCategory = defaultCategory,
         customCategories = MojiJson.codec.encodeToString(customCategories),
         quickPlanPresets = MojiJson.codec.encodeToString((0..2).map { index ->
-            QuickPlanPresetArchive("android-$index", presetButton(index), presetTitle(index), presetCategory(index))
+            QuickPlanPresetArchive("android-$index", presetButton(index), presetTitle(index), presetCategory(index).takeIf { it.isNotBlank() })
         }),
         defaultScheduleKind = defaultScheduleKind,
         defaultPlannedDurationEnabled = defaultPlannedDurationEnabled,
@@ -183,7 +186,7 @@ class AndroidSettings(context: Context) {
         if (presets != null) {
             resetPresets()
             presets.take(3).forEachIndexed { index, preset ->
-                setPreset(index, preset.buttonTitle, preset.planTitle, preset.category ?: archive.defaultCategory ?: "study")
+                setPreset(index, preset.buttonTitle, preset.planTitle, preset.category ?: "")
             }
         }
         focusMinutes = archive.focusMinutes

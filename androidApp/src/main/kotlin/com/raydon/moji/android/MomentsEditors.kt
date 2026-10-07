@@ -12,6 +12,11 @@ import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.background
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -45,7 +50,7 @@ fun CountdownEditorScreenDialog(existing: CountdownEvent?, viewModel: MojiViewMo
     var includesToday by remember(existing?.id) { mutableStateOf(existing?.includesToday ?: false) }
     var pinned by remember(existing?.id) { mutableStateOf(existing?.isPinned ?: false) }
     var calendarSync by remember(existing?.id) { mutableStateOf(existing?.calendarSyncEnabled ?: false) }
-    var advanced by remember { mutableStateOf(false) }
+    var advanced by remember { mutableStateOf(BuildConfig.DEBUG && viewModel.visualQaRoute.value == "moment-advanced") }
     val picker = rememberDatePicker { date = it }
     val summary = buildList { add(countdownRepeatLabel(repeat)); if (includesToday) add("含当天"); if (pinned) add("重点"); if (calendarSync || existing?.calendarEventIdentifier != null) add("日历") }.joinToString(" · ")
     val occurrence = com.raydon.moji.core.CountdownPolicy.nextOccurrenceDate(date.toKotlinDate(), repeat, LocalDate.now().toKotlinDate())
@@ -54,18 +59,18 @@ fun CountdownEditorScreenDialog(existing: CountdownEvent?, viewModel: MojiViewMo
         MojiScreen {
             Column(Modifier.fillMaxSize()) {
                 MojiSheetBar(if (advanced) "更多设置" else if (existing != null) "编辑这个日子" else if (context == "past") "添加纪念日" else "添加倒数日",
-                    if (advanced) "返回" else "取消", if (advanced) "" else "保存", { if (advanced) advanced = false else onDismiss() }, {
+                    if (advanced) "编辑这个日子" else "取消", if (advanced) "" else "保存", { if (advanced) advanced = false else onDismiss() }, {
                         viewModel.saveCountdown(draftId, title, date, repeat, includesToday, pinned, calendarSync,
                             existing?.symbolName ?: if (context == "past") "seal" else "hourglass", existing?.colorName ?: "vermilion", onSaved = onDismiss)
-                    }, title.isNotBlank())
-                LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(top = 20.dp, bottom = 36.dp), verticalArrangement = Arrangement.spacedBy(24.dp)) {
+                    }, title.isNotBlank(), leadingIsBack = advanced)
+                LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(top = 18.dp, bottom = 36.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     if (!advanced) {
                         item { FormSection {
                             FormTextField(title, { title = it }, "这个日子叫什么？"); FormSeparator()
                             FormDateRow("日期", date) { picker(date) }
                         } }
                         item { FormSection {
-                            Row(Modifier.fillMaxWidth().clickable { advanced = true }.padding(horizontal = 18.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Row(Modifier.fillMaxWidth().clickable { advanced = true }.padding(horizontal = 20.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
                                 Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) { Text("更多设置", fontSize = 17.sp); Text(summary, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f)) }
                                 MojiLineIcon(MojiIcon.ChevronRight, 17.dp, MaterialTheme.colorScheme.onSurface.copy(alpha = 0.28f))
                             }
@@ -76,10 +81,10 @@ fun CountdownEditorScreenDialog(existing: CountdownEvent?, viewModel: MojiViewMo
                             FormSeparator(); FormToggle("包含当天（+1）", includesToday, { includesToday = it })
                             FormSeparator(); FormToggle("重点标记", pinned, { pinned = it })
                         } }
-                        item { FormSection("计日预览", "未来日期自动倒数，过去日期自动正数；重复纪念日按下一次发生日期倒数。") {
+                        item { Column { androidx.compose.foundation.layout.Spacer(Modifier.height(18.dp)); FormSection("计日预览", "未来日期自动倒数，过去日期自动正数；重复纪念日按下一次发生日期倒数。") {
                             FormRow("方式", if (preview == 0) "今天" else if (preview < 0) "正数日" else "倒数日"); FormSeparator()
                             FormRow("显示", if (preview == 0) "今天" else if (preview < 0) "已过 ${kotlin.math.abs(preview)} 天" else "还有 $preview 天")
-                        } }
+                        } } }
                         item { FormSection(footer = if (existing?.calendarEventIdentifier == null) "保存时写入为全天事件，并沿用上方重复规则。" else "日历为单向添加；此处后续修改不会覆盖日历中的事件。") {
                             if (existing?.calendarEventIdentifier == null) FormToggle("写入系统日历", calendarSync, { calendarSync = it }) else FormRow("已写入系统日历")
                         } }
@@ -94,25 +99,21 @@ fun CountdownEditorScreenDialog(existing: CountdownEvent?, viewModel: MojiViewMo
 fun PomodoroDurationDialog(phase: String, currentMinutes: Int, viewModel: MojiViewModel, onDismiss: () -> Unit) {
     val maximum = when (phase) { "shortBreak" -> 30; "longBreak" -> 60; else -> 120 }
     var minutes by remember(phase) { mutableIntStateOf(currentMinutes) }
+    var minuteText by remember(phase) { mutableStateOf(currentMinutes.toString()) }
     Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false)) {
-        ConfigureDialogWindow()
-        Box(Modifier.fillMaxSize().safeDrawingPadding().imePadding(), contentAlignment = Alignment.BottomCenter) {
-            Surface(
-                modifier = Modifier.fillMaxWidth().navigationBarsPadding(),
-                shape = androidx.compose.foundation.shape.RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp),
-                color = MaterialTheme.colorScheme.background,
-            ) {
-                Column(Modifier.padding(top = 6.dp, bottom = 20.dp)) {
-                MojiSheetBar("${phaseName(phase)}时长", "取消", "保存", onDismiss, { viewModel.setPhaseMinutes(phase, minutes); onDismiss() })
-                Text("选择一个常用时长，或使用下方步进器微调。", modifier = Modifier.padding(horizontal = 22.dp, vertical = 8.dp), color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.48f), fontSize = 13.sp)
-                DurationPills(phasePresets(phase)) { minutes = it }
-                FormSection {
-                    FormStepper("时长", "$minutes 分钟", { minutes = (minutes - 1).coerceAtLeast(1) }, { minutes = (minutes + 1).coerceAtMost(maximum) })
+        MojiScreen(sheetFraction = 0.532f) {
+            Column(Modifier.fillMaxSize()) {
+                Box(Modifier.fillMaxWidth().height(14.dp), contentAlignment = Alignment.Center) {
+                    Box(Modifier.width(36.dp).height(5.dp).background(MaterialTheme.colorScheme.onSurface.copy(alpha = 0.23f), androidx.compose.foundation.shape.CircleShape))
                 }
-                Row(Modifier.padding(horizontal = 22.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Text("当前选择", color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.48f), modifier = Modifier.weight(1f))
-                    Text("$minutes 分钟", fontWeight = FontWeight.SemiBold, fontSize = 18.sp)
-                }
+                MojiSheetBar("${phaseName(phase)}时长", "取消", "保存", onDismiss, { viewModel.setPhaseMinutes(phase, (minuteText.toIntOrNull() ?: minutes).coerceIn(1, maximum)); onDismiss() })
+                LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(top = 14.dp, bottom = 30.dp), verticalArrangement = Arrangement.spacedBy(28.dp)) {
+                    item { FormSection("自定义分钟数", "可设置 1–$maximum 分钟。") {
+                        FormStepper(phaseName(phase), "$minutes 分钟", { minutes = (minutes - 1).coerceAtLeast(1); minuteText = minutes.toString() }, { minutes = (minutes + 1).coerceAtMost(maximum); minuteText = minutes.toString() }, valueStyle = MaterialTheme.typography.titleMedium.copy(fontSize = 20.sp, fontWeight = FontWeight.Medium, color = MaterialTheme.colorScheme.onSurface))
+                        FormSeparator()
+                        FormTextField(minuteText, { raw -> minuteText = raw.filter(Char::isDigit).take(3); minuteText.toIntOrNull()?.let { minutes = it.coerceIn(1, maximum) } }, "分钟", keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number))
+                    } }
+                    item { FormSection("常用时长") { DurationPills(phasePresets(phase)) { minutes = it; minuteText = it.toString() } } }
                 }
             }
         }

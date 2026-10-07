@@ -76,7 +76,7 @@ fun MomentsScreen(viewModel: MojiViewModel) {
     var didQA by remember { mutableStateOf(false) }
     androidx.compose.runtime.LaunchedEffect(qaRoute, snapshot.countdowns.size) { if (!didQA && qaRoute.isNotEmpty() && snapshot.countdowns.isNotEmpty()) {
         didQA = true
-        when (qaRoute) { "moment-editor" -> { editing = snapshot.countdowns.first(); showEditor = true }; "moment-past" -> scope = "past" }
+        when (qaRoute) { "moment-editor", "moment-advanced" -> { editing = snapshot.countdowns.first(); showEditor = true }; "moment-past" -> scope = "past" }
     } }
     val today = LocalDate.now()
     val zone = ZoneId.systemDefault()
@@ -237,7 +237,7 @@ private fun PomodoroPanel(viewModel: MojiViewModel, availableHeight: androidx.co
     val canKeep = state.phase == "focus" && (state.accumulatedSeconds + if (state.running) (state.remainingSeconds - remaining).coerceAtLeast(0) else 0) > 0
     var planMenu by remember { mutableStateOf(false) }
     var endDialog by remember { mutableStateOf(false) }
-    var durationPhase by remember { mutableStateOf<String?>(null) }
+    var durationPhase by remember { mutableStateOf(if (BuildConfig.DEBUG && viewModel.visualQaRoute.value == "focus-duration") "focus" else null) }
     var switchPhase by remember { mutableStateOf<String?>(null) }
     Column(
         Modifier.fillMaxWidth().height(availableHeight).padding(horizontal = 30.dp),

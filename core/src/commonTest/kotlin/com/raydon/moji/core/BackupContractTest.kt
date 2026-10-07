@@ -71,4 +71,11 @@ class BackupContractTest {
         val preferences = PlanPreferencesArchive(customCategories = "[\"阅读\"]", quickPlanPresets = """[{"id":"general","buttonTitle":"读书","planTitle":"每日阅读","category":"custom:阅读"}]""")
         assertEquals(preferences, MojiJson.decodeBackupOrSnapshot(raw(archive().copy(preferences = preferences))).second)
     }
+    @Test fun followDefaultPresetKeepsANullCategory() {
+        val preferences = PlanPreferencesArchive(defaultCategory = "work", quickPlanPresets = """[{"id":"general","buttonTitle":"待办","planTitle":"新计划","category":null}]""")
+        val restored = MojiJson.decodeBackupOrSnapshot(raw(archive().copy(preferences = preferences))).second!!
+        val presets = MojiJson.codec.decodeFromString<List<QuickPlanPresetArchive>>(restored.quickPlanPresets!!)
+        assertNull(presets.single().category)
+        assertEquals("work", restored.defaultCategory)
+    }
 }

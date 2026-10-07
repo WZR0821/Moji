@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.fillMaxHeight
@@ -352,11 +353,11 @@ fun RecordEditorScreenDialog(existing: TimeRecord?, viewModel: MojiViewModel, on
                 MojiSheetBar(if (existing == null) "添加记录" else "编辑记录", "取消", "保存", onDismiss, {
                     viewModel.saveRecord(draftId, title, category, date, start, end, note, endDate, schedule, onSaved = onDismiss)
                 }, title.isNotBlank() && (schedule != "exactTime" || endDate.atTime(end).isAfter(date.atTime(start))))
-                LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(top = 24.dp, bottom = 36.dp), verticalArrangement = Arrangement.spacedBy(28.dp)) {
+                LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(top = 27.dp, bottom = 36.dp), verticalArrangement = Arrangement.spacedBy(19.dp)) {
                     item {
                         FormSection("标题") { FormTextField(title, { title = it }, "例如：复习高等数学") }
                     }
-                    item { FormSection("详细说明（可选）") { FormTextField(note, { note = it }, "补充这段记录的细节", singleLine = false, minHeight = 148) } }
+                    item { FormSection("详细说明（可选）") { FormTextField(note, { note = it }, "补充这段记录的细节", singleLine = false, minHeight = 140) } }
                     item { FormSection("类型") { CategoryFields(category, viewModel) { category = it } }
                     }
                     item {
@@ -375,9 +376,9 @@ fun RecordEditorScreenDialog(existing: TimeRecord?, viewModel: MojiViewModel, on
                             }
                         }
                     }
-                    if (existing != null) item { FormSection(footer = if (existing.checkInItemID != null) "若记录关联计划，删除后对应计划会恢复为未完成。" else null) {
+                    if (existing != null) item { Column(Modifier.offset(y = (-7).dp)) { FormSection(footer = if (existing.checkInItemID != null) "若记录关联计划，删除后对应计划会恢复为未完成。" else null) {
                         Text("删除这条记录", color = mojiDestructive, fontSize = 17.sp, modifier = Modifier.fillMaxWidth().clickable { deleting = true }.padding(horizontal = 20.dp, vertical = 11.dp))
-                    } }
+                    } } }
                 }
             }
         }

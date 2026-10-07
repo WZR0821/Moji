@@ -41,6 +41,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.draw.alpha
@@ -62,19 +63,22 @@ val mojiDestructive: Color
 fun FormSection(
     title: String? = null,
     footer: String? = null,
+    titleLineHeight: Int = 22,
+    topPadding: Int = 0,
     content: @Composable ColumnScope.() -> Unit,
 ) {
     val scheme = MaterialTheme.colorScheme
     val dark = scheme.background.luminance() < 0.5f
     // SwiftUI's inset-grouped Form is a distinct surface from an ink card.
     val formSurface = if (dark) Color(0xFF2C2C2E) else Color.White
-    Column(Modifier.fillMaxWidth()) {
+    Column(Modifier.fillMaxWidth().padding(top = topPadding.dp)) {
         if (title != null) {
             Text(
                 title,
                 modifier = Modifier.padding(start = 40.dp, bottom = 8.dp),
                 color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.48f),
                 fontSize = 13.sp,
+                lineHeight = titleLineHeight.sp,
             )
         }
         Surface(
@@ -91,7 +95,7 @@ fun FormSection(
                 footer,
                 modifier = Modifier.padding(start = 40.dp, end = 40.dp, top = 7.dp),
                 color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.46f),
-                fontSize = 12.sp,
+                fontSize = 13.sp,
                 lineHeight = 17.sp,
             )
         }
@@ -138,18 +142,31 @@ fun FormRow(
 }
 
 @Composable
+fun FormLabelledNumberField(title: String, value: String, onChange: (String) -> Unit) {
+    Row(Modifier.fillMaxWidth().height(44.dp).padding(horizontal = 20.dp), verticalAlignment = Alignment.CenterVertically) {
+        Text(title, fontSize = 17.sp, modifier = Modifier.weight(1f))
+        androidx.compose.foundation.text.BasicTextField(value, onChange, Modifier.width(100.dp), singleLine = true,
+            keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(keyboardType = androidx.compose.ui.text.input.KeyboardType.Number),
+            textStyle = MaterialTheme.typography.bodyLarge.copy(color = MaterialTheme.colorScheme.onSurface, textAlign = androidx.compose.ui.text.style.TextAlign.End),
+            cursorBrush = androidx.compose.ui.graphics.SolidColor(MaterialTheme.colorScheme.onSurface),
+            decorationBox = { inner -> Box(contentAlignment = Alignment.CenterEnd) { if (value.isEmpty()) Text("可选", fontSize = 17.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.28f)); inner() } })
+    }
+}
+
+@Composable
 fun FormToggle(
     title: String,
     checked: Boolean,
     onCheckedChange: (Boolean) -> Unit,
     enabled: Boolean = true,
+    minHeight: Int = 44,
 ) {
     Row(
-        Modifier.fillMaxWidth().heightIn(min = 44.dp).padding(horizontal = 20.dp),
+        Modifier.fillMaxWidth().heightIn(min = minHeight.dp).padding(horizontal = 20.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Text(title, modifier = Modifier.weight(1f), fontSize = 17.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = if (enabled) 1f else 0.38f))
-        Box(Modifier.size(51.dp, 31.dp).background(if (checked) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.14f), CircleShape)
+        Box(Modifier.size(51.dp, 31.dp).background(if (checked) MaterialTheme.colorScheme.primary else if (MaterialTheme.colorScheme.background.luminance() < 0.5f) Color(0xFF39393D) else Color(0xFFE9E9EB), CircleShape)
             .alpha(if (enabled) 1f else 0.4f)
             .toggleable(checked, enabled = enabled, role = androidx.compose.ui.semantics.Role.Switch, onValueChange = onCheckedChange)
             .padding(2.dp), contentAlignment = if (checked) Alignment.CenterEnd else Alignment.CenterStart) {
@@ -167,12 +184,13 @@ fun FormTextField(
     minHeight: Int = 44,
     keyboardOptions: KeyboardOptions = KeyboardOptions.Default,
     textStyle: TextStyle = MaterialTheme.typography.bodyLarge.copy(color = MaterialTheme.colorScheme.onSurface),
+    focusRequester: androidx.compose.ui.focus.FocusRequester? = null,
 ) {
     androidx.compose.foundation.text.BasicTextField(
                             cursorBrush = androidx.compose.ui.graphics.SolidColor(MaterialTheme.colorScheme.onSurface),
         value = value,
         onValueChange = onValueChange,
-        modifier = Modifier.fillMaxWidth().heightIn(min = minHeight.dp).padding(horizontal = 20.dp, vertical = if (singleLine) 10.dp else 13.dp),
+        modifier = Modifier.fillMaxWidth().heightIn(min = minHeight.dp).then(if (focusRequester != null) Modifier.focusRequester(focusRequester) else Modifier).padding(horizontal = 20.dp, vertical = if (singleLine) 10.dp else 13.dp),
         singleLine = singleLine,
         keyboardOptions = keyboardOptions,
         textStyle = textStyle,
@@ -194,11 +212,11 @@ fun FormSegmentedControl(
 ) {
     val dark = MaterialTheme.colorScheme.background.luminance() < 0.5f
     Surface(
-        modifier = modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 9.dp),
+        modifier = modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 6.dp),
         color = if (dark) Color(0xFF3D3D42) else Color(0xFFEEEEF0),
         shape = RoundedCornerShape(9.dp),
     ) {
-        Row(Modifier.fillMaxWidth().height(36.dp).padding(2.dp)) {
+        Row(Modifier.fillMaxWidth().height(32.dp).padding(2.dp)) {
             options.forEach { (raw, label) ->
                 val active = raw == selected
                 Surface(
@@ -209,7 +227,7 @@ fun FormSegmentedControl(
                     shadowElevation = if (active) 1.dp else 0.dp,
                 ) {
                     Box(contentAlignment = Alignment.Center) {
-                        Text(label, fontSize = 15.sp, fontWeight = if (active) FontWeight.Medium else FontWeight.Normal)
+                        Text(label, fontSize = 13.sp, fontWeight = if (active) FontWeight.Medium else FontWeight.Normal)
                     }
                 }
             }
@@ -223,15 +241,18 @@ fun FormStepper(
     value: String,
     onMinus: () -> Unit,
     onPlus: () -> Unit,
+    enabled: Boolean = true,
+    valueStyle: TextStyle? = null,
+    minHeight: Int = 44,
 ) {
-    Row(Modifier.fillMaxWidth().height(44.dp).padding(start = 20.dp, end = 10.dp), verticalAlignment = Alignment.CenterVertically) {
+    Row(Modifier.fillMaxWidth().height(minHeight.dp).alpha(if (enabled) 1f else 0.38f).padding(start = 20.dp, end = 20.dp), verticalAlignment = Alignment.CenterVertically) {
         Text(title, fontSize = 17.sp, modifier = Modifier.weight(1f))
-        Text(value, fontSize = 17.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(end = 12.dp))
+        Text(value, style = valueStyle ?: MaterialTheme.typography.bodyLarge.copy(fontSize = 17.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)), modifier = Modifier.padding(end = 12.dp))
         Surface(color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.055f), shape = RoundedCornerShape(9.dp)) {
-            Row(Modifier.height(40.dp)) {
-                Box(Modifier.size(50.dp).clickable(onClick = onMinus), contentAlignment = Alignment.Center) { Text("−", fontSize = 25.sp) }
-                Box(Modifier.width(0.6.dp).height(28.dp).background(MaterialTheme.colorScheme.onSurface.copy(alpha = 0.12f)).align(Alignment.CenterVertically))
-                Box(Modifier.size(50.dp).clickable(onClick = onPlus), contentAlignment = Alignment.Center) { Text("+", fontSize = 25.sp) }
+            Row(Modifier.height(32.dp)) {
+                Box(Modifier.size(47.dp, 32.dp).clickable(enabled = enabled, onClick = onMinus), contentAlignment = Alignment.Center) { Text("−", fontSize = 22.sp) }
+                Box(Modifier.width(0.6.dp).height(20.dp).background(MaterialTheme.colorScheme.onSurface.copy(alpha = 0.12f)).align(Alignment.CenterVertically))
+                Box(Modifier.size(47.dp, 32.dp).clickable(enabled = enabled, onClick = onPlus), contentAlignment = Alignment.Center) { Text("+", fontSize = 22.sp) }
             }
         }
     }
@@ -242,26 +263,26 @@ fun FormStepper(
 fun FormDateRow(title: String, date: LocalDate, onDate: () -> Unit) {
     Row(Modifier.fillMaxWidth().heightIn(min = 44.dp).padding(horizontal = 20.dp), verticalAlignment = Alignment.CenterVertically) {
         Text(title, fontSize = 17.sp, modifier = Modifier.weight(1f))
-        Text(date.format(DateTimeFormatter.ofPattern("yyyy年M月d日")), fontSize = 16.sp,
+        Text(date.format(DateTimeFormatter.ofPattern("yyyy年M月d日")), fontSize = 17.sp, lineHeight = 22.sp,
             modifier = Modifier.background(MaterialTheme.colorScheme.onSurface.copy(alpha = 0.06f), RoundedCornerShape(6.dp))
-                .clickable(onClick = onDate).padding(horizontal = 9.dp, vertical = 7.dp))
+                .clickable(onClick = onDate).padding(horizontal = 11.dp, vertical = 5.dp))
     }
 }
 
 @Composable
 fun FormDateTimeRow(title: String, date: LocalDate, time: LocalTime, onDate: () -> Unit, onTime: () -> Unit) {
-    Row(Modifier.fillMaxWidth().heightIn(min = 44.dp).padding(horizontal = 20.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(7.dp)) {
+    Row(Modifier.fillMaxWidth().heightIn(min = 59.dp).padding(horizontal = 20.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(7.dp)) {
         Text(title, fontSize = 17.sp, modifier = Modifier.weight(1f))
         listOf(date.format(DateTimeFormatter.ofPattern("yyyy年M月d日")) to onDate, time.format(DateTimeFormatter.ofPattern("HH:mm")) to onTime).forEach { (value, action) ->
-            Text(value, fontSize = 16.sp, modifier = Modifier.background(MaterialTheme.colorScheme.onSurface.copy(alpha = 0.06f), RoundedCornerShape(6.dp)).clickable(onClick = action).padding(horizontal = 9.dp, vertical = 7.dp))
+            Text(value, fontSize = 17.sp, lineHeight = 22.sp, modifier = Modifier.background(MaterialTheme.colorScheme.onSurface.copy(alpha = 0.06f), RoundedCornerShape(6.dp)).clickable(onClick = action).padding(horizontal = 11.dp, vertical = 5.dp))
         }
     }
 }
 
 @Composable
-fun DurationPills(values: List<Int> = listOf(15, 25, 45, 60, 90), onSelect: (Int) -> Unit) {
+fun DurationPills(values: List<Int> = listOf(15, 25, 45, 60, 90), verticalPadding: Int = 5, onSelect: (Int) -> Unit) {
     Row(
-        Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 20.dp, vertical = 8.dp),
+        Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = verticalPadding.dp).horizontalScroll(rememberScrollState()),
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         values.forEach { minutes ->
@@ -270,7 +291,7 @@ fun DurationPills(values: List<Int> = listOf(15, 25, 45, 60, 90), onSelect: (Int
                 color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.10f),
                 shape = CircleShape,
             ) {
-                Text("$minutes 分", modifier = Modifier.padding(horizontal = 15.dp, vertical = 8.dp), fontSize = 15.sp)
+                Text("$minutes 分", modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp), fontSize = 17.sp, lineHeight = 22.sp)
             }
         }
     }

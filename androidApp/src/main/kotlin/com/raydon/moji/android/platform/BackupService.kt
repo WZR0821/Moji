@@ -77,11 +77,14 @@ object BackupService {
             // verified staging file must exist before the previous file is touched.
             writeVerified(app, tree, "Moji-${LocalDate.now()}.mojibackup", json)
             writeVerified(app, tree, "Moji-latest.mojibackup", json)
-            val cutoff = System.currentTimeMillis() - app.settings.backupRetentionDays * 86_400_000L
-            tree.listFiles()
-                .filter { it.name?.matches(Regex("Moji-\\d{4}-\\d{2}-\\d{2}\\.mojibackup")) == true }
-                .filter { it.lastModified() in 1 until cutoff }
-                .forEach { it.delete() }
+            if (app.settings.backupRetentionDays > 0) {
+                val cutoff = System.currentTimeMillis() - app.settings.backupRetentionDays * 86_400_000L
+                tree.listFiles()
+                    .filter { it.name?.matches(Regex("Moji-\\d{4}-\\d{2}-\\d{2}\\.mojibackup")) == true }
+                    .filter { it.lastModified() in 1 until cutoff }
+                    .forEach { it.delete() }
+            }
+            app.settings.lastBackupAt = System.currentTimeMillis()
             true
         }
     }

@@ -46,6 +46,7 @@ fun MojiApp(
     onExportBackup: () -> Unit,
     onImportBackup: () -> Unit,
     onChooseBackupFolder: () -> Unit,
+    onRestoreBackupFolder: () -> Unit,
     onRequestPermissions: () -> Unit,
 ) {
     val selected by viewModel.selectedTab.collectAsStateWithLifecycle()
@@ -80,8 +81,9 @@ fun MojiApp(
     val timer by viewModel.pomodoro.collectAsStateWithLifecycle()
     androidx.compose.runtime.SideEffect { view.keepScreenOn = viewModel.keepScreenAwake && timer.running }
     androidx.compose.runtime.DisposableEffect(view) { onDispose { view.keepScreenOn = false } }
+    MojiPaperScreen {
     Scaffold(
-        containerColor = MaterialTheme.colorScheme.background,
+        containerColor = androidx.compose.ui.graphics.Color.Transparent,
         snackbarHost = { SnackbarHost(snackbar) },
         bottomBar = {
             Column(
@@ -123,10 +125,11 @@ fun MojiApp(
                 0 -> PlanScreen(viewModel)
                 1 -> MemoScreen(viewModel)
                 2 -> MomentsScreen(viewModel)
-                else -> ReviewScreen(viewModel, onExportBackup, onImportBackup, onChooseBackupFolder, onRequestPermissions)
+                else -> ReviewScreen(viewModel, onExportBackup, onImportBackup, onChooseBackupFolder, onRestoreBackupFolder, onRequestPermissions)
             }
             if (backupBusy) LinearProgressIndicator(Modifier.fillMaxWidth().align(Alignment.TopCenter))
         }
+    }
     }
     }
     preview?.let { backup ->

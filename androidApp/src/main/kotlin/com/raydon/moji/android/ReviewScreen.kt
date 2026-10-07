@@ -58,6 +58,7 @@ fun ReviewScreen(
     onExportBackup: () -> Unit,
     onImportBackup: () -> Unit,
     onChooseBackupFolder: () -> Unit,
+    onRestoreBackupFolder: () -> Unit,
     onRequestPermissions: () -> Unit,
 ) {
     val snapshot by viewModel.snapshot.collectAsStateWithLifecycle()
@@ -68,7 +69,8 @@ fun ReviewScreen(
     var qaEditor by remember { mutableStateOf("") }
     androidx.compose.runtime.LaunchedEffect(qaRoute, snapshot.records.size) { if (!didQA && qaRoute.isNotEmpty() && snapshot.records.isNotEmpty()) {
         didQA = true
-        when (qaRoute) { "review-week" -> secondaryRoute = "weekly"; "review-month" -> secondaryRoute = "monthly"; "review-records" -> secondaryRoute = "records"; "settings" -> showSettings = true; "goal", "reflection", "next-week", "record-editor", "record-untimed" -> qaEditor = qaRoute }
+        if (qaRoute.startsWith("settings")) showSettings = true
+        else when (qaRoute) { "review-week" -> secondaryRoute = "weekly"; "review-month" -> secondaryRoute = "monthly"; "review-records" -> secondaryRoute = "records"; "goal", "reflection", "next-week", "record-editor", "record-untimed" -> qaEditor = qaRoute }
     } }
     if (qaEditor == "goal") WeeklyGoalDialog(viewModel, workflowWeek(LocalDate.now()), snapshot.weeklyGoals.firstOrNull()) { qaEditor = "" }
     if (qaEditor == "reflection") WeeklyReflectionDialog(viewModel, workflowWeek(LocalDate.now()), snapshot.weeklyReflections.firstOrNull()) { qaEditor = "" }
@@ -136,7 +138,7 @@ fun ReviewScreen(
             }
         }
     }
-    if (showSettings) SettingsDialog(viewModel, onExportBackup, onImportBackup, onChooseBackupFolder, onRequestPermissions) { showSettings = false }
+    if (showSettings) SettingsDialog(viewModel, onExportBackup, onImportBackup, onChooseBackupFolder, onRestoreBackupFolder, onRequestPermissions) { showSettings = false }
     secondaryRoute?.let { route -> ReviewSecondaryDialog(route, viewModel) { secondaryRoute = null } }
 }
 
@@ -194,10 +196,11 @@ private fun SettingsDialog(
     onExportBackup: () -> Unit,
     onImportBackup: () -> Unit,
     onChooseBackupFolder: () -> Unit,
+    onRestoreBackupFolder: () -> Unit,
     onRequestPermissions: () -> Unit,
     onDismiss: () -> Unit,
 ) {
-    var page by remember { mutableStateOf<String?>(null) }
+    var page by remember { mutableStateOf(if (BuildConfig.DEBUG) viewModel.visualQaRoute.value.removePrefix("settings-").takeIf { viewModel.visualQaRoute.value.startsWith("settings-") } else null) }
     val goBack: () -> Unit = {
         if (page == null) onDismiss()
         else page = if (page?.startsWith("widgets:") == true) "widgets" else null
@@ -205,15 +208,16 @@ private fun SettingsDialog(
     Dialog(onDismissRequest = goBack, properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false)) {
         MojiScreen {
             Column(Modifier.fillMaxSize()) {
-                MojiSheetBar(
+                if (page?.startsWith("widgets:") != true) MojiSheetBar(
                     title = page?.let(::settingsPageTitle) ?: "设置",
-                    leading = if (page == null) "" else "返回",
-                    trailing = "完成",
+                    leading = if (page == null) "" else "设置",
+                    trailing = if (page == null) "完成" else "",
                     onLeading = goBack,
                     onTrailing = onDismiss,
+                    leadingIsBack = page != null,
                 )
                 if (page == null) SettingsIndex(viewModel) { page = it }
-                else SettingsPageContent(page!!, viewModel, { page = it }, onExportBackup, onImportBackup, onChooseBackupFolder, onRequestPermissions)
+                else SettingsPageContent(page!!, viewModel, { page = it }, onExportBackup, onImportBackup, onChooseBackupFolder, onRestoreBackupFolder, onRequestPermissions)
             }
         }
     }
@@ -261,7 +265,7 @@ private fun SettingsIndex(viewModel: MojiViewModel, onOpen: (String) -> Unit) {
                 Row(Modifier.fillMaxWidth().height(44.dp).padding(horizontal = 20.dp), verticalAlignment = Alignment.CenterVertically) {
                     Text("开发者", fontSize = 17.sp)
                     Spacer(Modifier.weight(1f))
-                    Text("WANG ZIRUI", color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.46f), fontSize = 17.sp)
+                    Text("Jerry Wong", color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.46f), fontSize = 17.sp)
                 }
             }
             Spacer(Modifier.height(24.dp))
@@ -271,7 +275,8 @@ private fun SettingsIndex(viewModel: MojiViewModel, onOpen: (String) -> Unit) {
 
 @Composable
 private fun SettingsGroup(content: @Composable () -> Unit) {
-    Surface(Modifier.fillMaxWidth(), shape = RoundedCornerShape(13.dp), color = MaterialTheme.colorScheme.surface.copy(alpha = 0.94f)) { Column { content() } }
+    val dark = MaterialTheme.colorScheme.background == com.raydon.moji.ui.MojiPalette.PaperDark
+    Surface(Modifier.fillMaxWidth(), shape = RoundedCornerShape(13.dp), color = if (dark) androidx.compose.ui.graphics.Color(0xFF2C2C2E) else androidx.compose.ui.graphics.Color.White) { Column { content() } }
 }
 
 @Composable
@@ -349,7 +354,7 @@ private fun SettingSwitch(label: String, checked: Boolean, onChange: (Boolean) -
 
 private fun settingsPageTitle(page: String): String = when (page) {
     "defaults" -> "计划默认值"
-    "widgets" -> "小组件快速添加"
+    "widgets" -> "快速添加预设"
     in listOf("widgets:0", "widgets:1", "widgets:2") -> "编辑预设"
     "pomodoro" -> "番茄钟"
     "notifications" -> "提醒与反馈"

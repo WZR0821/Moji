@@ -29,6 +29,9 @@ class MainActivity : ComponentActivity() {
     private val backupFolder = registerForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
         uri?.let(viewModel::setBackupTree)
     }
+    private val restoreFolder = registerForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
+        uri?.let(viewModel::prepareRestoreFolder)
+    }
     private val permissions = registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { grants ->
         viewModel.message.value = if (grants.values.any { it }) "权限已更新" else "未授予权限，本地功能仍可使用"
     }
@@ -64,6 +67,7 @@ class MainActivity : ComponentActivity() {
                         onExportBackup = { exportBackup.launch("Moji-${java.time.LocalDate.now()}.mojibackup") },
                         onImportBackup = { importBackup.launch(arrayOf("application/json", "text/plain", "*/*")) },
                         onChooseBackupFolder = { backupFolder.launch(null) },
+                        onRestoreBackupFolder = { restoreFolder.launch(null) },
                         onRequestPermissions = {
                             permissions.launch(
                                 buildList {

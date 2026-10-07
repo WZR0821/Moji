@@ -170,7 +170,7 @@ fun MemoEditorDialog(existing: MemoItem?, viewModel: MojiViewModel, onDismiss: (
                             modifier = Modifier.clickable(enabled = canSave) { viewModel.saveMemo(draftId, title, content, checklist, checklistItems = entries, isPinned = pinned, onSaved = onDismiss) })
                     }
                 }
-                Surface(Modifier.fillMaxWidth().weight(1f).padding(start = 18.dp, end = 18.dp, top = 14.dp, bottom = 10.dp),
+                Surface(Modifier.fillMaxWidth().weight(1f).padding(start = 18.dp, end = 18.dp, top = 24.dp, bottom = 0.dp),
                     shape = RoundedCornerShape(16.dp), color = MaterialTheme.colorScheme.surface.copy(alpha = 0.88f),
                     border = BorderStroke(0.75.dp, MaterialTheme.colorScheme.onSurface.copy(alpha = 0.095f))) {
                     Box {
