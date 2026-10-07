@@ -11,6 +11,7 @@ struct MemosView: View {
 
     @State private var editorRoute: MemoEditorRoute?
     @State private var searchText = ""
+    @State private var convertingMemo: MemoItem?
 #if DEBUG
     @State private var didRunQAScenario = false
 #endif
@@ -96,6 +97,7 @@ struct MemosView: View {
                 MemoEditorView(store: store, memo: route.memo)
                     .id(route.id)
             }
+            .sheet(item: $convertingMemo) { MemoConversionView(store: store, memo: $0) }
             .onAppear {
                 store.reload()
 #if DEBUG
@@ -198,6 +200,7 @@ struct MemosView: View {
             }
         }
         .contextMenu {
+            Button { convertingMemo = memo } label: { Label("转为计划", systemImage: "calendar.badge.plus") }
             Button {
                 store.toggleMemoPin(id: memo.id)
             } label: {
@@ -310,6 +313,18 @@ struct MemosView: View {
 
 #if DEBUG
     private func runQAScenarioIfNeeded() {
+        if !didRunQAScenario, let route = ProcessInfo.processInfo.environment["MOJI_QA_SCENARIO"], route.hasPrefix("workflow-") {
+            didRunQAScenario = true
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+                switch route {
+                case "workflow-memo-note": editorRoute = MemoEditorRoute(memo: store.memos.first(where: { $0.mode == .note }))
+                case "workflow-memo-checklist": editorRoute = MemoEditorRoute(memo: store.memos.first(where: { $0.mode == .checklist }))
+                case "workflow-memo-convert": convertingMemo = store.memos.first(where: { $0.mode == .checklist })
+                default: break
+                }
+            }
+            return
+        }
         guard
             !didRunQAScenario,
             ["memo-list", "memo-editor", "memo-checklist"].contains(
@@ -456,7 +471,8 @@ private struct MemoEditorView: View {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("取消") { dismiss() }
                 }
-                ToolbarItemGroup(placement: .confirmationAction) {
+                ToolbarItem(placement: .confirmationAction) {
+                    HStack(spacing: 14) {
                     Menu {
                         Button {
                             isPinned.toggle()
@@ -483,6 +499,7 @@ private struct MemoEditorView: View {
                     }
                     .fontWeight(.semibold)
                     .disabled(!canSave)
+                    }
                 }
                 ToolbarItemGroup(placement: .bottomBar) {
                     Button {

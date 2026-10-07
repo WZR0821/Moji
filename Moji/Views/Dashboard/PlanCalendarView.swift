@@ -1313,6 +1313,15 @@ struct PlanCalendarView: View {
 
 #if DEBUG
     private func configureQAScenarioIfNeeded() {
+        if !didConfigureQAScenario, let route = ProcessInfo.processInfo.environment["MOJI_QA_SCENARIO"], route.hasPrefix("workflow-calendar-") {
+            didConfigureQAScenario = true
+            if route == "workflow-calendar-week" { mode = .week }
+            if route == "workflow-calendar-day" { mode = .day }
+            if route == "workflow-calendar-jump" { showsQuickJump = true }
+            // The shared workflow fixture already supplies data. Do not mix in
+            // the older standalone calendar acceptance fixture.
+            return
+        }
         guard
             !didConfigureQAScenario,
             let scenario = ProcessInfo.processInfo.environment["MOJI_QA_SCENARIO"],

@@ -17,6 +17,8 @@ struct DashboardView: View {
     @State private var expandedItemID: UUID?
     @State private var editorRoute: PlanEditorRoute?
     @State private var showsCompleted = false
+    @State private var showsLibrary = false
+    @State private var copyingItem: CheckInItem?
 #if DEBUG
     @State private var showsCalendar = [
         "calendar-month",
@@ -67,6 +69,7 @@ struct DashboardView: View {
         return store.checkInItems.filter {
             guard
                 $0.kind == .planned,
+                $0.isArchived != true,
                 $0.isCompleted || $0.status == .skipped
             else { return false }
 
@@ -82,6 +85,7 @@ struct DashboardView: View {
             ZStack {
                 InkWashBackground()
 
+                ScrollViewReader { proxy in
                 List {
                     if showsRestorePrompt {
                         restorePrompt
@@ -197,8 +201,18 @@ struct DashboardView: View {
                     .spring(response: 0.42, dampingFraction: 0.84),
                     value: pendingItems.map(\.id)
                 )
+#if DEBUG
+                .onChange(of: expandedItemID) { _, id in
+                    if ProcessInfo.processInfo.environment["MOJI_QA_SCENARIO"] == "workflow-plan-expanded-bottom", let id {
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { proxy.scrollTo(id, anchor: .bottom) }
+                    }
+                }
+#endif
+                }
             }
             .navigationTitle("计划")
+            .toolbarBackground(Color.planBackground, for: .navigationBar)
+            .toolbarBackground(.visible, for: .navigationBar)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
                     Button {
@@ -211,6 +225,7 @@ struct DashboardView: View {
 
                 ToolbarItem(placement: .primaryAction) {
                     Menu {
+                        Button { showsLibrary = true } label: { Label("计划库与模板", systemImage: "tray.full") }
                         Button {
                             presentNewEditor(kind: .completedLog)
                         } label: {
@@ -257,6 +272,8 @@ struct DashboardView: View {
                 )
                 .id(route.id)
             }
+            .sheet(isPresented: $showsLibrary) { PlanLibraryView(store: store) }
+            .sheet(item: $copyingItem) { PlanCopySheet(store: store, item: $0) }
             .sheet(isPresented: $showsWelcomeRestore) {
                 RestoreWelcomeSheet(store: store) { message in
                     restoreMessage = message
@@ -552,6 +569,13 @@ struct DashboardView: View {
         .listRowBackground(Color.clear)
         .listRowSeparator(.hidden)
         .id("\(archived ? "archived" : "pending")-\(item.id.uuidString)")
+        .contextMenu {
+            Button("复制到今天") { store.copyPlan(item.id, to: Date()) }
+            Button("复制到指定日期") { copyingItem = item }
+            Button("保存为模板") { store.saveTemplate(from: item.id) }
+            Button("归档") { store.batchPlans([item.id], archived: true) }
+            Button("修改") { openEditor(for: item) }
+        }
         .swipeActions(edge: .trailing, allowsFullSwipe: false) {
             Button {
                 if expandedItemID == item.id {
@@ -607,6 +631,23 @@ struct DashboardView: View {
 #if DEBUG
     private func runEditorQAScenarioIfNeeded() {
         guard !didRunQAScenario else { return }
+        if let route = ProcessInfo.processInfo.environment["MOJI_QA_SCENARIO"], route.hasPrefix("workflow-") {
+            didRunQAScenario = true
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+                switch route {
+                case "workflow-library", "workflow-templates", "workflow-library-batch": showsLibrary = true
+                case "workflow-plan-new": presentNewEditor(kind: .planned)
+                case "workflow-calendar-month", "workflow-calendar-week", "workflow-calendar-day", "workflow-calendar-jump": showsCalendar = true
+                case "workflow-plan-editor", "workflow-plan-editor-advanced":
+                    if let item = store.checkInItems.first(where: { $0.title == "整理 1.5.1 发布说明" }) { openEditor(for: item) }
+                case "workflow-plan-expanded", "workflow-plan-expanded-bottom", "workflow-plan-inline": expandedItemID = store.checkInItems.first(where: { $0.title == "整理 1.5.1 发布说明" })?.id
+                case "workflow-plan-completed": showsCompleted = true
+                case "workflow-plan-copy": copyingItem = store.checkInItems.first(where: { $0.title == "整理 1.5.1 发布说明" })
+                default: break
+                }
+            }
+            return
+        }
         switch ProcessInfo.processInfo.environment["MOJI_QA_SCENARIO"] {
         case "all-day-editor":
             didRunQAScenario = true
@@ -945,6 +986,9 @@ private struct MinimalPlanRow: View {
         .sensoryFeedback(.success, trigger: completionFeedback)
         .onAppear {
             synchronizeCompletionInk(isFinished)
+#if DEBUG
+            if isExpanded, ProcessInfo.processInfo.environment["MOJI_QA_SCENARIO"] == "workflow-plan-inline", item.title == "整理 1.5.1 发布说明" { beginInlineEditing() }
+#endif
         }
         .onChange(of: isFinished) { _, newValue in
             synchronizeCompletionInk(newValue)
@@ -953,6 +997,9 @@ private struct MinimalPlanRow: View {
             if !expanded {
                 cancelInlineEditing()
             }
+#if DEBUG
+            if expanded, ProcessInfo.processInfo.environment["MOJI_QA_SCENARIO"] == "workflow-plan-inline", item.title == "整理 1.5.1 发布说明" { beginInlineEditing() }
+#endif
         }
     }
 

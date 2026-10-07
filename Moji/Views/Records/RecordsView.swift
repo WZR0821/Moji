@@ -2,6 +2,12 @@ import SwiftUI
 import UniformTypeIdentifiers
 import WidgetKit
 
+#if DEBUG
+private struct WorkflowQARoute: Identifiable {
+    let id: String
+}
+#endif
+
 private enum SummaryRange: String, CaseIterable, Identifiable {
     case week
     case month
@@ -167,11 +173,10 @@ private struct SummaryDetailView: View {
     var body: some View {
         ScrollView {
             if range == .week {
-                WeeklySummaryView(
-                    records: store.records,
-                    checkInItems: store.checkInItems,
-                    anchorDate: $anchorDate
-                )
+                VStack(spacing: 16) {
+                    WeeklySummaryView(records: store.records, checkInItems: store.checkInItems, anchorDate: $anchorDate)
+                    WorkflowWeekSection(store: store, week: anchorDate)
+                }
             } else {
                 MonthlySummaryView(
                     records: store.records,
@@ -285,6 +290,7 @@ struct PersonalView: View {
     @State private var selectedReviewDay: CheckInDaySummary?
 #if DEBUG
     @State private var didRunSettingsQAScenario = false
+    @State private var workflowQARoute: WorkflowQARoute?
 #endif
 
     private var weekSummary: CheckInWeekSummary {
@@ -394,6 +400,14 @@ struct PersonalView: View {
 #if DEBUG
                 guard !didRunSettingsQAScenario else { return }
                 let scenario = ProcessInfo.processInfo.environment["MOJI_QA_SCENARIO"]
+                if let scenario, scenario.hasPrefix("workflow-") {
+                    didRunSettingsQAScenario = true
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+                        if scenario.hasPrefix("workflow-settings") { isPresentingSettings = true }
+                        else if scenario != "workflow-review" { workflowQARoute = WorkflowQARoute(id: scenario) }
+                    }
+                    return
+                }
                 guard
                     scenario == "settings"
                         || scenario == "summary-week"
@@ -412,6 +426,21 @@ struct PersonalView: View {
             .sheet(isPresented: $isPresentingSettings) {
                 SettingsView(store: store)
             }
+#if DEBUG
+            .sheet(item: $workflowQARoute) { route in
+                switch route.id {
+                case "workflow-review-week": NavigationStack { SummaryDetailView(store: store, range: .week) }
+                case "workflow-review-month": NavigationStack { SummaryDetailView(store: store, range: .month) }
+                case "workflow-review-records": NavigationStack { AllRecordsView(store: store) }
+                case "workflow-record-editor": RecordEditorView(store: store, record: store.records.first(where: { $0.hasPreciseTime }))
+                case "workflow-record-untimed": RecordEditorView(store: store, record: store.records.first(where: { !$0.hasPreciseTime }))
+                case "workflow-goal": WeeklyGoalEditor(store: store, week: Date(), goal: store.snapshot.weeklyGoals.first)
+                case "workflow-reflection": WeeklyReflectionEditor(store: store, week: Date(), reflection: store.snapshot.weeklyReflections.first)
+                case "workflow-next-week": NextWeekPlansSheet(store: store, week: Date())
+                default: EmptyView()
+                }
+            }
+#endif
         }
     }
 
@@ -669,6 +698,7 @@ struct PersonalView: View {
 private struct SettingsView: View {
     @ObservedObject var store: PlanStore
     @Environment(\.dismiss) private var dismiss
+    @State private var visualQAPath: [String] = []
 
     @AppStorage(PlanSettingsKeys.defaultCategory, store: SharedPersistence.sharedDefaults)
     private var defaultCategoryRaw = RecordCategory.study.rawValue
@@ -712,7 +742,7 @@ private struct SettingsView: View {
     private var paperTextureEnabled = true
 
     var body: some View {
-        NavigationStack {
+        NavigationStack(path: $visualQAPath) {
             List {
                 Section("偏好") {
                     NavigationLink {
@@ -799,7 +829,7 @@ private struct SettingsView: View {
                 }
 
                 Section {
-                    LabeledContent("开发者", value: "WANG ZIRUI")
+                    LabeledContent("开发者", value: "Jerry Wong")
                         .contentShape(Rectangle())
                 }
             }
@@ -810,6 +840,32 @@ private struct SettingsView: View {
             }
             .navigationTitle("设置")
             .navigationBarTitleDisplayMode(.inline)
+            .navigationDestination(for: String.self) { page in
+                switch page {
+                case "defaults": PlanDefaultsSettingsView()
+                case "widgets": QuickPlanPresetSettingsView()
+                case "widgets:0": QuickPlanPresetEditorView(preset: QuickPlanPresetStore.presets(from: quickPlanPresetsJSON)[0])
+                case "pomodoro": PomodoroSettingsView()
+                case "notifications": NotificationFeedbackSettingsView(store: store)
+                case "appearance": AppearanceSettingsView()
+                case "permissions": PermissionSettingsView()
+                case "backup": BackupSettingsView(store: store)
+                case "about": AboutSettingsView()
+                default: EmptyView()
+                }
+            }
+            .onAppear {
+#if DEBUG
+                if visualQAPath.isEmpty,
+                   let scenario = ProcessInfo.processInfo.environment["MOJI_QA_SCENARIO"],
+                   scenario.hasPrefix("workflow-settings-") {
+                    let page = String(scenario.dropFirst("workflow-settings-".count))
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                        visualQAPath = page == "widgets:0" ? ["widgets", page] : [page]
+                    }
+                }
+#endif
+            }
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) {
                     Button("完成") { dismiss() }
@@ -1463,6 +1519,8 @@ private struct BackupSettingsView: View {
     @State private var isExportingBackup = false
     @State private var isImportingBackup = false
     @State private var showsImportConfirmation = false
+    @State private var pendingImportSummary = ""
+    @State private var isReadingBackup = false
     @State private var pendingImportData: Data?
     @State private var pendingImportURL: URL?
     @State private var statusMessage: String?
@@ -1611,6 +1669,8 @@ private struct BackupSettingsView: View {
         .inkFormStyle()
         .background { InkWashBackground() }
         .navigationTitle("数据备份")
+        .disabled(isReadingBackup)
+        .overlay { if isReadingBackup { ProgressView("正在读取备份…").padding().background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12)) } }
         .navigationBarTitleDisplayMode(.inline)
         .fileExporter(
             isPresented: $isExportingBackup,
@@ -1633,9 +1693,23 @@ private struct BackupSettingsView: View {
             do {
                 let url = try result.get().first
                 guard let url else { return }
-                pendingImportData = try ExternalBackupService.readBackup(at: url)
-                pendingImportURL = url
-                showsImportConfirmation = true
+                isReadingBackup = true
+                Task {
+                    defer { isReadingBackup = false }
+                    do {
+                        let (data, preview) = try await Task.detached(priority: .userInitiated) {
+                            let data = try ExternalBackupService.readBackup(at: url)
+                            return (data, try SharedPersistence.previewBackup(data))
+                        }.value
+                        pendingImportSummary = "计划 \(preview.checkInItems.count) 项、记录 \(preview.records.count) 条、时刻 \(preview.countdowns.count) 项、备忘 \(preview.memos.count) 条。"
+                        if preview.checkInItems.isEmpty && preview.records.isEmpty && preview.countdowns.isEmpty && preview.memos.isEmpty {
+                            pendingImportSummary += "这是一份空备份，恢复后当前内容会被清空。"
+                        }
+                        pendingImportData = data
+                        pendingImportURL = url
+                        showsImportConfirmation = true
+                    } catch { statusMessage = error.localizedDescription }
+                }
             } catch {
                 statusMessage = error.localizedDescription
             }
@@ -1653,7 +1727,7 @@ private struct BackupSettingsView: View {
                 pendingImportURL = nil
             }
         } message: {
-            Text("当前数据会先由自动备份保留一份，但建议先手动导出。")
+            Text(pendingImportSummary + "恢复前会在本机保存一份当前数据副本。")
         }
         .alert(
             "数据备份",
@@ -1730,7 +1804,7 @@ private struct AboutSettingsView: View {
                     "版本",
                     value: "V\(appVersion) 正式版"
                 )
-                LabeledContent("开发者", value: "WANG ZIRUI")
+                LabeledContent("开发者", value: "Jerry Wong")
                 LabeledContent("数据格式", value: "v\(PlanSnapshot.currentSchemaVersion)")
                 LabeledContent("最低系统", value: "iOS 17")
             }

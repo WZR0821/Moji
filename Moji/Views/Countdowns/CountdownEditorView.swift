@@ -46,6 +46,7 @@ struct CountdownEditorView: View {
     @State private var calendarEventIdentifier: String?
     @State private var isSaving = false
     @State private var calendarError: String?
+    @State private var visualQAAdvanced = false
 
     init(
         store: PlanStore,
@@ -124,6 +125,11 @@ struct CountdownEditorView: View {
             }
             .navigationTitle(event == nil ? context.addTitle : "编辑这个日子")
             .navigationBarTitleDisplayMode(.inline)
+            .navigationDestination(isPresented: $visualQAAdvanced) {
+                CountdownAdvancedSettingsView(repeatRule: $repeatRule, includesToday: $includesToday,
+                    isPinned: $isPinned, calendarSyncEnabled: $calendarSyncEnabled,
+                    calendarEventIdentifier: calendarEventIdentifier, targetDate: targetDate, title: cleanTitle)
+            }
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("取消") { dismiss() }
@@ -140,6 +146,11 @@ struct CountdownEditorView: View {
             }
             .onAppear {
                 if event == nil { isTitleFocused = true }
+#if DEBUG
+                if ProcessInfo.processInfo.environment["MOJI_QA_SCENARIO"] == "workflow-moment-advanced" {
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { visualQAAdvanced = true }
+                }
+#endif
             }
             .alert("无法写入日历", isPresented: Binding(
                 get: { calendarError != nil },

@@ -21,6 +21,10 @@ Backups/
 .env.*
 !.env.example
 Config/Local.xcconfig
+local.properties
+keystore.properties
+.tools/
+.gradle/
 
 # Signing credentials and provisioning profiles
 *.cer
@@ -30,6 +34,8 @@ Config/Local.xcconfig
 *.p8
 *.pem
 *.pfx
+*.jks
+*.keystore
 
 # Swift/Xcode tooling caches
 .build/

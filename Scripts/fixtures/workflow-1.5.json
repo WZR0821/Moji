@@ -1,0 +1,254 @@
+{
+  "schemaVersion": 13,
+  "lastUpdated": "2026-10-07T03:00:00Z",
+  "checkInItems": [
+    {
+      "id": "00000001-0000-4000-8000-000000000000",
+      "title": "整理 1.5.1 发布说明",
+      "category": "work",
+      "kind": "planned",
+      "scheduledStart": "2026-10-07T05:30:00Z",
+      "plannedMinutes": 45,
+      "note": "先整理本周反馈，再核对计划库、备忘转计划和周复盘。\n需要检查长文本换行、输入后保存，以及深色模式中的印章对比度。",
+      "status": "planned",
+      "scheduleKind": "exactTime",
+      "plannedDurationEnabled": true,
+      "repeatRule": "weekly",
+      "reminderMinutesBefore": 15,
+      "calendarSyncEnabled": false,
+      "createdAt": "2026-10-06T01:00:00Z"
+    },
+    {
+      "id": "00000002-0000-4000-8000-000000000000",
+      "title": "阅读产品设计章节",
+      "category": "study",
+      "kind": "planned",
+      "scheduledStart": "2026-10-06T15:00:00Z",
+      "plannedMinutes": 25,
+      "note": "只需读完一章，不强制计时。",
+      "status": "planned",
+      "scheduleKind": "allDay",
+      "plannedDurationEnabled": false,
+      "calendarSyncEnabled": false,
+      "createdAt": "2026-10-06T02:00:00Z"
+    },
+    {
+      "id": "00000003-0000-4000-8000-000000000000",
+      "title": "归纳昨日待办",
+      "category": "work",
+      "kind": "planned",
+      "scheduledStart": "2026-10-06T05:00:00Z",
+      "plannedMinutes": 30,
+      "note": "结转示例：移至下周时保留原计划。",
+      "status": "planned",
+      "scheduleKind": "afternoon",
+      "plannedDurationEnabled": true,
+      "calendarSyncEnabled": false,
+      "createdAt": "2026-10-05T01:00:00Z"
+    },
+    {
+      "id": "00000004-0000-4000-8000-000000000000",
+      "title": "整理会议纪要",
+      "category": "work",
+      "kind": "planned",
+      "scheduledStart": "2026-10-07T01:00:00Z",
+      "plannedMinutes": 45,
+      "note": "完成并记录实际时间。",
+      "status": "completed",
+      "completedAt": "2026-10-07T01:45:00Z",
+      "actualStartDate": "2026-10-07T01:00:00Z",
+      "actualEndDate": "2026-10-07T01:45:00Z",
+      "scheduleKind": "exactTime",
+      "plannedDurationEnabled": true,
+      "calendarSyncEnabled": false,
+      "createdAt": "2026-10-06T03:00:00Z"
+    },
+    {
+      "id": "00000005-0000-4000-8000-000000000000",
+      "title": "散步与整理书桌",
+      "category": "custom:生活",
+      "kind": "planned",
+      "scheduledStart": "2026-10-06T15:00:00Z",
+      "plannedMinutes": 25,
+      "note": "已完成，但没有记录专注时长。",
+      "status": "completed",
+      "completedAt": "2026-10-07T03:00:00Z",
+      "scheduleKind": "allDay",
+      "plannedDurationEnabled": false,
+      "calendarSyncEnabled": false,
+      "createdAt": "2026-10-06T04:00:00Z"
+    },
+    {
+      "id": "00000006-0000-4000-8000-000000000000",
+      "title": "准备下一阶段工作",
+      "category": "work",
+      "kind": "planned",
+      "scheduledStart": "2026-10-10T10:00:00Z",
+      "plannedMinutes": 60,
+      "note": "在计划库查看未来计划。",
+      "status": "planned",
+      "scheduleKind": "evening",
+      "plannedDurationEnabled": true,
+      "calendarSyncEnabled": false,
+      "createdAt": "2026-10-07T00:00:00Z"
+    }
+  ],
+  "records": [
+    {
+      "id": "00000101-0000-4000-8000-000000000000",
+      "title": "整理会议纪要",
+      "category": "work",
+      "startDate": "2026-10-07T01:00:00Z",
+      "endDate": "2026-10-07T01:45:00Z",
+      "note": "核对项目安排和负责人。",
+      "checkInItemID": "00000004-0000-4000-8000-000000000000",
+      "scheduleKind": "exactTime"
+    },
+    {
+      "id": "00000102-0000-4000-8000-000000000000",
+      "title": "阅读与笔记",
+      "category": "study",
+      "startDate": "2026-10-06T00:00:00Z",
+      "endDate": "2026-10-06T01:00:00Z",
+      "note": "留下下一章的阅读问题。",
+      "scheduleKind": "exactTime"
+    },
+    {
+      "id": "00000103-0000-4000-8000-000000000000",
+      "title": "整理书单",
+      "category": "custom:生活",
+      "startDate": "2026-10-06T05:00:00Z",
+      "endDate": "2026-10-06T05:30:00Z",
+      "note": "",
+      "scheduleKind": "exactTime"
+    },
+    {
+      "id": "00000104-0000-4000-8000-000000000000",
+      "title": "散步与整理书桌",
+      "category": "custom:生活",
+      "startDate": "2026-10-06T15:00:00Z",
+      "endDate": "2026-10-06T15:00:00Z",
+      "note": "只记完成事实。",
+      "checkInItemID": "00000005-0000-4000-8000-000000000000",
+      "scheduleKind": "allDay"
+    }
+  ],
+  "countdowns": [
+    {
+      "id": "00000201-0000-4000-8000-000000000000",
+      "title": "项目交付",
+      "targetDate": "2026-10-08T15:00:00Z",
+      "symbolName": "hourglass",
+      "colorName": "vermilion",
+      "isPinned": true,
+      "createdAt": "2026-10-05T15:00:00Z",
+      "repeatRule": "never",
+      "includesToday": false,
+      "sortOrder": 0
+    },
+    {
+      "id": "00000202-0000-4000-8000-000000000000",
+      "title": "母亲生日",
+      "targetDate": "2020-12-20T15:00:00Z",
+      "symbolName": "gift.fill",
+      "colorName": "ink",
+      "isPinned": false,
+      "createdAt": "2026-10-05T15:00:00Z",
+      "repeatRule": "yearly",
+      "includesToday": false,
+      "sortOrder": 1
+    },
+    {
+      "id": "00000203-0000-4000-8000-000000000000",
+      "title": "初次相遇",
+      "targetDate": "2025-10-05T15:00:00Z",
+      "symbolName": "seal",
+      "colorName": "ink",
+      "isPinned": false,
+      "createdAt": "2026-10-05T15:00:00Z",
+      "repeatRule": "never",
+      "includesToday": false,
+      "sortOrder": 2
+    }
+  ],
+  "memos": [
+    {
+      "id": "00000301-0000-4000-8000-000000000000",
+      "title": "测试版反馈",
+      "content": "首页留白与水墨质感保持一致。\n检查完整说明、日期选择、输入后的保存和周复盘。长文本需要自然换行，不能遮住完成按钮或底部操作栏。",
+      "mode": "note",
+      "checklistItems": [],
+      "isPinned": true,
+      "createdAt": "2026-10-06T00:00:00Z",
+      "updatedAt": "2026-10-07T01:30:00Z"
+    },
+    {
+      "id": "00000302-0000-4000-8000-000000000000",
+      "title": "周末出行清单",
+      "content": "",
+      "mode": "checklist",
+      "checklistItems": [
+        {
+          "id": "00000401-0000-4000-8000-000000000000",
+          "text": "确认车票",
+          "isCompleted": true
+        },
+        {
+          "id": "00000402-0000-4000-8000-000000000000",
+          "text": "带上充电器",
+          "isCompleted": false
+        },
+        {
+          "id": "00000403-0000-4000-8000-000000000000",
+          "text": "预留一本路上看的书",
+          "isCompleted": false
+        }
+      ],
+      "isPinned": false,
+      "createdAt": "2026-10-06T01:00:00Z",
+      "updatedAt": "2026-10-07T01:00:00Z"
+    },
+    {
+      "id": "00000303-0000-4000-8000-000000000000",
+      "title": "下周想做的事",
+      "content": "保留原备忘，按需要转成计划。\n安排一次复盘，检查预计投入与实际专注。",
+      "mode": "note",
+      "checklistItems": [],
+      "isPinned": false,
+      "createdAt": "2026-10-06T02:00:00Z",
+      "updatedAt": "2026-10-06T03:00:00Z"
+    }
+  ],
+  "planTemplates": [
+    {
+      "id": "00000501-0000-4000-8000-000000000000",
+      "title": "阅读与笔记",
+      "category": "study",
+      "note": "读一章，再用三句话记录收获。",
+      "scheduleKind": "evening",
+      "hour": 19,
+      "minute": 0,
+      "plannedMinutes": 25,
+      "plannedDurationEnabled": true,
+      "createdAt": "2026-10-05T15:00:00Z"
+    }
+  ],
+  "weeklyGoals": [
+    {
+      "id": "00000601-0000-4000-8000-000000000000",
+      "weekStart": "2026-10-05",
+      "targetCount": 6,
+      "targetMinutes": 180,
+      "updatedAt": "2026-10-06T15:00:00Z"
+    }
+  ],
+  "weeklyReflections": [
+    {
+      "id": "00000701-0000-4000-8000-000000000000",
+      "weekStart": "2026-10-05",
+      "note": "把想法转成可执行的计划。完成不等于计时，保留真实的投入记录。",
+      "nextFocus": "优先完成发布说明，再整理阅读笔记。",
+      "updatedAt": "2026-10-06T15:00:00Z"
+    }
+  ]
+}

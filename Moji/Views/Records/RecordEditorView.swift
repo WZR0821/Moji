@@ -116,6 +116,7 @@ struct CheckInEditorView: View {
             ZStack {
                 InkWashBackground()
 
+                ScrollViewReader { proxy in
                 Form {
                     Section("记录方式") {
                         Picker("记录方式", selection: $kind) {
@@ -163,9 +164,18 @@ struct CheckInEditorView: View {
                     }
 
                     advancedSettingsSection
+                        .id("visual-advanced")
 
                 }
                 .inkFormStyle()
+                .onAppear {
+#if DEBUG
+                    if ProcessInfo.processInfo.environment["MOJI_QA_SCENARIO"] == "workflow-plan-editor-advanced" {
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { proxy.scrollTo("visual-advanced", anchor: .top) }
+                    }
+#endif
+                }
+                }
             }
             .navigationTitle(
                 item == nil
@@ -173,6 +183,8 @@ struct CheckInEditorView: View {
                     : (kind == .planned ? "编辑计划" : "记录已做")
             )
             .navigationBarTitleDisplayMode(.inline)
+            .toolbarBackground(Color.planBackground, for: .navigationBar)
+            .toolbarBackground(.visible, for: .navigationBar)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("取消") { dismiss() }
@@ -367,6 +379,8 @@ struct CheckInEditorView: View {
             Text("预计投入用于番茄钟和周总结，与全天或具体时间相互独立。")
                 .font(.caption)
                 .foregroundStyle(.secondary)
+                .lineLimit(nil)
+                .fixedSize(horizontal: false, vertical: true)
         }
     }
 
@@ -558,7 +572,11 @@ struct CheckInEditorView: View {
             reminderMinutesBefore: kind == .planned && reminderMinutesBefore >= 0
                 ? reminderMinutesBefore
                 : nil,
-            plannedDurationEnabled: kind == .planned ? plannedDurationEnabled : false
+            generatedFromOccurrenceID: item?.generatedFromOccurrenceID,
+            plannedDurationEnabled: kind == .planned ? plannedDurationEnabled : false,
+            isArchived: item?.isArchived,
+            sourceMemoID: item?.sourceMemoID,
+            sourceMemoChecklistItemID: item?.sourceMemoChecklistItemID
         )
 
         if

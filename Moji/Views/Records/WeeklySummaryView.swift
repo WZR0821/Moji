@@ -367,15 +367,15 @@ struct MonthlySummaryView: View {
             LazyVGrid(columns: columns, spacing: 6) {
                 ForEach(heatmapCells.indices, id: \.self) { index in
                     if let day = heatmapCells[index] {
-                        Text(day.date.formatted(.dateTime.day()))
-                            .font(.caption2.weight(day.checkIn.completedCount > 0 ? .bold : .regular))
-                            .foregroundStyle(heatmapForeground(for: day))
-                            .frame(maxWidth: .infinity)
+                        RoundedRectangle(cornerRadius: 6, style: .continuous)
+                            .fill(heatmapColor(for: day))
                             .aspectRatio(1, contentMode: .fit)
-                            .background(
-                                heatmapColor(for: day),
-                                in: RoundedRectangle(cornerRadius: 6, style: .continuous)
-                            )
+                            .overlay {
+                                Text("\(Calendar.mojiISO.component(.day, from: day.date))")
+                                    .font(.caption2.weight(day.checkIn.completedCount > 0 ? .bold : .regular))
+                                    .foregroundStyle(heatmapForeground(for: day))
+                                    .fixedSize()
+                            }
                             .accessibilityLabel(
                                 "\(day.date.formatted(.dateTime.month().day()))，完成 \(day.checkIn.completedCount) 项，共 \(day.checkIn.plannedCount) 项"
                             )
