@@ -55,11 +55,15 @@ fun CountdownEditorScreenDialog(existing: CountdownEvent?, viewModel: MojiViewMo
     val summary = buildList { add(countdownRepeatLabel(repeat)); if (includesToday) add("含当天"); if (pinned) add("重点"); if (calendarSync || existing?.calendarEventIdentifier != null) add("日历") }.joinToString(" · ")
     val occurrence = com.raydon.moji.core.CountdownPolicy.nextOccurrenceDate(date.toKotlinDate(), repeat, LocalDate.now().toKotlinDate())
     val preview = com.raydon.moji.core.CountdownPolicy.dayCount(LocalDate.parse(occurrence.toString()).atStartOfDay(ZoneId.systemDefault()).toInstant().toString(), Instant.now().toString(), includesToday, ZoneId.systemDefault().id)
-    Dialog(onDismissRequest = { if (advanced) advanced = false else onDismiss() }, properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false)) {
+    val editState = listOf(title, date, repeat, includesToday, pinned, calendarSync)
+    val initialEditState = remember(existing?.id) { editState }
+    val requestDismiss = rememberEditorDismiss(editState != initialEditState, onDismiss)
+    val editorTitle = if (existing != null) "编辑这个日子" else if (context == "past") "添加纪念日" else "添加倒数日"
+    Dialog(onDismissRequest = { if (advanced) advanced = false else requestDismiss() }, properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false)) {
         MojiScreen {
             Column(Modifier.fillMaxSize()) {
-                MojiSheetBar(if (advanced) "更多设置" else if (existing != null) "编辑这个日子" else if (context == "past") "添加纪念日" else "添加倒数日",
-                    if (advanced) "编辑这个日子" else "取消", if (advanced) "" else "保存", { if (advanced) advanced = false else onDismiss() }, {
+                MojiSheetBar(if (advanced) "更多设置" else editorTitle,
+                    if (advanced) editorTitle else "取消", if (advanced) "" else "保存", { if (advanced) advanced = false else requestDismiss() }, {
                         viewModel.saveCountdown(draftId, title, date, repeat, includesToday, pinned, calendarSync,
                             existing?.symbolName ?: if (context == "past") "seal" else "hourglass", existing?.colorName ?: "vermilion", onSaved = onDismiss)
                     }, title.isNotBlank(), leadingIsBack = advanced)

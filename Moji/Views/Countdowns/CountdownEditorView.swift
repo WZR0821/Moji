@@ -47,6 +47,8 @@ struct CountdownEditorView: View {
     @State private var isSaving = false
     @State private var calendarError: String?
     @State private var visualQAAdvanced = false
+    @State private var initialEditState: [String]?
+    @State private var confirmsDiscard = false
 
     init(
         store: PlanStore,
@@ -69,6 +71,11 @@ struct CountdownEditorView: View {
     private var cleanTitle: String {
         title.trimmingCharacters(in: .whitespacesAndNewlines)
     }
+
+    private var editState: [String] {
+        [title, String(targetDate.timeIntervalSince1970), repeatRule.rawValue, String(includesToday), String(isPinned), String(calendarSyncEnabled)]
+    }
+    private var hasEdits: Bool { initialEditState.map { $0 != editState } ?? false }
 
     private var advancedSummary: String {
         var parts = [repeatRule.displayName]
@@ -132,7 +139,7 @@ struct CountdownEditorView: View {
             }
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("取消") { dismiss() }
+                    Button("取消") { IMETextInput.commit { if hasEdits { confirmsDiscard = true } else { dismiss() } } }.disabled(isSaving)
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("保存") {
@@ -144,7 +151,9 @@ struct CountdownEditorView: View {
                     .disabled((cleanTitle.isEmpty && !isTitleFocused) || isSaving)
                 }
             }
+            .confirmDiscardEdits(isDirty: hasEdits || isSaving, isPresented: $confirmsDiscard)
             .onAppear {
+                if initialEditState == nil { initialEditState = editState }
                 if event == nil { isTitleFocused = true }
 #if DEBUG
                 if ProcessInfo.processInfo.environment["MOJI_QA_SCENARIO"] == "workflow-moment-advanced" {

@@ -15,8 +15,6 @@ import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.graphics.toArgb
-import androidx.compose.ui.focus.FocusRequester
-import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -43,6 +41,7 @@ fun PlanScreen(viewModel: MojiViewModel) {
     var showLibrary by remember { mutableStateOf(false) }
     var copying by remember { mutableStateOf<CheckInItem?>(null) }
     var quickTitle by remember { mutableStateOf("") }
+    var quickDraftId by remember { mutableStateOf(java.util.UUID.randomUUID().toString()) }
     var expandedId by remember { mutableStateOf<String?>(null) }
     var showsCompleted by remember { mutableStateOf(false) }
     var addMenu by remember { mutableStateOf(false) }
@@ -52,15 +51,16 @@ fun PlanScreen(viewModel: MojiViewModel) {
     LaunchedEffect(qaRoute, snapshot.checkInItems.size) {
         if (!didQA && qaRoute.isNotEmpty() && snapshot.checkInItems.isNotEmpty()) {
             didQA = true
-            val sample = snapshot.checkInItems.firstOrNull { it.title == "整理 1.5.1 发布说明" }
+            val sample = snapshot.checkInItems.firstOrNull { it.title == "整理 1.6.0 发布说明" }
             when (qaRoute) {
-                "library", "templates", "library-batch" -> showLibrary = true
+                "library", "library-filters", "templates", "library-batch" -> showLibrary = true
                 "plan-new" -> showEditor = true
                 "calendar-month", "calendar-week", "calendar-day", "calendar-jump" -> showCalendar = true
                 "plan-editor", "plan-editor-advanced" -> { editing = sample; showEditor = true }
                 "plan-expanded", "plan-expanded-bottom", "plan-inline" -> expandedId = sample?.id
                 "plan-completed" -> showsCompleted = true
                 "plan-copy" -> copying = sample
+                else -> if (qaRoute.startsWith("plan-quick-")) expandedId = sample?.id
             }
         }
     }
@@ -83,23 +83,33 @@ fun PlanScreen(viewModel: MojiViewModel) {
     val total = pending.size + completed.size
     val toolbarPixels = with(androidx.compose.ui.platform.LocalDensity.current) { 44.dp.roundToPx() }
     LaunchedEffect(qaRoute, expandedId, pending.size) {
-        if (BuildConfig.DEBUG && qaRoute == "plan-expanded-bottom" && expandedId != null) {
-            kotlinx.coroutines.delay(600)
+        if (expandedId != null) {
+            kotlinx.coroutines.delay(200)
             val index = pending.indexOfFirst { it.id == expandedId }
-            if (index >= 0) listState.scrollToItem(3 + index + if (snapshot.activeSession != null || timer.running || timer.accumulatedSeconds > 0) 1 else 0, -toolbarPixels)
+            val activeOffset = if (snapshot.activeSession != null || timer.hasActiveFocus()) 1 else 0
+            val archivedIndex = completed.indexOfFirst { it.id == expandedId }
+            val target = if (index >= 0) 3 + index + activeOffset else if (archivedIndex >= 0 && showsCompleted) 4 + pending.size.coerceAtLeast(1) + activeOffset + archivedIndex else -1
+            if (target >= 0) listState.animateScrollToItem(target, -toolbarPixels)
         }
     }
-    val openLibrary = { addMenu = false; showLibrary = true }
+    fun addQuickPlan() {
+        val submitted = quickTitle.trim()
+        if (submitted.isEmpty()) return
+        viewModel.savePlan(existingId = quickDraftId, title = submitted, note = "", date = today, time = LocalTime.MIDNIGHT,
+            scheduleKind = "allDay", category = viewModel.defaultCategory, plannedMinutes = 25,
+            repeatRule = "never", weekdays = emptyList(), reminderMinutes = null, calendarSync = false, plannedDurationEnabled = false,
+            onSaved = { if (quickTitle.trim() == submitted) quickTitle = ""; quickDraftId = java.util.UUID.randomUUID().toString() })
+    }
     val openRecord = { addMenu = false; editing = null; editorKind = "completed"; showEditor = true }
     val openPlan = { addMenu = false; editing = null; editorKind = "planned"; showEditor = true }
-    MojiScreen {
+    MojiScreen(opaqueTopInset = true) {
         Box(Modifier.fillMaxSize()) {
         LazyColumn(Modifier.fillMaxSize(), state = listState) {
             item {
                 Box {
-                    MojiLargeTitle("计划", MojiIcon.Calendar, { showCalendar = true }, listOf(MojiIcon.Plus to { addMenu = true }), bottomPadding = 0.dp)
+                    MojiLargeTitle("计划", MojiIcon.Calendar, { showCalendar = true }, listOf(MojiIcon.Grid to { showLibrary = true }, MojiIcon.Plus to { addMenu = true }), bottomPadding = 0.dp, opaqueBackground = true)
                     Box(Modifier.align(Alignment.TopEnd).padding(end = 18.dp, top = 40.dp)) {
-                        PlanAddMenu(addMenu && listState.firstVisibleItemIndex == 0, { addMenu = false }, openLibrary, openRecord, openPlan)
+                        PlanAddMenu(addMenu && listState.firstVisibleItemIndex == 0, { addMenu = false }, openRecord, openPlan)
                     }
                 }
             }
@@ -107,14 +117,13 @@ fun PlanScreen(viewModel: MojiViewModel) {
                 InkCard(Modifier.fillMaxWidth().padding(start = 18.dp, end = 18.dp, top = 10.dp, bottom = 7.dp), padding = PaddingValues(0.dp)) {
                     Row(Modifier.fillMaxWidth().height(52.dp).padding(start = 16.dp, end = 6.dp), verticalAlignment = Alignment.CenterVertically) {
                         androidx.compose.foundation.text.BasicTextField(quickTitle, { quickTitle = it }, Modifier.weight(1f),
+                            keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(imeAction = androidx.compose.ui.text.input.ImeAction.Done),
+                            keyboardActions = androidx.compose.foundation.text.KeyboardActions(onDone = { addQuickPlan() }),
                             singleLine = true, textStyle = MaterialTheme.typography.bodyLarge.copy(color = MaterialTheme.colorScheme.onSurface),
                             cursorBrush = SolidColor(MaterialTheme.colorScheme.onSurface),
                             decorationBox = { inner -> if (quickTitle.isEmpty()) Text("写下一件要做的事", fontSize = 17.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.24f)); inner() })
                         Box(Modifier.size(44.dp).clickable(enabled = quickTitle.isNotBlank()) {
-                            viewModel.savePlan(title = quickTitle, note = "", date = today, time = LocalTime.MIDNIGHT,
-                                scheduleKind = "allDay", category = viewModel.defaultCategory, plannedMinutes = 25,
-                                repeatRule = "never", weekdays = emptyList(), reminderMinutes = null, calendarSync = false, plannedDurationEnabled = false)
-                            quickTitle = ""
+                            addQuickPlan()
                         }, contentAlignment = Alignment.Center) {
                             InkAsset("InkIconLoop", Modifier.size(36.dp).alpha(if (quickTitle.isBlank()) 0.18f else 0.65f))
                             MojiLineIcon(MojiIcon.Plus, 18.dp, MaterialTheme.colorScheme.onSurface.copy(alpha = if (quickTitle.isBlank()) 0.22f else 1f))
@@ -131,17 +140,17 @@ fun PlanScreen(viewModel: MojiViewModel) {
                     }
                     Spacer(Modifier.weight(1f))
                     InkDivider(Modifier.width(44.dp), 0.26f, inkSeed("dashboard-today-heading"))
-                    Text(if (total == 0) "今日无计划" else "完成 ${completed.size}/$total", Modifier.padding(start = 12.dp).widthIn(min = 78.dp),
+                    Text(if (total == 0) "今日无计划" else "完成 ${completed.count { it.status == "completed" }}/$total", Modifier.padding(start = 12.dp).widthIn(min = 78.dp),
                         fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onSurface.copy(alpha = if (total == 0) 0.5f else 1f))
                 }
             }
-            if (snapshot.activeSession != null || timer.running || timer.accumulatedSeconds > 0) item {
+            if (snapshot.activeSession != null || timer.hasActiveFocus()) item {
                 InkCard(Modifier.padding(horizontal = 18.dp, vertical = 7.dp)) {
                     Row(Modifier.fillMaxWidth().clickable { viewModel.openFocus() }, verticalAlignment = Alignment.CenterVertically) {
                         MojiLineIcon(MojiIcon.Timer, 22.dp)
                         Column(Modifier.weight(1f).padding(start = 10.dp)) {
                             Text(snapshot.activeSession?.title ?: timer.title, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
-                            Text(if (timer.running) "正在专注 · ${viewModel.remainingSeconds() / 60}:${(viewModel.remainingSeconds() % 60).toString().padStart(2, '0')}" else "专注已暂停", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f))
+                            Text(if (timer.running) "${timer.dashboardStatus()} · ${viewModel.remainingSeconds() / 60}:${(viewModel.remainingSeconds() % 60).toString().padStart(2, '0')}" else timer.dashboardStatus(), fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f))
                         }
                         MojiLineIcon(MojiIcon.ChevronRight, 16.dp)
                     }
@@ -165,7 +174,7 @@ fun PlanScreen(viewModel: MojiViewModel) {
             if (completed.isNotEmpty()) {
                 item {
                     Row(Modifier.fillMaxWidth().clickable { showsCompleted = !showsCompleted }.padding(start = 22.dp, end = 22.dp, top = 14.dp, bottom = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-                        Text("今日已归档 ${completed.size}", fontSize = 15.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f), modifier = Modifier.weight(1f))
+                        Text("今日已结束 ${completed.size}", fontSize = 15.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f), modifier = Modifier.weight(1f))
                         MojiChevronDown(showsCompleted)
                     }
                 }
@@ -174,15 +183,16 @@ fun PlanScreen(viewModel: MojiViewModel) {
                         { editing = item; showEditor = true }, { copying = item })
                 }
             }
-            item { Spacer(Modifier.height(32.dp)) }
+            item { Spacer(Modifier.height(8.dp)) }
         }
         if (listState.firstVisibleItemIndex > 0) {
             Row(Modifier.fillMaxWidth().height(44.dp).background(MaterialTheme.colorScheme.background).padding(horizontal = 18.dp), verticalAlignment = Alignment.CenterVertically) {
                 Box(Modifier.size(44.dp).clickable { showCalendar = true }, contentAlignment = Alignment.Center) { MojiLineIcon(MojiIcon.Calendar, 25.dp) }
-                Text("计划", modifier = Modifier.weight(1f), fontSize = 17.sp, fontWeight = FontWeight.SemiBold, textAlign = androidx.compose.ui.text.style.TextAlign.Center)
+                Text("计划", modifier = Modifier.weight(1f).padding(start = 44.dp), fontSize = 17.sp, fontWeight = FontWeight.SemiBold, textAlign = androidx.compose.ui.text.style.TextAlign.Center)
+                Box(Modifier.size(44.dp).clickable { showLibrary = true }, contentAlignment = Alignment.Center) { MojiLineIcon(MojiIcon.Grid, 23.dp) }
                 Box {
                     Box(Modifier.size(44.dp).clickable { addMenu = true }, contentAlignment = Alignment.Center) { MojiLineIcon(MojiIcon.Plus, 23.dp) }
-                    PlanAddMenu(addMenu, { addMenu = false }, openLibrary, openRecord, openPlan)
+                    PlanAddMenu(addMenu, { addMenu = false }, openRecord, openPlan)
                 }
             }
         }
@@ -194,9 +204,8 @@ fun PlanScreen(viewModel: MojiViewModel) {
 }
 
 @Composable
-private fun PlanAddMenu(expanded: Boolean, onDismiss: () -> Unit, onLibrary: () -> Unit, onRecord: () -> Unit, onPlan: () -> Unit) {
+private fun PlanAddMenu(expanded: Boolean, onDismiss: () -> Unit, onRecord: () -> Unit, onPlan: () -> Unit) {
     DropdownMenu(expanded, onDismiss) {
-        DropdownMenuItem({ Text("计划库与模板") }, onLibrary)
         DropdownMenuItem({ Text("记录已做") }, onRecord)
         DropdownMenuItem({ Text("详细添加计划") }, onPlan)
     }
@@ -277,142 +286,151 @@ fun MojiChevronDown(expanded: Boolean) {
 private fun PlanRow(plan: CheckInItem, today: LocalDate, expanded: Boolean, archived: Boolean, viewModel: MojiViewModel,
                     toggleExpansion: () -> Unit, onEdit: () -> Unit, onCopy: () -> Unit) {
     var menu by remember { mutableStateOf(false) }
-    var inline by remember { mutableStateOf(false) }
+    var confirmDelete by remember { mutableStateOf(false) }
+    var quickField by remember { mutableStateOf<PlanQuickField?>(null) }
     val qaRoute by viewModel.visualQaRoute.collectAsStateWithLifecycle()
-    var didInlineQA by remember { mutableStateOf(false) }
+    var didQA by remember { mutableStateOf(false) }
     LaunchedEffect(qaRoute, expanded) {
-        if (BuildConfig.DEBUG && !didInlineQA && expanded && qaRoute == "plan-inline" && plan.title == "整理 1.5.1 发布说明") {
-            didInlineQA = true
-            inline = true
+        if (BuildConfig.DEBUG && !didQA && expanded && plan.title == "整理 1.6.0 发布说明") {
+            val field = if (qaRoute == "plan-inline") PlanQuickField.CONTENT
+                else if (qaRoute.startsWith("plan-quick-")) PlanQuickField.entries.firstOrNull { it.name.equals(qaRoute.removePrefix("plan-quick-").substringBefore("-"), true) } else null
+            if (field != null) { didQA = true; quickField = field }
         }
     }
-    var title by remember(plan.title) { mutableStateOf(plan.title) }
-    var note by remember(plan.note) { mutableStateOf(plan.note) }
-    val inlineFocus = remember { FocusRequester() }
-    LaunchedEffect(inline, expanded) { if (inline && expanded) inlineFocus.requestFocus() }
     val timer by viewModel.pomodoro.collectAsStateWithLifecycle()
     val finished = plan.status in listOf("completed", "skipped")
     val date = Instant.parse(plan.scheduledStart).atZone(ZoneId.systemDefault())
     val schedule = scheduleOptions.firstOrNull { it.first == plan.scheduleKind && it.first != "exactTime" }?.second ?: date.format(DateTimeFormatter.ofPattern("HH:mm"))
-    val timing = schedule + if (plan.plannedDurationEnabled == true) " · 预计 ${plan.plannedMinutes} 分钟" else ""
+    val hasDuration = plan.plannedDurationEnabled ?: (plan.detailsConfigured != false && (plan.scheduleKind ?: "exactTime") == "exactTime")
+    val timing = schedule + if (hasDuration) " · 预计 ${editorDuration(plan.plannedMinutes.toLong())}" else ""
     val daysLate = ChronoUnit.DAYS.between(date.toLocalDate(), today).coerceAtLeast(0)
+    val repeatText = if (plan.repeatRule == "customWeekdays") plan.repeatWeekdays.orEmpty().sorted().joinToString("、") { mapOf(1 to "周日", 2 to "周一", 3 to "周二", 4 to "周三", 5 to "周四", 6 to "周五", 7 to "周六")[it].orEmpty() }.ifEmpty { "自选星期" }
+        else repeatOptions.firstOrNull { it.first == (plan.repeatRule ?: "never") }?.second ?: "不重复"
+    val reminderText = when (val m = plan.reminderMinutesBefore) { null -> "不提醒"; 0 -> "开始时"; 60 -> "提前 1 小时"; 1440 -> "提前 1 天"; else -> if (m % 60 == 0) "提前 ${m / 60} 小时" else "提前 $m 分钟" }
     val content: @Composable () -> Unit = {
         Column {
-            Box {
-                Row(Modifier.fillMaxWidth().combinedClickable(onClick = toggleExpansion, onLongClick = { menu = true }).padding(vertical = 14.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Box(Modifier.size(44.dp).clickable { viewModel.togglePlan(plan.id) }, contentAlignment = Alignment.Center) {
-                        if (finished) {
-                            Box(Modifier.size(20.dp).background(MaterialTheme.colorScheme.onSurface, CircleShape), contentAlignment = Alignment.Center) {
-                                Text(if (plan.status == "skipped") "−" else "✓", fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.surface)
-                            }
-                            InkAsset("InkIconLoop", Modifier.requiredSize(54.dp).alpha(0.78f))
-                            InkAsset("InkCheckMark", Modifier.size(20.dp, 17.dp))
-                        } else {
-                            Box(Modifier.size(20.dp).border(1.5.dp, MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f), CircleShape))
+            Row(Modifier.fillMaxWidth().combinedClickable(onClick = { if (expanded) quickField = PlanQuickField.CONTENT else toggleExpansion() }, onLongClick = { menu = true }).padding(vertical = 10.dp),
+                verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                Box(Modifier.size(44.dp).clickable { viewModel.togglePlan(plan.id) }, contentAlignment = Alignment.Center) {
+                    if (finished) {
+                        Box(Modifier.size(20.dp).background(MaterialTheme.colorScheme.onSurface, CircleShape), contentAlignment = Alignment.Center) {
+                            Text(if (plan.status == "skipped") "−" else "✓", fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.surface)
+                        }
+                        InkAsset("InkIconLoop", Modifier.requiredSize(54.dp).alpha(0.78f))
+                        InkAsset("InkCheckMark", Modifier.size(20.dp, 17.dp))
+                    } else Box(Modifier.size(20.dp).border(1.5.dp, MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f), CircleShape))
+                }
+                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Box {
+                        Text(plan.title, fontSize = 17.sp, maxLines = if (expanded) Int.MAX_VALUE else 2, overflow = TextOverflow.Ellipsis,
+                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = if (plan.status == "completed") 0.5f else 1f))
+                        if (finished) Box(Modifier.matchParentSize(), contentAlignment = Alignment.Center) {
+                            InkAsset("InkTaskStrike", Modifier.fillMaxWidth().height(11.dp).offset(y = 1.dp).alpha(if (plan.status == "skipped") 0.46f else 0.72f))
                         }
                     }
-                    Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
-                        Box {
-                            Text(plan.title, fontSize = 17.sp, maxLines = if (expanded) 2 else 1, overflow = TextOverflow.Ellipsis,
-                                color = MaterialTheme.colorScheme.onSurface.copy(alpha = if (plan.status == "completed") 0.5f else 1f))
-                            if (finished) Box(Modifier.matchParentSize(), contentAlignment = Alignment.Center) {
-                                InkAsset("InkTaskStrike", Modifier.fillMaxWidth().height(11.dp).offset(y = 1.dp).alpha(if (plan.status == "skipped") 0.46f else 0.72f))
-                            }
-                        }
+                    if (!expanded) {
                         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(5.dp)) {
                             MojiLineIcon(if (plan.scheduleKind == "exactTime") MojiIcon.Clock else MojiIcon.Sun, 9.dp, MaterialTheme.colorScheme.secondary)
-                            Text(schedule, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
-                            Text((if (plan.plannedDurationEnabled == true) "· ${editorDuration(plan.plannedMinutes.toLong())} · " else "· ") + categoryName(plan.category), fontSize = 11.sp, maxLines = 1, color = MaterialTheme.colorScheme.secondary)
+                            Text(schedule + (if (hasDuration) " · ${editorDuration(plan.plannedMinutes.toLong())}" else "") + " · " + categoryName(plan.category),
+                                fontSize = 11.sp, maxLines = 2, color = MaterialTheme.colorScheme.secondary)
                         }
-                        if (!expanded && plan.note.isNotEmpty()) Text(plan.note, fontSize = 12.sp, maxLines = 2, minLines = 2, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f))
+                        if (plan.note.isNotEmpty()) Text(plan.note, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, color = MaterialTheme.colorScheme.secondary)
                     }
-                    if (daysLate > 0 && !finished) InkSeal(if (daysLate > 99) "99+" else daysLate.toString(), 26)
-                    Box(Modifier.size(44.dp).clickable(onClick = toggleExpansion), contentAlignment = Alignment.Center) { MojiChevronDown(expanded) }
                 }
-                DropdownMenu(menu, { menu = false }) {
-                    DropdownMenuItem({ Text("修改") }, { menu = false; onEdit() })
-                    DropdownMenuItem({ Text("复制到今天") }, { menu = false; viewModel.copyPlan(plan.id, today) })
-                    DropdownMenuItem({ Text("复制到指定日期") }, { menu = false; onCopy() })
-                    DropdownMenuItem({ Text("保存为模板") }, { menu = false; viewModel.saveTemplate(plan.id) })
-                    DropdownMenuItem({ Text("归档") }, { menu = false; viewModel.batchPlans(setOf(plan.id), archived = true) })
-                    if (plan.status == "planned") {
-                        DropdownMenuItem({ Text("顺延") }, { menu = false; viewModel.postponePlan(plan.id) })
-                        DropdownMenuItem({ Text("跳过") }, { menu = false; viewModel.skipPlan(plan.id) })
-                    }
-                    DropdownMenuItem({ Text("删除") }, { menu = false; viewModel.deletePlan(plan.id) })
-                }
+                if (daysLate > 0 && !finished) InkSeal(if (daysLate > 99) "99+" else daysLate.toString(), 22)
+                Box(Modifier.size(44.dp).clickable(onClick = toggleExpansion), contentAlignment = Alignment.Center) { MojiChevronDown(expanded) }
             }
             if (expanded) {
                 InkDivider()
-                Column(Modifier.padding(top = 12.dp, bottom = 10.dp), verticalArrangement = Arrangement.spacedBy(13.dp)) {
-                    if (inline) {
-                        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(7.dp)) {
-                                InkSeal("改", 19, style = 2); Text("快捷编辑", fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f))
+                Column(Modifier.padding(top = 8.dp, bottom = 12.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Row(Modifier.fillMaxWidth().heightIn(min = 32.dp).clickable { quickField = PlanQuickField.CONTENT }, verticalAlignment = Alignment.Top, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text(plan.note.ifEmpty { "添加备注" }, fontSize = 15.sp, lineHeight = 21.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = if (plan.note.isEmpty()) 0.5f else 0.86f), modifier = Modifier.weight(1f))
+                        MojiLineIcon(MojiIcon.Edit, 12.dp, MaterialTheme.colorScheme.onSurface.copy(alpha = 0.3f))
+                    }
+                    Column(Modifier.background(MaterialTheme.colorScheme.onSurface.copy(alpha = 0.045f), RoundedCornerShape(12.dp))) {
+                        PlanDetailRow("日期", date.format(DateTimeFormatter.ofPattern("M月d日 E", Locale.SIMPLIFIED_CHINESE)), MojiIcon.Calendar) { quickField = PlanQuickField.DATE }
+                        HorizontalDivider(Modifier.padding(start = 38.dp), thickness = 0.5.dp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.12f))
+                        PlanDetailRow("安排", timing, if (plan.scheduleKind == "exactTime") MojiIcon.Clock else MojiIcon.Sun) { quickField = PlanQuickField.SCHEDULE }
+                        HorizontalDivider(Modifier.padding(start = 38.dp), thickness = 0.5.dp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.12f))
+                        PlanDetailRow("类型", categoryName(plan.category), when (plan.category) { "work" -> MojiIcon.Work; "study" -> MojiIcon.Book; else -> MojiIcon.Tag }) { quickField = PlanQuickField.CATEGORY }
+                    }
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        PlanDetailPill(repeatText, MojiIcon.Repeat, Modifier.weight(1f)) { quickField = PlanQuickField.RECURRENCE }
+                        PlanDetailPill(reminderText, MojiIcon.Bell, Modifier.weight(1f)) { quickField = PlanQuickField.REMINDER }
+                    }
+                    if (plan.calendarEventIdentifier != null) Text("已写入系统日历", fontSize = 12.sp, color = MaterialTheme.colorScheme.secondary)
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Box(Modifier.weight(1f)) {
+                            Row(Modifier.fillMaxWidth().heightIn(min = 44.dp).background(MaterialTheme.colorScheme.onSurface.copy(alpha = 0.045f), RoundedCornerShape(11.dp)).clickable { menu = true },
+                                verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(7.dp, Alignment.CenterHorizontally)) {
+                                MojiLineIcon(MojiIcon.Ellipsis, 14.dp, MaterialTheme.colorScheme.secondary)
+                                Text("更多操作", fontSize = 13.sp, fontWeight = FontWeight.Medium, color = MaterialTheme.colorScheme.secondary)
                             }
-                            androidx.compose.foundation.text.BasicTextField(title, { title = it }, Modifier.fillMaxWidth().heightIn(min = 42.dp).focusRequester(inlineFocus).padding(vertical = 10.dp), singleLine = true, textStyle = MaterialTheme.typography.bodyLarge.copy(color = MaterialTheme.colorScheme.onSurface), cursorBrush = SolidColor(MaterialTheme.colorScheme.onSurface))
-                            androidx.compose.foundation.text.BasicTextField(note, { note = it }, Modifier.fillMaxWidth().heightIn(min = 88.dp, max = 126.dp).background(MaterialTheme.colorScheme.onSurface.copy(alpha = 0.045f), RoundedCornerShape(10.dp)).padding(horizontal = 11.dp, vertical = 8.dp), textStyle = MaterialTheme.typography.bodyMedium.copy(fontSize = 15.sp, lineHeight = 23.sp, color = MaterialTheme.colorScheme.onSurface), cursorBrush = SolidColor(MaterialTheme.colorScheme.onSurface), decorationBox = { inner -> Box { if (note.isBlank()) Text("添加详细说明（可选）", fontSize = 15.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.3f)); inner() } })
-                            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(9.dp)) {
-                                Box(Modifier.weight(1f).height(44.dp).background(MaterialTheme.colorScheme.onSurface.copy(alpha = 0.06f), RoundedCornerShape(11.dp)).clickable { inline = false; title = plan.title; note = plan.note }, contentAlignment = Alignment.Center) { Text("取消", fontSize = 17.sp) }
-                                Box(Modifier.weight(1f).height(44.dp).alpha(if (title.isNotBlank()) 1f else 0.42f).background(MaterialTheme.colorScheme.onSurface, RoundedCornerShape(11.dp)).clickable(enabled = title.isNotBlank()) { viewModel.quickEditPlan(plan.id, title, note); inline = false }, contentAlignment = Alignment.Center) { Text("保存", fontSize = 17.sp, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.background) }
+                            PlanRowMenu(menu, { menu = false }, plan, today, viewModel, onEdit, onCopy, { confirmDelete = true })
+                        }
+                        if (plan.status in listOf("planned", "inProgress")) Row(Modifier.weight(1f).heightIn(min = 44.dp).background(MaterialTheme.colorScheme.onSurface, RoundedCornerShape(12.dp)).clickable {
+                            if (!timer.hasActiveFocus()) { viewModel.selectPomodoroPhase("focus"); viewModel.linkPomodoro(plan) }
+                            viewModel.openFocus()
+                        }.padding(horizontal = 11.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            MojiLineIcon(MojiIcon.Timer, 17.dp, MaterialTheme.colorScheme.background)
+                            Column(verticalArrangement = Arrangement.spacedBy(1.dp)) {
+                                Text(if (timer.hasActiveFocus()) "继续专注" else "去专注", fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.background)
+                                Text(if (timer.hasActiveFocus()) "前往当前会话" else "选择时长后开始", fontSize = 11.sp, color = MaterialTheme.colorScheme.background.copy(alpha = 0.72f))
                             }
-                        }
-                    } else if (plan.note.isNotEmpty()) {
-                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(7.dp)) { InkSeal("注", 19); Text("详细说明", fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f)) }
-                            androidx.compose.foundation.text.selection.SelectionContainer { Text(plan.note, fontSize = 15.sp, lineHeight = 22.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.86f)) }
-                        }
-                    }
-                    val details = buildList {
-                        add("日期" to date.format(DateTimeFormatter.ofPattern("M月d日 E", Locale.SIMPLIFIED_CHINESE)))
-                        add("安排" to timing); add("类型" to categoryName(plan.category))
-                        if (plan.repeatRule != null && plan.repeatRule != "never") add("重复" to (repeatOptions.firstOrNull { it.first == plan.repeatRule }?.second ?: "自定义星期"))
-                        plan.reminderMinutesBefore?.let { add("提醒" to if (it == 0) "开始时" else "提前 $it 分钟") }
-                        if (plan.calendarEventIdentifier != null) add("系统日历" to "已同步")
-                    }
-                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        details.chunked(2).forEach { pair ->
-                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                pair.forEach { (label, value) ->
-                                    Row(Modifier.weight(1f).background(MaterialTheme.colorScheme.onSurface.copy(alpha = 0.045f), RoundedCornerShape(10.dp)).padding(horizontal = 10.dp, vertical = 9.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                        val glyph = when (label) {
-                                            "日期", "系统日历" -> MojiIcon.Calendar
-                                            "重复" -> MojiIcon.Repeat
-                                            "类型" -> when (plan.category) { "work" -> MojiIcon.Work; "study" -> MojiIcon.Book; else -> MojiIcon.Tag }
-                                            "提醒" -> MojiIcon.Bell
-                                            else -> MojiIcon.Clock
-                                        }
-                                        MojiLineIcon(glyph, 18.dp, MaterialTheme.colorScheme.onSurface.copy(alpha = 0.78f))
-                                        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                                            Text(label, fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f))
-                                            Text(value, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                    if (!inline) Row(horizontalArrangement = Arrangement.spacedBy(9.dp)) {
-                        listOf(Triple("快捷编辑", MojiIcon.PencilLine, { inline = true }), Triple("更多设置", MojiIcon.Sliders, onEdit)).forEach { (label, icon, action) ->
-                            Row(Modifier.weight(1f).height(44.dp).clickable(onClick = action), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(7.dp, Alignment.CenterHorizontally)) { MojiLineIcon(icon, 12.dp, MaterialTheme.colorScheme.secondary); Text(label, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.secondary) }
-                        }
-                    }
-                    if (plan.status == "planned") Row(Modifier.fillMaxWidth().heightIn(min = 48.dp).background(MaterialTheme.colorScheme.onSurface, RoundedCornerShape(12.dp)).clickable {
-                        if (!timer.running && timer.accumulatedSeconds == 0) { viewModel.selectPomodoroPhase("focus"); viewModel.linkPomodoro(plan) }
-                        viewModel.openFocus()
-                    }.padding(horizontal = 11.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        MojiLineIcon(MojiIcon.Timer, 17.dp, MaterialTheme.colorScheme.background)
-                        Column(verticalArrangement = Arrangement.spacedBy(1.dp)) {
-                            Text("开始番茄钟", fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.background)
-                            Text(if (timer.running || timer.accumulatedSeconds > 0) "前往当前会话" else "带入专注", fontSize = 11.sp, color = MaterialTheme.colorScheme.background.copy(alpha = 0.72f))
                         }
                     }
                 }
-            }
+            } else PlanRowMenu(menu, { menu = false }, plan, today, viewModel, onEdit, onCopy, { confirmDelete = true })
         }
     }
     Column(Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 2.dp)) {
         if (expanded) InkCard(padding = PaddingValues(horizontal = 14.dp)) { content() } else Column(Modifier.padding(horizontal = 4.dp)) { content() }
         if (!archived && !expanded) InkDivider(Modifier.padding(start = 58.dp), 0.34f, inkSeed(plan.id.uppercase()))
     }
+    quickField?.let { PlanQuickEditorDialog(plan, it, viewModel) { quickField = null } }
+    if (confirmDelete) AlertDialog(onDismissRequest = { confirmDelete = false }, title = { Text("删除这项计划？") },
+        text = { Text(plan.title) },
+        confirmButton = { TextButton(onClick = { confirmDelete = false; viewModel.deletePlan(plan.id) }) { Text("删除", color = mojiVermilion) } },
+        dismissButton = { TextButton(onClick = { confirmDelete = false }) { Text("取消") } })
 }
+
+@Composable
+private fun PlanDetailRow(title: String, value: String, icon: MojiIcon, onClick: () -> Unit) {
+    Row(Modifier.fillMaxWidth().clickable(onClick = onClick).heightIn(min = 44.dp).padding(horizontal = 10.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        MojiLineIcon(icon, 18.dp)
+        Text(title, fontSize = 13.sp, color = MaterialTheme.colorScheme.secondary, modifier = Modifier.width(32.dp))
+        Text(value, fontSize = 14.sp, fontWeight = FontWeight.Medium, modifier = Modifier.weight(1f))
+        MojiLineIcon(MojiIcon.ChevronRight, 10.dp, MaterialTheme.colorScheme.onSurface.copy(alpha = 0.3f))
+    }
+}
+
+@Composable
+private fun PlanDetailPill(value: String, icon: MojiIcon, modifier: Modifier, onClick: () -> Unit) {
+    Row(modifier.heightIn(min = 36.dp).background(MaterialTheme.colorScheme.onSurface.copy(alpha = 0.045f), RoundedCornerShape(10.dp)).clickable(onClick = onClick).padding(horizontal = 10.dp, vertical = 6.dp),
+        verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+        MojiLineIcon(icon, 12.dp)
+        Text(value, fontSize = 12.sp, modifier = Modifier.weight(1f))
+        MojiLineIcon(MojiIcon.ChevronRight, 9.dp, MaterialTheme.colorScheme.onSurface.copy(alpha = 0.3f))
+    }
+}
+
+@Composable
+private fun PlanRowMenu(expanded: Boolean, onDismiss: () -> Unit, plan: CheckInItem, today: LocalDate,
+                        viewModel: MojiViewModel, onEdit: () -> Unit, onCopy: () -> Unit, onDelete: () -> Unit) {
+    DropdownMenu(expanded, onDismiss) {
+        DropdownMenuItem({ Text("完整编辑") }, { onDismiss(); onEdit() })
+        DropdownMenuItem({ Text("复制到今天") }, { onDismiss(); viewModel.copyPlan(plan.id, today) })
+        DropdownMenuItem({ Text("复制到指定日期") }, { onDismiss(); onCopy() })
+        DropdownMenuItem({ Text("保存为模板") }, { onDismiss(); viewModel.saveTemplate(plan.id) })
+        DropdownMenuItem({ Text("归档") }, { onDismiss(); viewModel.batchPlans(setOf(plan.id), archived = true) })
+        if (plan.status == "planned") {
+            DropdownMenuItem({ Text("顺延") }, { onDismiss(); viewModel.postponePlan(plan.id) })
+            DropdownMenuItem({ Text("跳过") }, { onDismiss(); viewModel.skipPlan(plan.id) })
+        }
+        DropdownMenuItem({ Text("删除", color = mojiVermilion) }, { onDismiss(); onDelete() })
+    }
+}
+
+private fun com.raydon.moji.android.data.PomodoroState.hasActiveFocus(): Boolean =
+    running || accumulatedSeconds > 0 || pendingNextPhase != null || linkedPlanId.isNotBlank() || remainingSeconds < phaseDurationSeconds

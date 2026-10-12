@@ -24,7 +24,22 @@ data class PomodoroState(
     val durationIsPlanOwned: Boolean = false,
     val pendingNextPhase: String? = null,
     val completedPhase: String? = null,
-)
+) {
+    /** Match the iOS dashboard: linking a plan is preparation, not a pause. */
+    fun dashboardStatus(): String {
+        fun label(value: String) = when (value) {
+            "shortBreak" -> "短休息"
+            "longBreak" -> "长休息"
+            else -> "专注"
+        }
+        completedPhase?.takeIf { pendingNextPhase != null }?.let { return "${label(it)}完成" }
+        return label(phase) + when {
+            running -> "中"
+            remainingSeconds < phaseDurationSeconds -> "已暂停"
+            else -> "待开始"
+        }
+    }
+}
 
 class AndroidSettings(context: Context) {
     private val prefs = context.getSharedPreferences("moji.settings", Context.MODE_PRIVATE)

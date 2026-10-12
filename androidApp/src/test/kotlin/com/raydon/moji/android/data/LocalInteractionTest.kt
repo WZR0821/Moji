@@ -10,6 +10,14 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class LocalInteractionTest {
+    @Test fun focusStatusDistinguishesPreparedRunningPausedAndCompleted() {
+        assertEquals("专注待开始", PomodoroState(linkedPlanId = "plan").dashboardStatus())
+        assertEquals("专注中", PomodoroState(running = true).dashboardStatus())
+        assertEquals("专注已暂停", PomodoroState(remainingSeconds = 900).dashboardStatus())
+        assertEquals("短休息待开始", PomodoroState(phase = "shortBreak").dashboardStatus())
+        assertEquals("专注完成", PomodoroState(completedPhase = "focus", pendingNextPhase = "shortBreak").dashboardStatus())
+        assertEquals("短休息中", PomodoroState(phase = "shortBreak", running = true, completedPhase = "focus").dashboardStatus())
+    }
     @Test fun calendarPairsCompletedPlanWithItsExactRecordWithoutDuplicate() {
         val item = CheckInItem(id = "p", title = "计划", scheduledStart = "2026-10-06T00:00:00Z", createdAt = "2026-10-06T00:00:00Z", status = "completed", actualStartDate = "2026-10-07T01:00:00+00:00", actualEndDate = "2026-10-07T01:45:00Z")
         val exact = TimeRecord(id = "r", title = "计划", startDate = "2026-10-07T01:00:00Z", endDate = "2026-10-07T01:45:00Z", checkInItemID = "p")

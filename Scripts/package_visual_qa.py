@@ -1,54 +1,64 @@
-"""Package the final paired screenshot matrix, not provisional captures."""
+"""Package only the expected final screenshot matrix, never a provisional subset."""
 import hashlib
 import json
+import math
 from pathlib import Path
 import struct
 import zipfile
 
 ROOT = Path(__file__).resolve().parents[1]
-EVIDENCE = ROOT / "build/1.5.1-qa"
-OUTPUT = ROOT / "dist/Source/Moji-v1.5.1-build41-visual-qa.zip"
 
 def main():
-    originals = sorted((EVIDENCE / "ios").glob("*.png"))
-    names = {p.name for p in originals}
-    if len(names) != 59 or sum(n.endswith("-light.png") for n in names) != 45:
-        raise SystemExit("Expected exactly 45 light and 14 dark final iOS captures")
-    if names != {p.name for p in (EVIDENCE / "android").glob("*.png")}:
-        raise SystemExit("Android/iOS final screenshot matrix differs")
-    paths = originals + sorted((EVIDENCE / "android").glob("*.png"))
-    paths += sorted((EVIDENCE / "comparisons").glob("*.png"))
-    if len(list((EVIDENCE / "comparisons").glob("sheet-*.png"))) != 16:
-        raise SystemExit("Expected 12 light and 4 dark contact sheets")
-    for name in ["android-inline-before.xml", "android-inline-keyboard.xml", "android-inline-keyboard.png", "android-inline-ready.xml", "android-inline-saved.xml", "android-inline-saved.png", "android-inline-relaunch.xml", "android-inline-relaunch.png"]:
-        paths.append(EVIDENCE / "manual" / name)
-    if OUTPUT.exists():
-        raise SystemExit(f"Not overwriting evidence archive: {OUTPUT}")
-    OUTPUT.parent.mkdir(parents=True, exist_ok=True)
-    manifest = {"version": "1.5.1", "build": 41, "paired_states": 59,
-                "original_screenshots": 118, "light_states": 45, "dark_states": 14,
+    version = dict(line.split("=", 1) for line in (ROOT / "version.properties").read_text().splitlines() if "=" in line)
+    name, build = version["versionName"], int(version["versionCode"])
+    evidence = ROOT / f"build/{name}-qa"
+    output = ROOT / f"dist/Source/Moji-v{name}-build{build}-visual-qa.zip"
+    matrix = json.loads((evidence / "expected-matrix.json").read_text())
+    if (matrix["version"], matrix["build"]) != (name, build):
+        raise SystemExit("Screenshot matrix does not match the release version")
+    expected = {f"{route}-{mode}.png" for mode in ("light", "dark") for route in matrix[mode]}
+    for platform in ("ios", "android"):
+        if {p.name for p in (evidence / platform).glob("*.png")} != expected:
+            raise SystemExit(f"{platform} screenshot set does not match expected-matrix.json")
+    sheet_count = sum(math.ceil(len(matrix[mode]) / 4) for mode in ("light", "dark"))
+    if len(list((evidence / "comparisons").glob("sheet-*.png"))) != sheet_count:
+        raise SystemExit("Contact sheets are incomplete or contain provisional leftovers")
+    paths = sorted((evidence / "ios").glob("*.png")) + sorted((evidence / "android").glob("*.png"))
+    paths += sorted((evidence / "comparisons").glob("*.png"))
+    paths += [p for p in sorted((evidence / "manual").glob("*")) if p.suffix in {".png", ".xml", ".json"}]
+    paths.append(evidence / "expected-matrix.json")
+    paths += [evidence / name for name in (
+        "ios-tests-final.log", "ios-visual-build-final.log", "ios-release.log",
+        "android-validation-final.log", "core-tests-fresh.log", "manual-focus-final.log",
+    )]
+    if not list((evidence / "manual").glob("*.png")):
+        raise SystemExit("Missing manual input evidence")
+    if output.exists():
+        raise SystemExit(f"Not overwriting evidence archive: {output}")
+    output.parent.mkdir(parents=True, exist_ok=True)
+    manifest = {"version": name, "build": build, "paired_states": len(expected),
+                "original_screenshots": len(expected) * 2,
+                "light_states": len(matrix["light"]), "dark_states": len(matrix["dark"]),
                 "reference": "iOS left, Android right in comparison images",
-                "limits": "Simulator fixture review, not a zero-pixel/all-device guarantee; see VERIFICATION_1.5.1.md",
+                "limits": f"Simulator fixture review, not a zero-pixel/all-device guarantee; see VERIFICATION_{name}.md",
                 "files": []}
-    with zipfile.ZipFile(OUTPUT, "x", compression=zipfile.ZIP_DEFLATED) as archive:
+    with zipfile.ZipFile(output, "x", compression=zipfile.ZIP_DEFLATED) as archive:
         for path in paths:
             data = path.read_bytes()
-            relative = path.relative_to(EVIDENCE).as_posix()
-            # Avoid colon-containing filenames on Windows.
-            name = relative.replace(":", "-")
+            relative = path.relative_to(evidence).as_posix()
+            safe_name = relative.replace(":", "-")
             if relative.startswith(("ios/", "android/")):
-                if data[:8] != b"\x89PNG\r\n\x1a\n" or struct.unpack(">II", data[16:24]) != (1179, 2556):
+                if data[:8] != b"\x89PNG\r\n\x1a\n" or struct.unpack(">II", data[16:24]) != (matrix["width"], matrix["height"]):
                     raise SystemExit(f"Invalid original screenshot: {relative}")
-            archive.writestr(name, data)
-            manifest["files"].append({"path": name, "capture_path": relative,
-                                      "sha256": hashlib.sha256(data).hexdigest()})
-        for relative in ["docs/VERIFICATION_1.5.1.md", "docs/RELEASE_NOTES_1.5.1.md", "Scripts/fixtures/workflow-1.5.json"]:
+            archive.writestr(safe_name, data)
+            manifest["files"].append({"path": safe_name, "capture_path": relative, "sha256": hashlib.sha256(data).hexdigest()})
+        for relative in [f"docs/VERIFICATION_{name}.md", f"docs/RELEASE_NOTES_{name}.md", "Scripts/fixtures/workflow-1.6.json"]:
             archive.write(ROOT / relative, Path(relative).name)
         archive.writestr("EVIDENCE_MANIFEST.json", json.dumps(manifest, ensure_ascii=False, indent=2) + "\n")
-    with zipfile.ZipFile(OUTPUT) as archive:
+    with zipfile.ZipFile(output) as archive:
         if archive.testzip():
             raise SystemExit("Evidence ZIP CRC failure")
-    print(f"Packaged 59 paired states and manual input evidence: {OUTPUT}")
+    print(f"Packaged {len(expected)} paired states and manual input evidence: {output}")
 
 if __name__ == "__main__":
     main()

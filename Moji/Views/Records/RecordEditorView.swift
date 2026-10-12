@@ -25,6 +25,8 @@ struct CheckInEditorView: View {
     @State private var isAdvancedSettingsExpanded: Bool
     @State private var isSaving = false
     @State private var calendarError: String?
+    @State private var initialEditState: [String]?
+    @State private var confirmsDiscard = false
 
     init(
         store: PlanStore,
@@ -85,17 +87,21 @@ struct CheckInEditorView: View {
             initialValue: Set(initialWeekdays.isEmpty ? [scheduledWeekday] : initialWeekdays)
         )
         _reminderMinutesBefore = State(initialValue: item?.reminderMinutesBefore ?? -1)
-        _isAdvancedSettingsExpanded = State(
-            initialValue: item?.hasPlannedDuration == true
-                || item?.effectiveRepeatRule != .never
-                || item?.reminderMinutesBefore != nil
-                || item?.calendarSyncEnabled == true
-        )
+        _isAdvancedSettingsExpanded = State(initialValue: false)
     }
 
     private var cleanTitle: String {
         title.trimmingCharacters(in: .whitespacesAndNewlines)
     }
+
+    private var editState: [String] {
+        [kind.rawValue, title, note, category.rawValue, scheduleKind.rawValue,
+         String(scheduledStart.timeIntervalSince1970), String(plannedMinutes), String(plannedDurationEnabled),
+         String(actualStart.timeIntervalSince1970), String(actualEnd.timeIntervalSince1970),
+         String(calendarSyncEnabled), repeatRule.rawValue, selectedWeekdays.sorted().map(String.init).joined(separator: ","),
+         String(reminderMinutesBefore)]
+    }
+    private var hasEdits: Bool { initialEditState.map { $0 != editState } ?? false }
 
     private var actualMinutes: Int {
         guard actualEnd > actualStart else { return 0 }
@@ -118,15 +124,6 @@ struct CheckInEditorView: View {
 
                 ScrollViewReader { proxy in
                 Form {
-                    Section("记录方式") {
-                        Picker("记录方式", selection: $kind) {
-                            ForEach(CheckInKind.allCases) { option in
-                                Text(option.displayName).tag(option)
-                            }
-                        }
-                        .pickerStyle(.segmented)
-                    }
-
                     Section("标题") {
                         IMESafeTextField(
                             placeholder: kind == .planned
@@ -144,8 +141,8 @@ struct CheckInEditorView: View {
                             text: $note,
                             axis: .vertical
                         )
-                            .lineLimit(5...12)
-                            .frame(minHeight: 116, alignment: .topLeading)
+                            .lineLimit(3...12)
+                            .frame(minHeight: 66, alignment: .topLeading)
                             .accessibilityIdentifier("plan.editor.details")
                     } header: {
                         Text("详细说明（可选）")
@@ -171,6 +168,7 @@ struct CheckInEditorView: View {
                 .onAppear {
 #if DEBUG
                     if ProcessInfo.processInfo.environment["MOJI_QA_SCENARIO"] == "workflow-plan-editor-advanced" {
+                        isAdvancedSettingsExpanded = true
                         DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { proxy.scrollTo("visual-advanced", anchor: .top) }
                     }
 #endif
@@ -179,7 +177,7 @@ struct CheckInEditorView: View {
             }
             .navigationTitle(
                 item == nil
-                    ? kind.displayName
+                    ? (kind == .planned ? "新建计划" : "记录已做")
                     : (kind == .planned ? "编辑计划" : "记录已做")
             )
             .navigationBarTitleDisplayMode(.inline)
@@ -187,7 +185,7 @@ struct CheckInEditorView: View {
             .toolbarBackground(.visible, for: .navigationBar)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("取消") { dismiss() }
+                    Button("取消") { IMETextInput.commit { if hasEdits { confirmsDiscard = true } else { dismiss() } } }
                         .disabled(isSaving)
                 }
                 ToolbarItem(placement: .confirmationAction) {
@@ -201,11 +199,13 @@ struct CheckInEditorView: View {
                 }
             }
             .onAppear {
+                if initialEditState == nil { initialEditState = editState }
                 if item == nil { isTitleFocused = true }
 #if DEBUG
                 runEditorQAScenarioIfNeeded()
 #endif
             }
+            .confirmDiscardEdits(isDirty: hasEdits || isSaving, isPresented: $confirmsDiscard)
             .onChange(of: kind) { previousKind, newKind in
                 guard previousKind != newKind, newKind == .completedLog else { return }
                 if scheduleKind == .exactTime {
@@ -702,6 +702,8 @@ struct RecordEditorView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var isTitleFocused = false
     @State private var showsDeleteConfirmation = false
+    @State private var initialEditState: [String]?
+    @State private var confirmsDiscard = false
 
     @State private var title: String
     @State private var category: RecordCategory
@@ -726,6 +728,9 @@ struct RecordEditorView: View {
     private var cleanTitle: String {
         title.trimmingCharacters(in: .whitespacesAndNewlines)
     }
+
+    private var editState: [String] { [title, note, category.rawValue, scheduleKind.rawValue, String(startDate.timeIntervalSince1970), String(endDate.timeIntervalSince1970)] }
+    private var hasEdits: Bool { initialEditState.map { $0 != editState } ?? false }
 
     private var durationMinutes: Int {
         guard endDate > startDate else { return 0 }
@@ -758,8 +763,8 @@ struct RecordEditorView: View {
                             text: $note,
                             axis: .vertical
                         )
-                            .lineLimit(5...12)
-                            .frame(minHeight: 116, alignment: .topLeading)
+                            .lineLimit(3...12)
+                            .frame(minHeight: 66, alignment: .topLeading)
                             .accessibilityIdentifier("record.details")
                     }
 
@@ -840,7 +845,7 @@ struct RecordEditorView: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("取消") { dismiss() }
+                    Button("取消") { IMETextInput.commit { if hasEdits { confirmsDiscard = true } else { dismiss() } } }
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("保存") {
@@ -850,7 +855,9 @@ struct RecordEditorView: View {
                     .disabled(!canSave && !isTitleFocused)
                 }
             }
+            .confirmDiscardEdits(isDirty: hasEdits, isPresented: $confirmsDiscard)
             .onAppear {
+                if initialEditState == nil { initialEditState = editState }
                 if record == nil { isTitleFocused = true }
             }
             .alert("删除记录？", isPresented: $showsDeleteConfirmation) {

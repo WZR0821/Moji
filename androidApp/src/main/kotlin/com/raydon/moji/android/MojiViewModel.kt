@@ -192,11 +192,17 @@ class MojiViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun togglePlan(id: String) = launchMutation { app.repository.togglePlan(id) }
-    fun quickEditPlan(id: String, title: String, note: String) = launchMutation {
-        if (title.isBlank()) return@launchMutation
-        app.repository.mutate { state -> state.copy(checkInItems = state.checkInItems.map {
-            if (it.id == id) it.copy(title = title.trim(), note = note.trim()) else it
-        }) }
+    fun quickUpdatePlan(id: String, change: com.raydon.moji.android.data.PlanQuickChange, onSaved: () -> Unit) = saveOperation(id) {
+        app.repository.mutate { state ->
+            val original = state.checkInItems.firstOrNull { it.id == id } ?: error("这项计划已被删除")
+            val updated = change.applyTo(original) ?: error("请检查填写的内容")
+            state.copy(checkInItems = state.checkInItems.map { if (it.id == id) updated else it })
+        }
+        afterMutation()
+        onSaved()
+        if (change is com.raydon.moji.android.data.PlanQuickChange.Date && change.day != LocalDate.now()) {
+            message.value = "已移到 ${change.day.monthValue}月${change.day.dayOfMonth}日，可在日历或计划库查看"
+        }
     }
     fun skipPlan(id: String) = launchMutation { app.repository.skipPlan(id) }
     fun postponePlan(id: String) = launchMutation { app.repository.postponePlan(id) }
@@ -211,13 +217,15 @@ class MojiViewModel(application: Application) : AndroidViewModel(application) {
             day.atStartOfDay(ZoneId.systemDefault()).toInstant().toString(), Instant.now().toString(), category) }
     }
 
-    fun copyPlan(id: String, day: LocalDate) = launchMutation {
+    fun copyPlan(id: String, day: LocalDate, onSaved: (() -> Unit)? = null) = saveOperation("copy:$id") {
         app.repository.mutate { state ->
             val item = state.checkInItems.firstOrNull { it.id == id } ?: return@mutate state
             val time = Instant.parse(item.scheduledStart).atZone(ZoneId.systemDefault()).toLocalTime()
             state.copy(checkInItems = state.checkInItems + PlanWorkflow.copied(item, UUID.randomUUID().toString(),
                 day.atTime(time).atZone(ZoneId.systemDefault()).toInstant().toString(), Instant.now().toString()))
         }
+        afterMutation()
+        onSaved?.invoke()
         message.value = "已复制为新的计划"
     }
 
@@ -270,15 +278,17 @@ class MojiViewModel(application: Application) : AndroidViewModel(application) {
         message.value = "已撤销整理；后续已修改的计划保持不变"
     }
 
-    fun saveWeeklyGoal(goal: WeeklyGoal) = launchMutation {
-        if ((goal.targetCount == null && goal.targetMinutes == null) || goal.targetCount?.let { it < 1 } == true || goal.targetMinutes?.let { it < 1 } == true) return@launchMutation
+    fun saveWeeklyGoal(goal: WeeklyGoal, onSaved: (() -> Unit)? = null) = saveOperation(goal.id) {
+        if ((goal.targetCount == null && goal.targetMinutes == null) || goal.targetCount?.let { it < 1 } == true || goal.targetMinutes?.let { it < 1 } == true) return@saveOperation
         app.repository.mutate { state -> state.copy(weeklyGoals = state.weeklyGoals.filterNot { it.id == goal.id || (it.weekStart == goal.weekStart && it.category == goal.category) } + goal) }
+        afterMutation(); onSaved?.invoke()
     }
 
     fun deleteWeeklyGoal(id: String) = launchMutation { app.repository.mutate { it.copy(weeklyGoals = it.weeklyGoals.filterNot { goal -> goal.id == id }) } }
 
-    fun saveWeeklyReflection(reflection: WeeklyReflection) = launchMutation {
+    fun saveWeeklyReflection(reflection: WeeklyReflection, onSaved: (() -> Unit)? = null) = saveOperation(reflection.id) {
         app.repository.mutate { it.copy(weeklyReflections = it.weeklyReflections.filterNot { old -> old.weekStart == reflection.weekStart } + reflection) }
+        afterMutation(); onSaved?.invoke()
     }
 
     fun saveMemo(
@@ -648,7 +658,7 @@ class MojiViewModel(application: Application) : AndroidViewModel(application) {
     fun seedVisualQa(route: String = "") {
         if (!BuildConfig.DEBUG) return
         viewModelScope.launch(mutationErrors) {
-            val json = app.assets.open("workflow-1.5.json").bufferedReader(Charsets.UTF_8).use { it.readText() }
+            val json = app.assets.open("workflow-1.6.json").bufferedReader(Charsets.UTF_8).use { it.readText() }
             app.repository.replace(MojiJson.decodeBackupOrSnapshot(json).first)
             app.settings.customCategories = listOf("生活")
             app.settings.appearance = "system"

@@ -9,6 +9,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
@@ -54,7 +55,7 @@ private fun WorkflowDialog(title: String, onDismiss: () -> Unit, leading: String
 fun PlanCopyDialog(item: CheckInItem, viewModel: MojiViewModel, onDismiss: () -> Unit) {
     var day by remember { mutableStateOf(LocalDate.now()) }
     val pick = rememberDatePicker { day = it }
-    WorkflowDialog("复制计划", onDismiss, trailing = "复制", onSave = { viewModel.copyPlan(item.id, day); onDismiss() }) {
+    WorkflowDialog("复制计划", onDismiss, trailing = "复制", onSave = { viewModel.copyPlan(item.id, day, onSaved = onDismiss) }) {
         LazyColumn(contentPadding = PaddingValues(top = 45.dp, bottom = 20.dp), verticalArrangement = Arrangement.spacedBy(24.dp)) {
             item { FormSection { FormRow(item.title); FormSeparator(); FormDateRow("目标日期", day) { pick(day) } } }
             item { WorkflowInfoSection("复制为独立的新计划，保留类型、说明、时段和预计投入，不复制完成状态、计时记录或重复序列。") }
@@ -80,6 +81,7 @@ fun PlanLibraryDialog(viewModel: MojiViewModel, onDismiss: () -> Unit) {
     var copying by remember { mutableStateOf<CheckInItem?>(null) }
     var templateDay by remember { mutableStateOf(LocalDate.now()) }
     var menuId by remember { mutableStateOf<String?>(null) }
+    var filtersExpanded by remember { mutableStateOf(BuildConfig.DEBUG && viewModel.visualQaRoute.value == "library-filters") }
     val pickFrom = rememberDatePicker { from = it; if (to < it) to = it }
     val pickTo = rememberDatePicker { to = maxOf(from, it) }
     val pickTemplate = rememberDatePicker { templateDay = it }
@@ -91,6 +93,11 @@ fun PlanLibraryDialog(viewModel: MojiViewModel, onDismiss: () -> Unit) {
         item.kind == "planned" && (query.isBlank() || item.title.contains(query, true) || item.note.contains(query, true)) &&
             (category == "all" || item.category == category) && matchesStatus && matchesPeriod
     }.sortedByDescending { it.scheduledStart }
+    val selectableIds = plans.filter { it.status != "inProgress" }.map { it.id }.toSet()
+    LaunchedEffect(selectableIds) { selected = selected.intersect(selectableIds) }
+    val filterSummary = listOfNotNull(category.takeIf { it != "all" }?.let(::categoryName),
+        status.takeIf { it != "all" }?.let { if (it == "archived") "已归档" else planStatusName(it) },
+        mapOf("past" to "过去", "today" to "今天", "future" to "未来", "range" to "日期范围")[period]).joinToString(" · ").ifEmpty { "全部类型 · 全部状态 · 全部日期" }
     LaunchedEffect(Unit) {
         if (BuildConfig.DEBUG && viewModel.visualQaRoute.value == "library-batch") {
             selected = plans.take(2).map { it.id }.toSet(); selecting = true; batch = true
@@ -106,13 +113,24 @@ fun PlanLibraryDialog(viewModel: MojiViewModel, onDismiss: () -> Unit) {
             }
             if (mode == "plans") {
                 item {
-                    FormSection("筛选") {
+                    FormSection {
+                        Row(Modifier.fillMaxWidth().clickable { filtersExpanded = !filtersExpanded }.padding(horizontal = 20.dp, vertical = 11.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                                Text("筛选", fontSize = 17.sp)
+                                Text(filterSummary, fontSize = 12.sp, color = MaterialTheme.colorScheme.secondary)
+                            }
+                            Box(Modifier.rotate(if (filtersExpanded) 90f else 0f)) { MojiLineIcon(MojiIcon.ChevronRight, 14.dp) }
+                        }
+                        if (filtersExpanded) {
+                        FormSeparator()
                         FormChoiceRow("计划类型", category, listOf("all" to "全部类型") + categoryChoices(viewModel)) { category = it }
                         FormSeparator()
                         FormChoiceRow("状态", status, listOf("all" to "全部状态", "planned" to "待完成", "inProgress" to "进行中", "completed" to "已完成", "skipped" to "已跳过", "archived" to "已归档")) { status = it }
                         FormSeparator()
                         FormChoiceRow("日期", period, listOf("all" to "全部日期", "past" to "过去", "today" to "今天", "future" to "未来", "range" to "日期范围")) { period = it }
                         if (period == "range") { FormSeparator(); FormDateRow("开始日期", from) { pickFrom(from) }; FormSeparator(); FormDateRow("结束日期", to) { pickTo(to) } }
+                        if (category != "all" || status != "all" || period != "all") { FormSeparator(); FormRow("清除筛选", onClick = { category = "all"; status = "all"; period = "all" }) }
+                        }
                     }
                 }
                 item {
@@ -128,8 +146,8 @@ fun PlanLibraryDialog(viewModel: MojiViewModel, onDismiss: () -> Unit) {
                         if (plans.isEmpty()) FormRow("没有符合条件的计划")
                         plans.forEach { item ->
                             Box {
-                                Row(Modifier.fillMaxWidth().combinedClickable(onLongClick = { if (!selecting) menuId = item.id }, onClick = {
-                                    if (selecting) selected = if (item.id in selected) selected - item.id else selected + item.id else editing = item
+                                Row(Modifier.fillMaxWidth().combinedClickable(enabled = !selecting || item.status != "inProgress", onLongClick = { if (!selecting) menuId = item.id }, onClick = {
+                                    if (selecting) { if (item.status != "inProgress") selected = if (item.id in selected) selected - item.id else selected + item.id } else editing = item
                                 }).padding(horizontal = 16.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
                                     if (selecting) { SelectionCircle(item.id in selected); Spacer(Modifier.width(12.dp)) }
                                     Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(5.dp)) {
@@ -336,8 +354,10 @@ fun WeeklyGoalDialog(viewModel: MojiViewModel, week: LocalDate, goal: WeeklyGoal
     var count by remember { mutableStateOf(goal?.targetCount?.toString() ?: "") }
     var minutes by remember { mutableStateOf(goal?.targetMinutes?.toString() ?: "") }
     val valid = (count.isBlank() || count.toIntOrNull() in 1..100000) && (minutes.isBlank() || minutes.toIntOrNull() in 1..100000) && (count.isNotBlank() || minutes.isNotBlank())
-    WorkflowDialog("周目标", onDismiss, trailing = "保存", enabled = valid, onSave = {
-        viewModel.saveWeeklyGoal(WeeklyGoal(goal?.id ?: UUID.randomUUID().toString(), workflowWeek(week).toString(), category.takeIf { it != "all" }, count.toIntOrNull(), minutes.toIntOrNull(), Instant.now().toString())); onDismiss()
+    val draftId = remember { goal?.id ?: UUID.randomUUID().toString() }
+    val requestDismiss = rememberEditorDismiss(category != (goal?.category ?: "all") || count != (goal?.targetCount?.toString() ?: "") || minutes != (goal?.targetMinutes?.toString() ?: ""), onDismiss)
+    WorkflowDialog("周目标", requestDismiss, trailing = "保存", enabled = valid, onSave = {
+        viewModel.saveWeeklyGoal(WeeklyGoal(draftId, workflowWeek(week).toString(), category.takeIf { it != "all" }, count.toIntOrNull(), minutes.toIntOrNull(), Instant.now().toString()), onSaved = onDismiss)
     }) {
         LazyColumn(contentPadding = PaddingValues(vertical = 20.dp), verticalArrangement = Arrangement.spacedBy(24.dp)) {
             item { FormSection("${workflowWeek(week)} 起的一周") {
@@ -355,7 +375,9 @@ fun WeeklyGoalDialog(viewModel: MojiViewModel, week: LocalDate, goal: WeeklyGoal
 fun WeeklyReflectionDialog(viewModel: MojiViewModel, week: LocalDate, reflection: WeeklyReflection?, onDismiss: () -> Unit) {
     var note by remember { mutableStateOf(reflection?.note ?: "") }
     var nextFocus by remember { mutableStateOf(reflection?.nextFocus ?: "") }
-    WorkflowDialog("周复盘", onDismiss, trailing = "保存", onSave = { viewModel.saveWeeklyReflection(WeeklyReflection(reflection?.id ?: UUID.randomUUID().toString(), workflowWeek(week).toString(), note, nextFocus, Instant.now().toString())); onDismiss() }) {
+    val draftId = remember { reflection?.id ?: UUID.randomUUID().toString() }
+    val requestDismiss = rememberEditorDismiss(note != (reflection?.note ?: "") || nextFocus != (reflection?.nextFocus ?: ""), onDismiss)
+    WorkflowDialog("周复盘", requestDismiss, trailing = "保存", onSave = { viewModel.saveWeeklyReflection(WeeklyReflection(draftId, workflowWeek(week).toString(), note, nextFocus, Instant.now().toString()), onSaved = onDismiss) }) {
         LazyColumn(contentPadding = PaddingValues(vertical = 20.dp), verticalArrangement = Arrangement.spacedBy(24.dp)) {
             item { FormSection("本周复盘") { FormTextField(note, { note = it }, "做得好的事、遇到的问题", singleLine = false, minHeight = 132) } }
             item { FormSection("下周关注") { FormTextField(nextFocus, { nextFocus = it }, "给下周留下一句提醒", singleLine = false, minHeight = 88) } }

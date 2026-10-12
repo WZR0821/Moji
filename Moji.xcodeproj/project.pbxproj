@@ -7,6 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		F16000000000000000000001 /* PlanQuickEditor.swift in Sources */ = {isa = PBXBuildFile; fileRef = F16000000000000000000002; };
 		F15000000000000000000001 /* PlanWorkflow.swift in Sources */ = {isa = PBXBuildFile; fileRef = F15000000000000000000002; };
 		F15000000000000000000003 /* PlanWorkflow.swift in Sources */ = {isa = PBXBuildFile; fileRef = F15000000000000000000002; };
 		F15000000000000000000004 /* WorkflowViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = F15000000000000000000005; };
@@ -76,6 +77,7 @@
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
+		F16000000000000000000002 /* PlanQuickEditor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlanQuickEditor.swift; sourceTree = "<group>"; };
 		F15000000000000000000002 /* PlanWorkflow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlanWorkflow.swift; sourceTree = "<group>"; };
 		F15000000000000000000005 /* WorkflowViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkflowViews.swift; sourceTree = "<group>"; };
 		F0A200000000000000000001 /* JFZSKSealScript_V3.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = JFZSKSealScript_V3.ttf; sourceTree = "<group>"; };
@@ -132,6 +134,7 @@
 			isa = PBXGroup;
 			children = (
 				EE74EA9095AF45FB08C7EFE6 /* DashboardView.swift */,
+				F16000000000000000000002 /* PlanQuickEditor.swift */,
 				A7C14E2B93D84F21A114C002 /* PlanCalendarView.swift */,
 			);
 			path = Dashboard;
@@ -391,6 +394,7 @@
 				F7BF76C0B0DD6C3FFBB8F392 /* CountdownEditorView.swift in Sources */,
 				22085A836B772F051B239668 /* CountdownsView.swift in Sources */,
 				63B9E500D034EDE8B38987F5 /* DashboardView.swift in Sources */,
+				F16000000000000000000001 /* PlanQuickEditor.swift in Sources */,
 				B30A00000000000000000001 /* MemosView.swift in Sources */,
 				A7C14E2B93D84F21A114C001 /* PlanCalendarView.swift in Sources */,
 				A4C45DBADFADC405C7D7BDD7 /* MojiApp.swift in Sources */,
@@ -552,7 +556,7 @@
 				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
 				CODE_SIGN_STYLE = Automatic;
 				COPY_PHASE_STRIP = NO;
-			CURRENT_PROJECT_VERSION = 41;
+			CURRENT_PROJECT_VERSION = 42;
 				DEBUG_INFORMATION_FORMAT = dwarf;
 				DEVELOPMENT_TEAM = "";
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
@@ -572,7 +576,7 @@
 				GCC_WARN_UNUSED_FUNCTION = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
-			MARKETING_VERSION = 1.5.1;
+			MARKETING_VERSION = 1.6.0;
 				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
 				MTL_FAST_MATH = YES;
 				ONLY_ACTIVE_ARCH = YES;
@@ -655,7 +659,7 @@
 				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
 				CODE_SIGN_STYLE = Automatic;
 				COPY_PHASE_STRIP = NO;
-			CURRENT_PROJECT_VERSION = 41;
+			CURRENT_PROJECT_VERSION = 42;
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
 				DEVELOPMENT_TEAM = "";
 				ENABLE_NS_ASSERTIONS = NO;
@@ -669,7 +673,7 @@
 				GCC_WARN_UNUSED_FUNCTION = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
-			MARKETING_VERSION = 1.5.1;
+			MARKETING_VERSION = 1.6.0;
 				MTL_ENABLE_DEBUG_INFO = NO;
 				MTL_FAST_MATH = YES;
 				PRODUCT_NAME = "$(TARGET_NAME)";

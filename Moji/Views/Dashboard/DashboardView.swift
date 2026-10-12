@@ -19,6 +19,7 @@ struct DashboardView: View {
     @State private var showsCompleted = false
     @State private var showsLibrary = false
     @State private var copyingItem: CheckInItem?
+    @State private var deletingItem: CheckInItem?
 #if DEBUG
     @State private var showsCalendar = [
         "calendar-month",
@@ -168,7 +169,7 @@ struct DashboardView: View {
                             }
                         } label: {
                             HStack {
-                                Text("今日已归档 \(completedItems.count)")
+                                Text("今日已结束 \(completedItems.count)")
                                 Spacer()
                                 Image(systemName: "chevron.down")
                                     .rotationEffect(.degrees(showsCompleted ? 180 : 0))
@@ -201,13 +202,13 @@ struct DashboardView: View {
                     .spring(response: 0.42, dampingFraction: 0.84),
                     value: pendingItems.map(\.id)
                 )
-#if DEBUG
                 .onChange(of: expandedItemID) { _, id in
-                    if ProcessInfo.processInfo.environment["MOJI_QA_SCENARIO"] == "workflow-plan-expanded-bottom", let id {
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { proxy.scrollTo(id, anchor: .bottom) }
+                    guard let id else { return }
+                    let prefix = pendingItems.contains { $0.id == id } ? "pending" : "archived"
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+                        withAnimation(.easeInOut(duration: 0.25)) { proxy.scrollTo("\(prefix)-\(id.uuidString)", anchor: .top) }
                     }
                 }
-#endif
                 }
             }
             .navigationTitle("计划")
@@ -223,9 +224,12 @@ struct DashboardView: View {
                     .accessibilityLabel("打开计划日历")
                 }
 
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button { showsLibrary = true } label: { Image(systemName: "square.grid.2x2") }
+                        .accessibilityLabel("计划库与模板")
+                }
                 ToolbarItem(placement: .primaryAction) {
                     Menu {
-                        Button { showsLibrary = true } label: { Label("计划库与模板", systemImage: "tray.full") }
                         Button {
                             presentNewEditor(kind: .completedLog)
                         } label: {
@@ -274,6 +278,26 @@ struct DashboardView: View {
             }
             .sheet(isPresented: $showsLibrary) { PlanLibraryView(store: store) }
             .sheet(item: $copyingItem) { PlanCopySheet(store: store, item: $0) }
+            .alert("删除这个计划？", isPresented: Binding(get: { deletingItem != nil }, set: { if !$0 { deletingItem = nil } })) {
+                Button("取消", role: .cancel) { deletingItem = nil }
+                Button("删除", role: .destructive) {
+                    if let item = deletingItem { store.deleteCheckIn(id: item.id) }
+                    deletingItem = nil
+                }
+            } message: { Text(deletingItem?.title ?? "") }
+            .overlay(alignment: .bottom) {
+                if let notice = store.workflowNotice, !showsLibrary {
+                    Text(notice).font(.footnote).padding(12)
+                        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12))
+                        .padding(.horizontal, 18).padding(.bottom, 8)
+                        .allowsHitTesting(false)
+                }
+            }
+            .task(id: store.workflowNotice) {
+                guard let notice = store.workflowNotice else { return }
+                try? await Task.sleep(for: .seconds(4))
+                if !Task.isCancelled, store.workflowNotice == notice { store.workflowNotice = nil }
+            }
             .sheet(isPresented: $showsWelcomeRestore) {
                 RestoreWelcomeSheet(store: store) { message in
                     restoreMessage = message
@@ -386,8 +410,8 @@ struct DashboardView: View {
             .frame(width: 44)
             .opacity(0.26)
 
-            let completedCount = completedItemsForChecklistDate.count
-            let totalCount = pendingItems.count + completedCount
+            let completedCount = completedItemsForChecklistDate.filter(\.isCompleted).count
+            let totalCount = pendingItems.count + completedItemsForChecklistDate.count
             Text(totalCount == 0 ? "今日无计划" : "完成 \(completedCount)/\(totalCount)")
                 .font(.caption.weight(.semibold).monospacedDigit())
                 .foregroundStyle(totalCount == 0 ? Color.secondary : Color.planPrimary)
@@ -533,9 +557,8 @@ struct DashboardView: View {
                     expandedItemID = expandedItemID == item.id ? nil : item.id
                 }
             },
-            openEditor: {
-                openEditor(for: item)
-            }
+            openEditor: { openEditor(for: item) },
+            openCopy: { copyingItem = item }
         )
         VStack(spacing: 0) {
             Group {
@@ -578,10 +601,7 @@ struct DashboardView: View {
         }
         .swipeActions(edge: .trailing, allowsFullSwipe: false) {
             Button {
-                if expandedItemID == item.id {
-                    expandedItemID = nil
-                }
-                store.deleteCheckIn(id: item.id)
+                deletingItem = item
             } label: {
                 Label("删除", systemImage: "trash")
             }
@@ -635,15 +655,16 @@ struct DashboardView: View {
             didRunQAScenario = true
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
                 switch route {
-                case "workflow-library", "workflow-templates", "workflow-library-batch": showsLibrary = true
+                case "workflow-library", "workflow-library-filters", "workflow-templates", "workflow-library-batch": showsLibrary = true
                 case "workflow-plan-new": presentNewEditor(kind: .planned)
                 case "workflow-calendar-month", "workflow-calendar-week", "workflow-calendar-day", "workflow-calendar-jump": showsCalendar = true
                 case "workflow-plan-editor", "workflow-plan-editor-advanced":
-                    if let item = store.checkInItems.first(where: { $0.title == "整理 1.5.1 发布说明" }) { openEditor(for: item) }
-                case "workflow-plan-expanded", "workflow-plan-expanded-bottom", "workflow-plan-inline": expandedItemID = store.checkInItems.first(where: { $0.title == "整理 1.5.1 发布说明" })?.id
+                    if let item = store.checkInItems.first(where: { $0.title == "整理 1.6.0 发布说明" }) { openEditor(for: item) }
+                case "workflow-plan-expanded", "workflow-plan-expanded-bottom", "workflow-plan-inline": expandedItemID = store.checkInItems.first(where: { $0.title == "整理 1.6.0 发布说明" })?.id
                 case "workflow-plan-completed": showsCompleted = true
-                case "workflow-plan-copy": copyingItem = store.checkInItems.first(where: { $0.title == "整理 1.5.1 发布说明" })
-                default: break
+                case "workflow-plan-copy": copyingItem = store.checkInItems.first(where: { $0.title == "整理 1.6.0 发布说明" })
+                default:
+                    if route.hasPrefix("workflow-plan-quick-") { expandedItemID = store.checkInItems.first(where: { $0.title == "整理 1.6.0 发布说明" })?.id }
                 }
             }
             return
@@ -838,12 +859,6 @@ struct DashboardView: View {
     }
 }
 
-private struct PlanDetailDatum {
-    let title: String
-    let value: String
-    let symbol: String
-}
-
 private struct MinimalPlanRow: View {
     @ObservedObject var store: PlanStore
     @ObservedObject var pomodoro: PomodoroEngine
@@ -854,14 +869,13 @@ private struct MinimalPlanRow: View {
     let isExpanded: Bool
     let toggleExpansion: () -> Void
     let openEditor: () -> Void
+    let openCopy: () -> Void
 
     @State private var completionInkProgress = 0.0
     @State private var isCommittingCompletion = false
     @State private var completionFeedback = 0
-    @State private var isInlineEditing = false
-    @State private var quickEditTitle = ""
-    @State private var quickEditNote = ""
-    @State private var isQuickEditTitleFocused = false
+    @State private var quickField: PlanQuickField?
+    @State private var confirmsDelete = false
     @AppStorage(PlanSettingsKeys.hapticsEnabled, store: SharedPersistence.sharedDefaults)
     private var hapticsEnabled = true
 
@@ -889,75 +903,37 @@ private struct MinimalPlanRow: View {
                 .disabled(isCommittingCompletion)
                 .accessibilityLabel(statusAccessibilityLabel)
 
-                Group {
-                    if isExpanded {
-                        VStack(alignment: .leading, spacing: 3) {
-                            Text(item.title)
-                                .font(.body)
-                                .foregroundStyle(
-                                    item.isCompleted ? Color.secondary : Color.primary
-                                )
-                                .lineLimit(2)
-                                .overlay {
-                                    InkBrushStrike(
-                                        progress: completionInkProgress,
-                                        tint: .planPrimary,
-                                        opacity: item.status == .skipped ? 0.46 : 0.72
-                                    )
-                                    .frame(height: 11)
-                                    .offset(y: 1)
-                                }
-                            metadataLine
-                        }
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .layoutPriority(1)
-                        .textSelection(.enabled)
-                    } else {
-                        Button(action: toggleExpansion) {
-                            VStack(alignment: .leading, spacing: 3) {
-                                Text(item.title)
-                                    .font(.body)
-                                    .foregroundStyle(
-                                        item.isCompleted ? Color.secondary : Color.primary
-                                    )
-                                    .lineLimit(1)
-                                    .overlay {
-                                        InkBrushStrike(
-                                            progress: completionInkProgress,
-                                            tint: .planPrimary,
-                                            opacity: item.status == .skipped ? 0.46 : 0.72
-                                        )
-                                        .frame(height: 11)
-                                        .offset(y: 1)
-                                    }
-
-                                metadataLine
-
-                                if !item.note.isEmpty {
-                                    Text(item.note)
-                                        .font(.caption)
-                                        .foregroundStyle(.secondary)
-                                        .lineLimit(2, reservesSpace: true)
-                                }
+                Button {
+                    if isExpanded { quickField = .content } else { toggleExpansion() }
+                } label: {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(item.title)
+                            .font(.system(size: 17))
+                            .foregroundStyle(item.isCompleted ? Color.secondary : Color.primary)
+                            .lineLimit(isExpanded ? nil : 2)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .overlay {
+                                InkBrushStrike(progress: completionInkProgress, tint: .planPrimary,
+                                    opacity: item.status == .skipped ? 0.46 : 0.72)
+                                    .frame(height: 11).offset(y: 1)
                             }
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .layoutPriority(1)
-                            .contentShape(Rectangle())
+                        if !isExpanded {
+                            metadataLine
+                            if !item.note.isEmpty {
+                                Text(item.note).font(.system(size: 12)).foregroundStyle(.secondary).lineLimit(1)
+                            }
                         }
-                        .buttonStyle(.plain)
                     }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .layoutPriority(1)
+                    .contentShape(Rectangle())
                 }
+                .buttonStyle(.plain)
+                .accessibilityLabel(isExpanded ? "编辑内容：\(item.title)" : item.title)
 
                 carryOverSeal
 
-                if item.calendarEventIdentifier != nil {
-                    Image(systemName: "calendar.badge.checkmark")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-
                 Button {
-                    cancelInlineEditing()
                     toggleExpansion()
                 } label: {
                     Image(systemName: "chevron.down")
@@ -970,7 +946,7 @@ private struct MinimalPlanRow: View {
                 .buttonStyle(.plain)
                 .accessibilityLabel(isExpanded ? "收起计划" : "展开计划")
             }
-            .padding(.vertical, 14)
+            .padding(.vertical, 10)
 
             if isExpanded {
                 InkBrushDivider(animated: true)
@@ -987,92 +963,118 @@ private struct MinimalPlanRow: View {
         .onAppear {
             synchronizeCompletionInk(isFinished)
 #if DEBUG
-            if isExpanded, ProcessInfo.processInfo.environment["MOJI_QA_SCENARIO"] == "workflow-plan-inline", item.title == "整理 1.5.1 发布说明" { beginInlineEditing() }
+            applyQuickEditorQA()
 #endif
         }
-        .onChange(of: isFinished) { _, newValue in
-            synchronizeCompletionInk(newValue)
-        }
-        .onChange(of: isExpanded) { _, expanded in
-            if !expanded {
-                cancelInlineEditing()
-            }
+        .onChange(of: isFinished) { _, value in synchronizeCompletionInk(value) }
+        .onChange(of: isExpanded) { _, _ in
 #if DEBUG
-            if expanded, ProcessInfo.processInfo.environment["MOJI_QA_SCENARIO"] == "workflow-plan-inline", item.title == "整理 1.5.1 发布说明" { beginInlineEditing() }
+            applyQuickEditorQA()
 #endif
         }
+        .sheet(item: $quickField) { field in
+            PlanQuickEditor(store: store, item: item, field: field)
+        }
+        .alert("删除这个计划？", isPresented: $confirmsDelete) {
+            Button("取消", role: .cancel) {}
+            Button("删除", role: .destructive) { store.deleteCheckIn(id: item.id) }
+        } message: { Text(item.title) }
     }
 
+#if DEBUG
+    private func applyQuickEditorQA() {
+        guard isExpanded, item.title == "整理 1.6.0 发布说明" else { return }
+        let route = ProcessInfo.processInfo.environment["MOJI_QA_SCENARIO"] ?? ""
+        if route == "workflow-plan-inline" { quickField = .content }
+        else if route.hasPrefix("workflow-plan-quick-"),
+                let field = PlanQuickField(rawValue: String(route.dropFirst("workflow-plan-quick-".count)).components(separatedBy: "-").first ?? "") {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { quickField = field }
+        }
+    }
+#endif
+
     private var expandedDetails: some View {
-        VStack(alignment: .leading, spacing: 13) {
-            if isInlineEditing {
-                inlineEditor
-            } else if !item.note.isEmpty {
-                VStack(alignment: .leading, spacing: 8) {
-                    HStack(spacing: 7) {
-                        InkSealMark(
-                            character: "注",
-                            size: 19,
-                            style: .round,
-                            seed: InkVariant.seed(for: item.id.uuidString)
-                        )
-                        Text("详细说明")
-                            .font(.caption.weight(.semibold))
-                            .foregroundStyle(.secondary)
-                    }
-
-                    Text(item.note)
-                        .font(.subheadline)
-                        .foregroundStyle(.primary.opacity(0.86))
-                        .lineSpacing(4)
+        VStack(alignment: .leading, spacing: 10) {
+            Button { quickField = .content } label: {
+                HStack(alignment: .top, spacing: 8) {
+                    Text(item.note.isEmpty ? "添加备注" : item.note)
+                        .font(.system(size: 15)).lineSpacing(3)
+                        .foregroundStyle(item.note.isEmpty ? Color.secondary : Color.primary.opacity(0.86))
                         .fixedSize(horizontal: false, vertical: true)
-                        .textSelection(.enabled)
-                        .accessibilityIdentifier("plan.expanded.details")
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    Image(systemName: "pencil").font(.system(size: 12)).foregroundStyle(.tertiary).padding(.top, 3)
+                }.frame(minHeight: 32, alignment: .leading).contentShape(Rectangle())
+            }.buttonStyle(.plain).accessibilityIdentifier("plan.expanded.details")
+
+            VStack(spacing: 0) {
+                detailRow("日期", value: item.scheduledStart.formatted(.dateTime.month().day().weekday(.short)), symbol: "calendar", field: .date)
+                Divider().padding(.leading, 38)
+                detailRow("安排", value: item.timingSummaryText, symbol: item.effectiveScheduleKind.symbolName, field: .schedule)
+                Divider().padding(.leading, 38)
+                detailRow("类型", value: item.category.displayName, symbol: item.category.symbolName, field: .category)
+            }
+            .background(Color.planPrimary.opacity(0.045), in: RoundedRectangle(cornerRadius: 12))
+
+            HStack(spacing: 8) {
+                detailPill("重复", value: item.repeatSummaryText, symbol: "repeat", field: .recurrence)
+                detailPill("提醒", value: item.reminderSummaryText, symbol: "bell", field: .reminder)
+            }
+            if item.calendarEventIdentifier != nil {
+                Label("已写入系统日历", systemImage: "calendar.badge.checkmark").font(.system(size: 12)).foregroundStyle(.secondary)
             }
 
-            VStack(spacing: 8) {
-                ForEach(Array(stride(from: 0, to: detailData.count, by: 2)), id: \.self) {
-                    index in
-                    HStack(alignment: .top, spacing: 8) {
-                        detailTile(detailData[index])
-                        if detailData.indices.contains(index + 1) {
-                            detailTile(detailData[index + 1])
-                        }
+            HStack(spacing: 8) {
+                Menu {
+                    Button("完整编辑", action: openEditor)
+                    Button("复制到今天") { store.copyPlan(item.id, to: Date()) }
+                    Button("复制到指定日期", action: openCopy)
+                    Button("保存为模板") { store.saveTemplate(from: item.id) }
+                    Button("归档") { store.batchPlans([item.id], archived: true) }
+                        .disabled(item.status == .inProgress)
+                    if item.status == .planned {
+                        Button("顺延到明天") { store.postponeCheckIn(id: item.id) }
+                        Button("跳过") { store.skipCheckIn(id: item.id) }
                     }
+                    Button("删除", role: .destructive) { confirmsDelete = true }
+                } label: {
+                    Label("更多操作", systemImage: "ellipsis")
+                        .font(.system(size: 13, weight: .medium))
+                        .frame(maxWidth: .infinity, minHeight: 44)
                 }
-            }
-            .textSelection(.enabled)
-
-            if !isInlineEditing {
-                HStack(spacing: 9) {
-                    expandedTextAction(
-                        title: "快捷编辑",
-                        symbol: "pencil.line",
-                        action: beginInlineEditing
-                    )
-
-                    expandedTextAction(
-                        title: "更多设置",
-                        symbol: "slider.horizontal.3",
-                        action: openEditor
-                    )
+                    .background(Color.planPrimary.opacity(0.045), in: RoundedRectangle(cornerRadius: 11))
+                if item.status == .planned || item.status == .inProgress {
+                    expandedAction(title: pomodoro.hasActiveSession ? "继续专注" : "去专注",
+                        message: pomodoro.hasActiveSession ? "前往当前会话" : "选择时长后开始",
+                        symbol: "timer", emphasized: true, action: startPomodoro)
                 }
-            }
-
-            if item.status == .planned {
-                expandedAction(
-                    title: "开始番茄钟",
-                    message: pomodoro.hasActiveSession ? "前往当前会话" : "带入专注",
-                    symbol: "timer",
-                    emphasized: true,
-                    action: startPomodoro
-                )
             }
         }
-        .padding(.top, 12)
-        .padding(.bottom, 10)
+        .padding(.top, 8)
+        .padding(.bottom, 12)
+    }
+
+    private func detailRow(_ title: String, value: String, symbol: String, field: PlanQuickField) -> some View {
+        Button { quickField = field } label: {
+            HStack(spacing: 8) {
+                Image(systemName: symbol).font(.system(size: 14)).frame(width: 18)
+                Text(title).font(.system(size: 13)).foregroundStyle(.secondary).frame(width: 32, alignment: .leading)
+                Text(value).font(.system(size: 14, weight: .medium)).fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                Image(systemName: "chevron.right").font(.system(size: 10, weight: .semibold)).foregroundStyle(.tertiary)
+            }.padding(.horizontal, 10).padding(.vertical, 8).frame(minHeight: 44).contentShape(Rectangle())
+        }.buttonStyle(.plain).accessibilityLabel("修改\(title)：\(value)").accessibilityIdentifier("plan.quick.\(field.rawValue)")
+    }
+
+    private func detailPill(_ title: String, value: String, symbol: String, field: PlanQuickField) -> some View {
+        Button { quickField = field } label: {
+            HStack(spacing: 6) {
+                Image(systemName: symbol).font(.system(size: 12))
+                Text(value).font(.system(size: 12)).fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                Image(systemName: "chevron.right").font(.system(size: 9)).foregroundStyle(.tertiary)
+            }.padding(.horizontal, 10).padding(.vertical, 6).frame(maxWidth: .infinity, minHeight: 36)
+                .background(Color.planPrimary.opacity(0.045), in: RoundedRectangle(cornerRadius: 10))
+        }.buttonStyle(.plain).accessibilityLabel("修改\(title)：\(value)").accessibilityIdentifier("plan.quick.\(field.rawValue)")
     }
 
     /// How many days a still-open plan has been carried past its own day.
@@ -1090,7 +1092,7 @@ private struct MinimalPlanRow: View {
     @ViewBuilder
     private var carryOverSeal: some View {
         if let days = carryOverDaysLate {
-            CarryOverDaySeal(daysLate: days, size: 26)
+            CarryOverDaySeal(daysLate: days, size: 22)
                 .accessibilityElement(children: .ignore)
                 .accessibilityLabel(CarryOverSeal.accessibilityLabel(daysLate: days))
                 .accessibilityHidden(false)
@@ -1125,157 +1127,6 @@ private struct MinimalPlanRow: View {
         .minimumScaleFactor(0.78)
     }
 
-    private var inlineEditor: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack(spacing: 7) {
-                InkSealMark(
-                    character: "改",
-                    size: 19,
-                    style: .round,
-                    seed: InkVariant.seed(for: item.id.uuidString)
-                )
-                Text("快捷编辑")
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(.secondary)
-            }
-
-            IMESafeTextField(
-                placeholder: "计划标题",
-                text: $quickEditTitle,
-                isFocused: $isQuickEditTitleFocused,
-                accessibilityIdentifier: "plan.expanded.quickEdit.title",
-                textStyle: .body
-            )
-            .frame(minHeight: 42)
-
-            ZStack(alignment: .topLeading) {
-                if quickEditNote.isEmpty {
-                    Text("添加详细说明（可选）")
-                        .font(.subheadline)
-                        .foregroundStyle(.tertiary)
-                        .padding(.horizontal, 5)
-                        .padding(.vertical, 8)
-                        .allowsHitTesting(false)
-                }
-                TextEditor(text: $quickEditNote)
-                    .font(.subheadline)
-                    .lineSpacing(4)
-                    .scrollContentBackground(.hidden)
-                    .padding(.horizontal, -1)
-                    .accessibilityIdentifier("plan.expanded.quickEdit.note")
-            }
-            .frame(minHeight: 88, maxHeight: 126)
-            .padding(.horizontal, 6)
-            .background(
-                Color.planPrimary.opacity(0.045),
-                in: RoundedRectangle(cornerRadius: 10, style: .continuous)
-            )
-
-            HStack(spacing: 9) {
-                Button("取消") {
-                    cancelInlineEditing()
-                }
-                .frame(maxWidth: .infinity, minHeight: 44)
-                .background(
-                    Color.planPrimary.opacity(0.06),
-                    in: RoundedRectangle(cornerRadius: 11, style: .continuous)
-                )
-                .buttonStyle(.plain)
-
-                Button("保存") {
-                    IMETextInput.commit(saveInlineEditing)
-                }
-                .fontWeight(.semibold)
-                .foregroundStyle(Color.planBackground)
-                .frame(maxWidth: .infinity, minHeight: 44)
-                .background(
-                    Color.planPrimary,
-                    in: RoundedRectangle(cornerRadius: 11, style: .continuous)
-                )
-                .buttonStyle(.plain)
-                .disabled(!canSaveInlineEdit)
-                .opacity(canSaveInlineEdit ? 1 : 0.42)
-                .accessibilityIdentifier("plan.expanded.quickEdit.save")
-            }
-        }
-        .accessibilityIdentifier("plan.expanded.quickEdit")
-    }
-
-    private var detailData: [PlanDetailDatum] {
-        var result = [
-            PlanDetailDatum(
-                title: "日期",
-                value: item.scheduledStart.formatted(
-                    .dateTime.month().day().weekday(.short)
-                ),
-                symbol: "calendar"
-            ),
-            PlanDetailDatum(
-                title: "安排",
-                value: item.timingSummaryText,
-                symbol: item.effectiveScheduleKind.symbolName
-            ),
-            PlanDetailDatum(
-                title: "类型",
-                value: item.category.displayName,
-                symbol: item.category.symbolName
-            )
-        ]
-        if item.effectiveRepeatRule != .never {
-            result.append(
-                PlanDetailDatum(
-                    title: "重复",
-                    value: item.repeatSummaryText,
-                    symbol: "repeat"
-                )
-            )
-        }
-        if item.reminderMinutesBefore != nil {
-            result.append(
-                PlanDetailDatum(
-                    title: "提醒",
-                    value: item.reminderSummaryText,
-                    symbol: "bell"
-                )
-            )
-        }
-        if item.calendarEventIdentifier != nil {
-            result.append(
-                PlanDetailDatum(
-                    title: "Apple 日历",
-                    value: "已同步",
-                    symbol: "calendar.badge.checkmark"
-                )
-            )
-        }
-        return result
-    }
-
-    private func detailTile(_ data: PlanDetailDatum) -> some View {
-        HStack(alignment: .top, spacing: 8) {
-            Image(systemName: data.symbol)
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(Color.planPrimary.opacity(0.78))
-                .frame(width: 18, height: 18)
-            VStack(alignment: .leading, spacing: 2) {
-                Text(data.title)
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-                Text(data.value)
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(.primary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-        }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 9)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(
-            Color.planPrimary.opacity(0.045),
-            in: RoundedRectangle(cornerRadius: 10, style: .continuous)
-        )
-    }
-
     private func expandedAction(
         title: String,
         message: String,
@@ -1299,7 +1150,7 @@ private struct MinimalPlanRow: View {
                 Spacer(minLength: 0)
             }
             .padding(.horizontal, 11)
-            .frame(maxWidth: .infinity, minHeight: 48, alignment: .leading)
+            .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
             .foregroundStyle(emphasized ? Color.planBackground : Color.planPrimary)
             .background(
                 emphasized ? Color.planPrimary : Color.planPrimary.opacity(0.065),
@@ -1308,53 +1159,6 @@ private struct MinimalPlanRow: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-    }
-
-    private func expandedTextAction(
-        title: String,
-        symbol: String,
-        action: @escaping () -> Void
-    ) -> some View {
-        Button(action: action) {
-            Label(title, systemImage: symbol)
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(Color.planSecondary)
-                .frame(maxWidth: .infinity, minHeight: 44)
-                .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-    }
-
-    private var canSaveInlineEdit: Bool {
-        !quickEditTitle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-    }
-
-    private func beginInlineEditing() {
-        quickEditTitle = item.title
-        quickEditNote = item.note
-        isInlineEditing = true
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) {
-            isQuickEditTitleFocused = true
-        }
-    }
-
-    private func cancelInlineEditing() {
-        isQuickEditTitleFocused = false
-        isInlineEditing = false
-        quickEditTitle = ""
-        quickEditNote = ""
-    }
-
-    private func saveInlineEditing() {
-        let cleanTitle = quickEditTitle.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !cleanTitle.isEmpty else { return }
-
-        var updated = item
-        updated.title = cleanTitle
-        updated.note = quickEditNote.trimmingCharacters(in: .whitespacesAndNewlines)
-        updated.detailsConfigured = true
-        store.saveCheckIn(updated)
-        cancelInlineEditing()
     }
 
     private func startPomodoro() {

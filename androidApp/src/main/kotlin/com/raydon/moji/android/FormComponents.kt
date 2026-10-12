@@ -160,9 +160,10 @@ fun FormToggle(
     onCheckedChange: (Boolean) -> Unit,
     enabled: Boolean = true,
     minHeight: Int = 44,
+    horizontalPadding: Int = 20,
 ) {
     Row(
-        Modifier.fillMaxWidth().heightIn(min = minHeight.dp).padding(horizontal = 20.dp),
+        Modifier.fillMaxWidth().heightIn(min = minHeight.dp).padding(horizontal = horizontalPadding.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Text(title, modifier = Modifier.weight(1f), fontSize = 17.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = if (enabled) 1f else 0.38f))
@@ -244,8 +245,9 @@ fun FormStepper(
     enabled: Boolean = true,
     valueStyle: TextStyle? = null,
     minHeight: Int = 44,
+    horizontalPadding: Int = 20,
 ) {
-    Row(Modifier.fillMaxWidth().height(minHeight.dp).alpha(if (enabled) 1f else 0.38f).padding(start = 20.dp, end = 20.dp), verticalAlignment = Alignment.CenterVertically) {
+    Row(Modifier.fillMaxWidth().height(minHeight.dp).alpha(if (enabled) 1f else 0.38f).padding(horizontal = horizontalPadding.dp), verticalAlignment = Alignment.CenterVertically) {
         Text(title, fontSize = 17.sp, modifier = Modifier.weight(1f))
         Text(value, style = valueStyle ?: MaterialTheme.typography.bodyLarge.copy(fontSize = 17.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)), modifier = Modifier.padding(end = 12.dp))
         Surface(color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.055f), shape = RoundedCornerShape(9.dp)) {
@@ -260,8 +262,8 @@ fun FormStepper(
 
 /** One date/time row, matching the iOS form while retaining native Android pickers. */
 @Composable
-fun FormDateRow(title: String, date: LocalDate, onDate: () -> Unit) {
-    Row(Modifier.fillMaxWidth().heightIn(min = 44.dp).padding(horizontal = 20.dp), verticalAlignment = Alignment.CenterVertically) {
+fun FormDateRow(title: String, date: LocalDate, minHeight: Int = 44, horizontalPadding: Int = 20, onDate: () -> Unit) {
+    Row(Modifier.fillMaxWidth().heightIn(min = minHeight.dp).padding(horizontal = horizontalPadding.dp), verticalAlignment = Alignment.CenterVertically) {
         Text(title, fontSize = 17.sp, modifier = Modifier.weight(1f))
         Text(date.format(DateTimeFormatter.ofPattern("yyyy年M月d日")), fontSize = 17.sp, lineHeight = 22.sp,
             modifier = Modifier.background(MaterialTheme.colorScheme.onSurface.copy(alpha = 0.06f), RoundedCornerShape(6.dp))

@@ -43,6 +43,7 @@ struct PlanLibraryView: View {
     @State private var editing: WorkflowPlanRoute?
     @State private var copying: WorkflowPlanRoute?
     @State private var templateDay = Date()
+    @State private var filtersExpanded = false
 
     private var plans: [CheckInItem] {
         let today = Calendar.current.startOfDay(for: Date())
@@ -75,9 +76,12 @@ struct PlanLibraryView: View {
             .sheet(item: $editing) { CheckInEditorView(store: store, item: $0.item) }
             .sheet(item: $copying) { PlanCopySheet(store: store, item: $0.item) }
             .onChange(of: mode) { _, _ in selected.removeAll(); selecting = false }
+            .onChange(of: plans.filter { $0.status != .inProgress }.map(\.id)) { _, ids in selected.formIntersection(ids) }
+            .onChange(of: from) { _, day in if to < day { to = day } }
 #if DEBUG
             .onAppear {
                 let scenario = ProcessInfo.processInfo.environment["MOJI_QA_SCENARIO"]
+                if scenario == "workflow-library-filters" { filtersExpanded = true }
                 if scenario == "workflow-templates" { mode = 1 }
                 if scenario == "workflow-library-batch" {
                     selected = Set(plans.prefix(2).map(\.id)); selecting = true
@@ -89,7 +93,8 @@ struct PlanLibraryView: View {
     }
 
     private var filtersSection: some View {
-        Section("筛选") {
+        Section {
+            DisclosureGroup(isExpanded: $filtersExpanded) {
             Picker("计划类型", selection: $category) {
                 Text("全部类型").tag("all")
                 ForEach(workflowCategories()) { Text($0.displayName).tag($0.rawValue) }
@@ -106,7 +111,24 @@ struct PlanLibraryView: View {
                 DatePicker("开始日期", selection: $from, displayedComponents: .date)
                 DatePicker("结束日期", selection: $to, in: from..., displayedComponents: .date)
             }
+            if category != "all" || status != "all" || period != "all" {
+                Button("清除筛选") { category = "all"; status = "all"; period = "all" }
+            }
+            } label: {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("筛选").foregroundStyle(.primary)
+                    Text(filterSummary).font(.caption).foregroundStyle(.secondary)
+                }
+            }
         }
+    }
+
+    private var filterSummary: String {
+        let statusNames = ["planned": "待完成", "inProgress": "进行中", "completed": "已完成", "skipped": "已跳过", "archived": "已归档"]
+        let periodNames = ["past": "过去", "today": "今天", "future": "未来", "range": "日期范围"]
+        let parts = [category == "all" ? nil : RecordCategory(rawValue: category)?.displayName,
+                     statusNames[status], periodNames[period]].compactMap { $0 }
+        return parts.isEmpty ? "全部类型 · 全部状态 · 全部日期" : parts.joined(separator: " · ")
     }
 
     private var plansSection: some View {
@@ -129,7 +151,7 @@ struct PlanLibraryView: View {
 
     private func libraryRow(_ item: CheckInItem) -> some View {
         Button {
-            if selecting { if !selected.insert(item.id).inserted { selected.remove(item.id) } }
+            if selecting { guard item.status != .inProgress else { return }; if !selected.insert(item.id).inserted { selected.remove(item.id) } }
             else { editing = WorkflowPlanRoute(id: item.id, item: item) }
         } label: {
             HStack(spacing: 12) {
@@ -142,6 +164,7 @@ struct PlanLibraryView: View {
                 Spacer(minLength: 0)
             }.padding(.vertical, 4)
         }.buttonStyle(.plain)
+        .disabled(selecting && item.status == .inProgress)
         .contextMenu {
             Button("复制到今天") { store.copyPlan(item.id, to: Date()) }
             Button("复制到指定日期") { copying = WorkflowPlanRoute(id: item.id, item: item) }
@@ -326,6 +349,8 @@ struct WeeklyGoalEditor: View {
         _minutes = State(initialValue: goal?.targetMinutes.map(String.init) ?? "")
     }
     private var valid: Bool { (count.isEmpty || (Int(count).map { (1...100000).contains($0) } ?? false)) && (minutes.isEmpty || (Int(minutes).map { (1...100000).contains($0) } ?? false)) && (!count.isEmpty || !minutes.isEmpty) }
+    @State private var confirmsDiscard = false
+    private var hasEdits: Bool { category != (goal?.category?.rawValue ?? "all") || count != (goal?.targetCount.map(String.init) ?? "") || minutes != (goal?.targetMinutes.map(String.init) ?? "") }
     var body: some View {
         NavigationStack {
             Form {
@@ -349,8 +374,9 @@ struct WeeklyGoalEditor: View {
             }
             .scrollContentBackground(.hidden).background { InkWashBackground() }
             .navigationTitle("周目标").navigationBarTitleDisplayMode(.inline)
+            .confirmDiscardEdits(isDirty: hasEdits, isPresented: $confirmsDiscard)
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) { Button("取消") { dismiss() } }
+                ToolbarItem(placement: .cancellationAction) { Button("取消") { IMETextInput.commit { if hasEdits { confirmsDiscard = true } else { dismiss() } } } }
                 ToolbarItem(placement: .confirmationAction) { Button("保存") {
                     store.saveWeeklyGoal(WeeklyGoal(id: goal?.id ?? UUID(), weekStart: PlanWorkflow.weekKey(week), category: category == "all" ? nil : RecordCategory(rawValue: category), targetCount: Int(count), targetMinutes: Int(minutes))); dismiss()
                 }.fontWeight(.semibold).disabled(!valid) }
@@ -370,6 +396,8 @@ struct WeeklyReflectionEditor: View {
         self.store = store; self.week = week; self.reflection = reflection
         _note = State(initialValue: reflection?.note ?? ""); _nextFocus = State(initialValue: reflection?.nextFocus ?? "")
     }
+    @State private var confirmsDiscard = false
+    private var hasEdits: Bool { note != (reflection?.note ?? "") || nextFocus != (reflection?.nextFocus ?? "") }
     var body: some View {
         NavigationStack {
             Form {
@@ -378,9 +406,10 @@ struct WeeklyReflectionEditor: View {
             }
             .scrollContentBackground(.hidden).background { InkWashBackground() }
             .navigationTitle("周复盘").navigationBarTitleDisplayMode(.inline)
+            .confirmDiscardEdits(isDirty: hasEdits, isPresented: $confirmsDiscard)
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) { Button("取消") { dismiss() } }
-                ToolbarItem(placement: .confirmationAction) { Button("保存") { store.saveWeeklyReflection(WeeklyReflection(id: reflection?.id ?? UUID(), weekStart: PlanWorkflow.weekKey(week), note: note, nextFocus: nextFocus)); dismiss() }.fontWeight(.semibold) }
+                ToolbarItem(placement: .cancellationAction) { Button("取消") { IMETextInput.commit { if hasEdits { confirmsDiscard = true } else { dismiss() } } } }
+                ToolbarItem(placement: .confirmationAction) { Button("保存") { IMETextInput.commit { store.saveWeeklyReflection(WeeklyReflection(id: reflection?.id ?? UUID(), weekStart: PlanWorkflow.weekKey(week), note: note, nextFocus: nextFocus)); dismiss() } }.fontWeight(.semibold) }
             }
         }
     }

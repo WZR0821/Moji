@@ -23,7 +23,8 @@ IOS_ROUTE_TEXT = {
     "settings-widgets:0": "按钮文字", "settings-notifications": "全天计划提醒",
     "settings-appearance": "显示模式", "settings-permissions": "请求通知权限",
     "settings-backup": "从单个备份文件导入", "settings-about": "数据格式",
-    "plan-inline": "快捷编辑", "plan-editor-advanced": "高级设置",
+    "plan-inline": "编辑内容", "plan-editor-advanced": "高级设置",
+    "memo-note": "转为清单", "memo-checklist": "转为正文",
     "record-untimed": "编辑记录", "calendar-month": "当日安排",
     "calendar-week": "星期一", "calendar-day": "具体时间", "calendar-jump": "跳转到",
 }
@@ -36,7 +37,7 @@ def verify_ios_route(route, staging, ocr_tool):
     return expected in text
 
 def verify_android_route(route):
-    expected = {"plan-inline": "快捷编辑", "record-untimed": "编辑记录", "plan-editor-advanced": "高级设置", "calendar-jump": "跳转到"}.get(route)
+    expected = {"plan-inline": "编辑内容", "record-untimed": "编辑记录", "plan-editor-advanced": "高级设置", "calendar-jump": "跳转到", "memo-note": "转为清单", "memo-checklist": "转为正文"}.get(route)
     if not expected: return
     for attempt in range(3):
         run([ADB, "-s", "emulator-5554", "shell", "uiautomator", "dump", "/sdcard/moji-qa-window.xml"], stdout=subprocess.DEVNULL)
@@ -71,7 +72,8 @@ def capture(platform, route, mode, output, settle_seconds=15, ocr_tool=None):
             run(["xcrun", "simctl", "io", SIM, "screenshot", str(staging)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             with Image.open(staging) as shot:
                 sample = shot.convert("RGB").crop((60, 350, 1120, 2350)).resize((106, 200))
-                colorful = sum(max(rgb)-min(rgb) > 55 for rgb in sample.getdata()) / (106*200)
+                pixels = sample.get_flattened_data() if hasattr(sample, "get_flattened_data") else sample.getdata()
+                colorful = sum(max(rgb)-min(rgb) > 55 for rgb in pixels) / (106*200)
                 blank = max(ImageStat.Stat(sample).stddev) < 8
             if not blank and colorful < 0.04 and verify_ios_route(route, staging, ocr_tool): break
         else: raise RuntimeError(f"iOS screenshot did not settle into Moji: {route}")
@@ -117,7 +119,7 @@ if __name__ == "__main__":
     parser.add_argument("--platform", choices=["ios", "android", "both", "compare"], default="both")
     parser.add_argument("--routes", default=",".join(ROUTES))
     parser.add_argument("--mode", choices=["light", "dark"], default="light")
-    parser.add_argument("--output", type=Path, default=ROOT / "build/1.5.1-qa")
+    parser.add_argument("--output", type=Path, default=ROOT / "build/1.6.0-qa")
     parser.add_argument("--settle-seconds", type=int, default=15)
     parser.add_argument("--ocr-tool", type=Path, help="Optional compiled Scripts/qa_ocr.swift on macOS")
     args = parser.parse_args()
@@ -126,7 +128,7 @@ if __name__ == "__main__":
     routes = args.routes.split(",")
     if args.platform in ["ios", "both"]:
         container = run(["xcrun", "simctl", "get_app_container", SIM, "com.raydon.minuteplan", "data"], capture_output=True, text=True).stdout.strip()
-        run(["ditto", str(ROOT / "Scripts/fixtures/workflow-1.5.json"), str(Path(container) / "Documents/MojiVisualQA.json")])
+        run(["ditto", str(ROOT / "Scripts/fixtures/workflow-1.6.json"), str(Path(container) / "Documents/MojiVisualQA.json")])
     if args.platform != "compare":
         for route in routes:
             for platform in ["ios", "android"] if args.platform == "both" else [args.platform]: capture(platform, route, args.mode, output, args.settle_seconds, args.ocr_tool)

@@ -17,7 +17,7 @@ import androidx.compose.runtime.*
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 
 val scheduleOptions = listOf("allDay" to "全天", "morning" to "上午", "afternoon" to "下午", "evening" to "晚上", "exactTime" to "具体时间")
-val repeatOptions = listOf("never" to "不重复", "daily" to "每天", "weekdays" to "工作日", "weekly" to "每周", "monthly" to "每月", "customWeekdays" to "自定义星期")
+val repeatOptions = listOf("never" to "不重复", "daily" to "每天", "weekdays" to "每个工作日", "weekly" to "每周", "customWeekdays" to "自选星期", "monthly" to "每月")
 
 @Composable
 fun FormChoiceRow(title: String, value: String, options: List<Pair<String, String>>, showsValueIcon: Boolean = false, minHeight: Int = 44, onSelect: (String) -> Unit) {

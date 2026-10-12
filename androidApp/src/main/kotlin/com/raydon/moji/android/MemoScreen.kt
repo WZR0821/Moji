@@ -101,6 +101,7 @@ fun MemoScreen(viewModel: MojiViewModel) {
 @Composable
 private fun MemoRow(memo: MemoItem, viewModel: MojiViewModel, onEdit: () -> Unit, onConvert: () -> Unit) {
     var menu by remember { mutableStateOf(false) }
+    var confirmDelete by remember { mutableStateOf(false) }
     val updated = Instant.parse(memo.updatedAt).atZone(ZoneId.systemDefault())
     val timestamp = when (updated.toLocalDate()) {
         LocalDate.now() -> updated.format(DateTimeFormatter.ofPattern("HH:mm"))
@@ -131,9 +132,13 @@ private fun MemoRow(memo: MemoItem, viewModel: MojiViewModel, onEdit: () -> Unit
         DropdownMenu(menu, { menu = false }) {
             DropdownMenuItem({ Text("转为计划") }, { menu = false; onConvert() })
             DropdownMenuItem({ Text(if (memo.isPinned) "取消置顶" else "置顶") }, { menu = false; viewModel.toggleMemoPin(memo.id) })
-            DropdownMenuItem({ Text("删除") }, { menu = false; viewModel.deleteMemo(memo.id) })
+            DropdownMenuItem({ Text("删除") }, { menu = false; confirmDelete = true })
         }
     }
+    if (confirmDelete) AlertDialog(onDismissRequest = { confirmDelete = false },
+        title = { Text("删除这则备忘？") }, text = { Text("删除后无法撤销。") },
+        confirmButton = { TextButton(onClick = { viewModel.deleteMemo(memo.id); confirmDelete = false }) { Text("删除") } },
+        dismissButton = { TextButton(onClick = { confirmDelete = false }) { Text("取消") } })
 }
 
 @Composable
@@ -150,11 +155,14 @@ fun MemoEditorDialog(existing: MemoItem?, viewModel: MojiViewModel, onDismiss: (
     var focusedId by remember { mutableStateOf<String?>(null) }
     var requestedId by remember { mutableStateOf<String?>(null) }
     val canSave = title.isNotBlank() || if (checklist) entries.any { it.text.isNotBlank() } else content.isNotBlank()
-    Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false)) {
+    val editState = listOf(title, content, checklist, pinned, entries.filter { it.text.isNotBlank() })
+    val initialEditState = remember(existing?.id) { editState }
+    val requestDismiss = rememberEditorDismiss(editState != initialEditState, onDismiss)
+    Dialog(onDismissRequest = requestDismiss, properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false)) {
         MojiScreen {
             Column(Modifier.fillMaxSize()) {
                 Row(Modifier.fillMaxWidth().height(44.dp).padding(horizontal = 18.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Text("取消", fontSize = 17.sp, modifier = Modifier.weight(1f).clickable(onClick = onDismiss))
+                    Text("取消", fontSize = 17.sp, modifier = Modifier.weight(1f).heightIn(min = 44.dp).wrapContentHeight().clickable(onClick = requestDismiss))
                     Text(if (existing == null) "新建备忘" else "编辑备忘", fontSize = 17.sp, fontWeight = FontWeight.SemiBold)
                     Row(Modifier.weight(1f), horizontalArrangement = Arrangement.End, verticalAlignment = Alignment.CenterVertically) {
                         Box {
@@ -166,11 +174,11 @@ fun MemoEditorDialog(existing: MemoItem?, viewModel: MojiViewModel, onDismiss: (
                                 if (existing != null) DropdownMenuItem({ Text("删除备忘") }, { menu = false; deleteConfirm = true })
                             }
                         }
-                        Text("完成", fontSize = 17.sp, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onSurface.copy(alpha = if (canSave) 1f else 0.35f),
-                            modifier = Modifier.clickable(enabled = canSave) { viewModel.saveMemo(draftId, title, content, checklist, checklistItems = entries, isPinned = pinned, onSaved = onDismiss) })
+                        Text("保存", fontSize = 17.sp, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onSurface.copy(alpha = if (canSave) 1f else 0.35f),
+                            modifier = Modifier.heightIn(min = 44.dp).wrapContentHeight().clickable(enabled = canSave) { viewModel.saveMemo(draftId, title, content, checklist, checklistItems = entries, isPinned = pinned, onSaved = onDismiss) })
                     }
                 }
-                Surface(Modifier.fillMaxWidth().weight(1f).padding(start = 18.dp, end = 18.dp, top = 24.dp, bottom = 0.dp),
+                Surface(Modifier.fillMaxWidth().weight(1f).padding(start = 18.dp, end = 18.dp, top = 24.dp, bottom = 10.dp),
                     shape = RoundedCornerShape(16.dp), color = MaterialTheme.colorScheme.surface.copy(alpha = 0.88f),
                     border = BorderStroke(0.75.dp, MaterialTheme.colorScheme.onSurface.copy(alpha = 0.095f))) {
                     Box {
@@ -207,12 +215,12 @@ fun MemoEditorDialog(existing: MemoItem?, viewModel: MojiViewModel, onDismiss: (
                             }
                         } else BasicTextField(content, { content = it }, Modifier.fillMaxSize().padding(horizontal = 14.dp, vertical = 8.dp),
                             cursorBrush = SolidColor(MaterialTheme.colorScheme.onSurface), textStyle = MaterialTheme.typography.bodyLarge.copy(color = MaterialTheme.colorScheme.onSurface, lineHeight = 25.sp),
-                            decorationBox = { inner -> if (content.isEmpty()) Text("开始书写…", fontSize = 17.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.24f)); inner() })
+                            decorationBox = { inner -> if (content.isEmpty()) Text("开始记录……", fontSize = 17.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.24f)); inner() })
                     }
                     }
                 }
-                Row(Modifier.fillMaxWidth().height(44.dp).padding(horizontal = 18.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-                    Box(Modifier.size(24.dp).semantics { contentDescription = if (checklist) "转为正文" else "核对清单" }.clickable {
+                Row(Modifier.fillMaxWidth().height(49.dp).padding(horizontal = 18.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp, if (checklist) Alignment.Start else Alignment.CenterHorizontally)) {
+                    Row(Modifier.heightIn(min = 44.dp).semantics { contentDescription = if (checklist) "转为正文" else "转为清单" }.clickable {
                         if (checklist) content = entries.filter { it.text.isNotBlank() }.joinToString("\n") { "${if (it.isCompleted) "✓" else "•"} ${it.text.trim()}" }
                         else {
                             entries = content.lines().map { it.trim() }.filter { it.isNotBlank() }.map { line ->
@@ -223,18 +231,18 @@ fun MemoEditorDialog(existing: MemoItem?, viewModel: MojiViewModel, onDismiss: (
                             content = ""; requestedId = entries.first().id
                         }
                         checklist = !checklist
-                    }) { MojiLineIcon(if (checklist) MojiIcon.TextLines else MojiIcon.Checklist, 24.dp) }
+                    }, verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) { MojiLineIcon(if (checklist) MojiIcon.TextLines else MojiIcon.Checklist, 18.dp); Text(if (checklist) "转为正文" else "转为清单", fontSize = 14.sp) }
                     if (checklist) {
-                        Box(Modifier.size(24.dp).semantics { contentDescription = "添加项目" }.clickable {
+                        Row(Modifier.heightIn(min = 44.dp).semantics { contentDescription = "添加一项" }.clickable {
                             val index = entries.indexOfFirst { it.id == focusedId }.takeIf { it >= 0 } ?: (entries.size - 1)
                             if (entries[index].text.isBlank()) requestedId = entries[index].id
                             else {
                                 val added = MemoChecklistItem(UUID.randomUUID().toString())
                                 entries = entries.take(index + 1) + added + entries.drop(index + 1); requestedId = added.id
                             }
-                        }) { MojiLineIcon(MojiIcon.Plus, 24.dp) }
+                        }, verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) { MojiLineIcon(MojiIcon.Plus, 18.dp); Text("添加一项", fontSize = 14.sp) }
                         if (entries.any { it.isCompleted }) Box {
-                            Box(Modifier.size(24.dp).semantics { contentDescription = "清单操作" }.clickable { checklistMenu = true }) { MojiLineIcon(MojiIcon.Ellipsis, 24.dp) }
+                            Box(Modifier.size(44.dp).wrapContentSize().semantics { contentDescription = "清单操作" }.clickable { checklistMenu = true }) { MojiLineIcon(MojiIcon.Ellipsis, 24.dp) }
                             DropdownMenu(checklistMenu, { checklistMenu = false }) { DropdownMenuItem({ Text("清除已完成") }, {
                                 entries = entries.filterNot { it.isCompleted }.ifEmpty { listOf(MemoChecklistItem(UUID.randomUUID().toString())) }; checklistMenu = false
                             }) }

@@ -12,6 +12,7 @@ struct MemosView: View {
     @State private var editorRoute: MemoEditorRoute?
     @State private var searchText = ""
     @State private var convertingMemo: MemoItem?
+    @State private var deletingMemo: MemoItem?
 #if DEBUG
     @State private var didRunQAScenario = false
 #endif
@@ -98,6 +99,10 @@ struct MemosView: View {
                     .id(route.id)
             }
             .sheet(item: $convertingMemo) { MemoConversionView(store: store, memo: $0) }
+            .alert("删除这则备忘？", isPresented: Binding(get: { deletingMemo != nil }, set: { if !$0 { deletingMemo = nil } })) {
+                Button("取消", role: .cancel) { deletingMemo = nil }
+                Button("删除", role: .destructive) { if let memo = deletingMemo { store.deleteMemo(id: memo.id) }; deletingMemo = nil }
+            } message: { Text("删除后无法撤销。") }
             .onAppear {
                 store.reload()
 #if DEBUG
@@ -194,7 +199,7 @@ struct MemosView: View {
         }
         .swipeActions(edge: .trailing, allowsFullSwipe: true) {
             Button(role: .destructive) {
-                store.deleteMemo(id: memo.id)
+                deletingMemo = memo
             } label: {
                 Label("删除", systemImage: "trash")
             }
@@ -210,7 +215,7 @@ struct MemosView: View {
                 )
             }
             Button(role: .destructive) {
-                store.deleteMemo(id: memo.id)
+                deletingMemo = memo
             } label: {
                 Label("删除", systemImage: "trash")
             }
@@ -391,6 +396,7 @@ private struct MemoEditorView: View {
     @State private var isPinned: Bool
     @State private var isTitleFocused = false
     @State private var showsDeleteConfirmation = false
+    @State private var confirmsDiscard = false
     @State private var focusedChecklistItemID: UUID?
     @State private var checklistCaretRequest: ChecklistCaretRequest?
 
@@ -410,6 +416,13 @@ private struct MemoEditorView: View {
 
     private var cleanContent: String {
         content.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private var hasEdits: Bool {
+        title != (memo?.title ?? "") || content != (memo?.content ?? "") ||
+        mode != (memo?.mode ?? .note) || isPinned != (memo?.isPinned ?? false) ||
+        checklistItems.filter { !$0.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty } !=
+            (memo?.checklistItems ?? []).filter { !$0.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
     }
 
     private var canSave: Bool {
@@ -469,7 +482,7 @@ private struct MemoEditorView: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("取消") { dismiss() }
+                    Button("取消") { IMETextInput.commit { if hasEdits { confirmsDiscard = true } else { dismiss() } } }
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     HStack(spacing: 14) {
@@ -494,7 +507,7 @@ private struct MemoEditorView: View {
                     }
                     .accessibilityLabel("备忘操作")
 
-                    Button("完成") {
+                    Button("保存") {
                         IMETextInput.commit(save)
                     }
                     .fontWeight(.semibold)
@@ -505,18 +518,22 @@ private struct MemoEditorView: View {
                     Button {
                         switchMemoMode()
                     } label: {
-                        Label(
-                            mode == .checklist ? "转为正文" : "核对清单",
-                            systemImage: mode == .checklist ? "text.alignleft" : "checklist"
-                        )
+                        HStack(spacing: 6) {
+                            Image(systemName: mode == .checklist ? "text.alignleft" : "checklist").font(.system(size: 18))
+                            Text(mode == .checklist ? "转为正文" : "转为清单").font(.system(size: 14))
+                        }.fixedSize()
                     }
+                    .labelStyle(.titleAndIcon).font(.system(size: 14)).frame(minHeight: 44)
                     .accessibilityIdentifier("memo.editor.toggleChecklist")
 
                     if mode == .checklist {
                         Button {
                             addChecklistItem(after: focusedChecklistItemID)
                         } label: {
-                            Label("添加项目", systemImage: "plus")
+                            HStack(spacing: 6) {
+                                Image(systemName: "plus").font(.system(size: 18))
+                                Text("添加一项").font(.system(size: 14))
+                            }.fixedSize()
                         }
 
                         if checklistItems.contains(where: \.isCompleted) {
@@ -533,6 +550,7 @@ private struct MemoEditorView: View {
                     }
                 }
             }
+            .confirmDiscardEdits(isDirty: hasEdits, isPresented: $confirmsDiscard)
             .onAppear {
                 if mode == .checklist, checklistItems.isEmpty {
                     checklistItems = [MemoChecklistItem()]

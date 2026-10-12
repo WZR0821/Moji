@@ -18,9 +18,10 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.LineHeightStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.ui.unit.TextUnit
+import androidx.compose.ui.unit.em
 import kotlin.math.*
 
 object MojiPalette {
@@ -73,8 +74,8 @@ fun MojiTheme(dark: Boolean, content: @Composable () -> Unit) {
         headlineMedium = Typography().headlineMedium.copy(fontSize = 30.sp, lineHeight = 36.sp, letterSpacing = 0.sp, fontWeight = FontWeight.Bold),
         titleLarge = Typography().titleLarge.copy(fontSize = 22.sp, lineHeight = 28.sp, letterSpacing = 0.sp, fontWeight = FontWeight.Bold),
         titleMedium = Typography().titleMedium.copy(fontSize = 17.sp, lineHeight = 22.sp, letterSpacing = 0.sp, fontWeight = FontWeight.SemiBold),
-        // Small explicit font sizes must not inherit a fixed 24sp body line box.
-        bodyLarge = Typography().bodyLarge.copy(fontSize = 17.sp, lineHeight = TextUnit.Unspecified, letterSpacing = 0.sp),
+        // Relative line boxes keep explicit captions and Chinese text aligned with iOS.
+        bodyLarge = Typography().bodyLarge.copy(fontSize = 17.sp, lineHeight = 1.2.em, lineHeightStyle = LineHeightStyle(LineHeightStyle.Alignment.Center, LineHeightStyle.Trim.Both, LineHeightStyle.Mode.Tight), letterSpacing = 0.sp),
         bodyMedium = Typography().bodyMedium.copy(fontSize = 15.sp, lineHeight = 21.sp, letterSpacing = 0.sp),
         bodySmall = Typography().bodySmall.copy(fontSize = 13.sp, lineHeight = 18.sp, letterSpacing = 0.sp),
         labelLarge = Typography().labelLarge.copy(fontSize = 15.sp, lineHeight = 20.sp, letterSpacing = 0.sp),

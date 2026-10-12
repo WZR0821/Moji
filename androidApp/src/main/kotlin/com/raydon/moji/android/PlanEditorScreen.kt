@@ -54,7 +54,7 @@ fun PlanEditorScreenDialog(
     var date by remember(existing?.id) { mutableStateOf(oldDate?.toLocalDate() ?: initialDate) }
     var time by remember(existing?.id) { mutableStateOf(oldDate?.toLocalTime()?.withSecond(0)?.withNano(0) ?: now.toLocalTime()) }
     var schedule by remember(existing?.id) { mutableStateOf(existing?.scheduleKind ?: viewModel.defaultScheduleKind) }
-    var plannedDurationEnabled by remember(existing?.id) { mutableStateOf(existing?.plannedDurationEnabled ?: viewModel.defaultPlannedDurationEnabled) }
+    var plannedDurationEnabled by remember(existing?.id) { mutableStateOf(existing?.let { it.plannedDurationEnabled ?: (it.detailsConfigured != false && (it.scheduleKind ?: "exactTime") == "exactTime") } ?: viewModel.defaultPlannedDurationEnabled) }
     var plannedMinutes by remember(existing?.id) { mutableStateOf(existing?.plannedMinutes ?: viewModel.defaultPlannedMinutes) }
     var actualStart by remember(existing?.id) {
         mutableStateOf(existing?.actualStartDate?.let { Instant.parse(it).atZone(zone).toLocalTime() } ?: now.minusMinutes(plannedMinutes.toLong()).toLocalTime())
@@ -69,7 +69,7 @@ fun PlanEditorScreenDialog(
     var reminderEnabled by remember(existing?.id) { mutableStateOf(existing?.reminderMinutesBefore != null) }
     var reminderMinutes by remember(existing?.id) { mutableStateOf(existing?.reminderMinutesBefore ?: 10) }
     var calendarSync by remember(existing?.id) { mutableStateOf(existing?.calendarSyncEnabled ?: false) }
-    var advanced by remember { mutableStateOf(plannedDurationEnabled || repeatRule != "never" || reminderEnabled || calendarSync) }
+    var advanced by remember { mutableStateOf(BuildConfig.DEBUG && viewModel.visualQaRoute.value == "plan-editor-advanced") }
     val pickDate = rememberDatePicker { if (endDate == date) endDate = it; date = it }
     val pickTime = rememberTimePicker { time = it }
     val pickActualStart = rememberTimePicker { actualStart = it }
@@ -78,17 +78,23 @@ fun PlanEditorScreenDialog(
     val titleFocus = remember { androidx.compose.ui.focus.FocusRequester() }
     val qaScrollInset = with(androidx.compose.ui.platform.LocalDensity.current) { 44.dp.roundToPx() }
 
+    val editState = listOf(kind, title, note, category, date, time, schedule, plannedDurationEnabled, plannedMinutes,
+        actualStart, actualEnd, endDate, weekdays.sorted(), repeatRule, reminderEnabled, reminderMinutes, calendarSync)
+    val initialEditState = remember(existing?.id) { editState }
+    val requestDismiss = rememberEditorDismiss(editState != initialEditState, onDismiss)
+
     Dialog(
-        onDismissRequest = onDismiss,
+        onDismissRequest = requestDismiss,
         properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false),
     ) {
         MojiScreen {
             Column(Modifier.fillMaxSize()) {
                 MojiSheetBar(
-                    title = if (kind == "completed") "记录已做" else if (existing == null) "计划要做" else "编辑计划",
+                    title = if (kind == "completed") "记录已做" else if (existing == null) "新建计划" else "编辑计划",
                     leading = "取消",
                     trailing = "保存",
-                    onLeading = onDismiss,
+                    transparentBackground = false,
+                    onLeading = requestDismiss,
                     trailingEnabled = title.isNotBlank() && (kind != "completed" || schedule != "exactTime" || endDate.atTime(actualEnd).isAfter(date.atTime(actualStart))) && (kind != "planned" || repeatRule != "customWeekdays" || weekdays.isNotEmpty()),
                     onTrailing = {
                         viewModel.savePlan(
@@ -115,30 +121,19 @@ fun PlanEditorScreenDialog(
                 LazyColumn(
                     Modifier.fillMaxSize(),
                     state = listState,
-                    contentPadding = PaddingValues(top = 27.dp, bottom = 34.dp),
-                    verticalArrangement = Arrangement.spacedBy(19.dp),
+                    contentPadding = PaddingValues(top = 31.dp, bottom = 34.dp),
+                    verticalArrangement = Arrangement.spacedBy(23.dp),
                 ) {
-                    item {
-                        FormSection("记录方式") {
-                            FormSegmentedControl(
-                                listOf("planned" to "计划要做", "completed" to "记录已做"),
-                                kind,
-                            ) {
-                                if (it != kind && it == "completed") { date = now.toLocalDate(); endDate = date; actualEnd = now.toLocalTime(); actualStart = now.minusMinutes(plannedMinutes.toLong()).toLocalTime() }
-                                kind = it
-                            }
-                        }
-                    }
                     item {
                         FormSection("标题") { FormTextField(title, { title = it }, if (kind == "planned") "例如：完成报告第一章" else "例如：整理会议纪要", focusRequester = titleFocus) }
                     }
                     item {
                         FormSection("详细说明（可选）", "保存后，展开计划即可直接阅读完整内容。") {
-                            FormTextField(note, { note = it }, "补充背景、步骤或注意事项", singleLine = false, minHeight = 140)
+                            FormTextField(note, { note = it }, "补充背景、步骤或注意事项", singleLine = false, minHeight = 90)
                         }
                     }
                     item {
-                        FormSection("类型") { CategoryFields(category, viewModel) { category = it } }
+                        FormSection("类型", topPadding = 12) { CategoryFields(category, viewModel) { category = it } }
                     }
                     if (kind == "planned") {
                         item {
@@ -229,9 +224,9 @@ fun PlanEditorScreenDialog(
                 androidx.compose.runtime.LaunchedEffect(existing?.id) {
                     // The Dialog has its own composition. Wait until its list is
                     // laid out before requesting focus or capturing a deep row.
-                    androidx.compose.runtime.snapshotFlow { listState.layoutInfo.totalItemsCount }.first { it >= 6 }
+                    androidx.compose.runtime.snapshotFlow { listState.layoutInfo.totalItemsCount }.first { it >= 5 }
                     if (BuildConfig.DEBUG && viewModel.visualQaRoute.value == "plan-editor-advanced") {
-                        listState.scrollToItem(5, -qaScrollInset)
+                        listState.scrollToItem(4, -qaScrollInset)
                     }
                     if (existing == null) titleFocus.requestFocus()
                 }

@@ -1,5 +1,57 @@
 import Foundation
 
+/// A quick edit patches one field of the latest plan. A sheet must not replace
+/// a stale whole item after a timer, widget, or another editor has changed it.
+enum PlanQuickChange {
+    case content(title: String, note: String)
+    case date(Date)
+    case schedule(ScheduleKind, hour: Int, minute: Int, estimatedMinutes: Int?)
+    case category(RecordCategory)
+    case recurrence(PlanRepeatRule, weekdays: Set<Int>)
+    case reminder(Int?)
+
+    func applying(to original: CheckInItem, calendar: Calendar = .current) -> CheckInItem? {
+        guard original.kind == .planned else { return nil }
+        var item = original
+        // Freeze legacy duration semantics before marking details as configured.
+        item.plannedDurationEnabled = original.hasPlannedDuration
+        switch self {
+        case let .content(title, note):
+            let clean = title.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !clean.isEmpty else { return nil }
+            item.title = clean
+            item.note = note.trimmingCharacters(in: .whitespacesAndNewlines)
+        case let .date(day):
+            let time = calendar.dateComponents([.hour, .minute], from: original.scheduledStart)
+            item.scheduledStart = Self.localDate(on: day, hour: time.hour ?? 0, minute: time.minute ?? 0, calendar: calendar)
+        case let .schedule(kind, hour, minute, estimatedMinutes):
+            item.scheduleKind = kind
+            item.scheduledStart = Self.localDate(on: original.scheduledStart,
+                hour: kind.representativeHour ?? min(23, max(0, hour)),
+                minute: kind == .exactTime ? min(59, max(0, minute)) : 0, calendar: calendar)
+            item.plannedDurationEnabled = estimatedMinutes != nil
+            if let estimatedMinutes { item.plannedMinutes = min(1_440, max(1, estimatedMinutes)) }
+        case let .category(category): item.category = category
+        case let .recurrence(rule, weekdays):
+            let valid = weekdays.filter { (1...7).contains($0) }
+            guard rule != .customWeekdays || !valid.isEmpty else { return nil }
+            item.repeatRule = rule
+            item.repeatWeekdays = rule == .customWeekdays ? valid.sorted() : []
+        case let .reminder(minutes): item.reminderMinutesBefore = minutes.map { min(10_080, max(0, $0)) }
+        }
+        item.detailsConfigured = true
+        return item
+    }
+
+    private static func localDate(on day: Date, hour: Int, minute: Int, calendar: Calendar) -> Date {
+        // Construct wall-clock components: a spring-forward gap advances by its
+        // actual duration (02:30 -> 03:30), matching Android's ZonedDateTime.
+        var components = calendar.dateComponents([.era, .year, .month, .day], from: day)
+        components.hour = hour; components.minute = minute; components.second = 0
+        return calendar.date(from: components) ?? day
+    }
+}
+
 struct PlanTemplate: Codable, Identifiable, Equatable {
     var id: UUID = UUID()
     var title: String

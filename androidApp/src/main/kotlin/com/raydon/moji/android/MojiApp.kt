@@ -11,6 +11,9 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.navigationBars
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
@@ -86,8 +89,10 @@ fun MojiApp(
         containerColor = androidx.compose.ui.graphics.Color.Transparent,
         snackbarHost = { SnackbarHost(snackbar) },
         bottomBar = {
+            val density = LocalDensity.current
+            val bottomExtra = maxOf(0.dp, 34.dp - with(density) { WindowInsets.navigationBars.getBottom(density).toDp() })
             Column(
-                Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.background).navigationBarsPadding()
+                Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.background).navigationBarsPadding().padding(bottom = bottomExtra)
             ) {
                 HorizontalDivider(color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f), thickness = 0.5.dp)
                 Row(Modifier.fillMaxWidth().height(49.dp)) {

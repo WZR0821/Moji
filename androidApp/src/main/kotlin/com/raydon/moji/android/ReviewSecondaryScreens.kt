@@ -347,17 +347,20 @@ fun RecordEditorScreenDialog(existing: TimeRecord?, viewModel: MojiViewModel, on
     val pickEndDate = rememberDatePicker { endDate = it }
     val pickStart = rememberTimePicker { start = it }
     val pickEnd = rememberTimePicker { end = it }
-    Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false)) {
+    val editState = listOf(title, note, category, schedule, date, endDate, start, end)
+    val initialEditState = remember(existing?.id) { editState }
+    val requestDismiss = rememberEditorDismiss(editState != initialEditState, onDismiss)
+    Dialog(onDismissRequest = requestDismiss, properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false)) {
         MojiScreen {
             Column(Modifier.fillMaxSize()) {
-                MojiSheetBar(if (existing == null) "添加记录" else "编辑记录", "取消", "保存", onDismiss, {
+                MojiSheetBar(if (existing == null) "添加记录" else "编辑记录", "取消", "保存", requestDismiss, {
                     viewModel.saveRecord(draftId, title, category, date, start, end, note, endDate, schedule, onSaved = onDismiss)
-                }, title.isNotBlank() && (schedule != "exactTime" || endDate.atTime(end).isAfter(date.atTime(start))))
+                }, title.isNotBlank() && (schedule != "exactTime" || endDate.atTime(end).isAfter(date.atTime(start))), transparentBackground = false)
                 LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(top = 27.dp, bottom = 36.dp), verticalArrangement = Arrangement.spacedBy(19.dp)) {
                     item {
                         FormSection("标题") { FormTextField(title, { title = it }, "例如：复习高等数学") }
                     }
-                    item { FormSection("详细说明（可选）") { FormTextField(note, { note = it }, "补充这段记录的细节", singleLine = false, minHeight = 140) } }
+                    item { FormSection("详细说明（可选）") { FormTextField(note, { note = it }, "补充这段记录的细节", singleLine = false, minHeight = 90) } }
                     item { FormSection("类型") { CategoryFields(category, viewModel) { category = it } }
                     }
                     item {

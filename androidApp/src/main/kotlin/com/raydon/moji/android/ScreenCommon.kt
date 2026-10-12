@@ -6,6 +6,7 @@ import androidx.compose.foundation.layout.WindowInsetsSides
 import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.statusBars
+import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.runtime.staticCompositionLocalOf
@@ -103,19 +104,20 @@ fun ConfigureDialogWindow(dimAmount: Float? = null) {
 }
 
 @Composable
-fun MojiScreen(sheetFraction: Float? = null, sheetHeight: Dp? = null, content: @Composable () -> Unit) {
+fun MojiScreen(sheetFraction: Float? = null, sheetHeight: Dp? = null, opaqueTopInset: Boolean = false, content: @Composable () -> Unit) {
     ConfigureDialogWindow(if (sheetFraction != null || sheetHeight != null) 0.12f else null)
     val window = (LocalView.current.parent as? DialogWindowProvider)?.window
     if (window != null) {
         val density = LocalDensity.current
         val topInset = with(density) { WindowInsets.statusBars.getTop(density).toDp() }
+        val bottomExtra = maxOf(0.dp, 34.dp - with(density) { WindowInsets.navigationBars.getBottom(density).toDp() })
         Box(Modifier.fillMaxSize().padding(top = if (sheetFraction == null && sheetHeight == null) maxOf(70.dp, topInset + 44.dp) else 0.dp), contentAlignment = Alignment.BottomCenter) {
             val sheetSize = if (sheetHeight != null) Modifier.height(sheetHeight) else Modifier.fillMaxHeight(sheetFraction ?: 1f)
             Box(Modifier.fillMaxWidth().then(sheetSize).clip(RoundedCornerShape(topStart = 18.dp, topEnd = 18.dp))) {
                 MojiPaperScreen {
                     Box(Modifier.fillMaxSize()
                         .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Horizontal + WindowInsetsSides.Bottom))
-                        .imePadding()) { content() }
+                        .padding(bottom = bottomExtra).imePadding()) { content() }
                 }
             }
         }
@@ -124,7 +126,10 @@ fun MojiScreen(sheetFraction: Float? = null, sheetHeight: Dp? = null, content: @
         val statusInset = with(density) { WindowInsets.statusBars.getTop(density).toDp() }
         // Keep the app's large-title baseline aligned with the iPhone reference,
         // even when Android's status bar is shorter than the iOS safe area.
-        Box(Modifier.fillMaxSize().padding(top = maxOf(0.dp, 58.dp - statusInset))) { content() }
+        Box(Modifier.fillMaxSize()) {
+            if (opaqueTopInset) Box(Modifier.fillMaxWidth().height(maxOf(0.dp, 58.dp - statusInset)).background(MaterialTheme.colorScheme.background))
+            Box(Modifier.fillMaxSize().padding(top = maxOf(0.dp, 58.dp - statusInset))) { content() }
+        }
     }
 }
 
@@ -280,8 +285,9 @@ fun MojiLargeTitle(
     leadingAction: (() -> Unit)? = null,
     actions: List<Pair<MojiIcon, () -> Unit>> = emptyList(),
     bottomPadding: Dp = 14.dp,
+    opaqueBackground: Boolean = false,
 ) {
-    Column(Modifier.fillMaxWidth().padding(horizontal = 18.dp)) {
+    Column(Modifier.fillMaxWidth().background(if (opaqueBackground) MaterialTheme.colorScheme.background else Color.Transparent).padding(horizontal = 18.dp)) {
         Row(
             Modifier.fillMaxWidth().height(44.dp),
             verticalAlignment = Alignment.CenterVertically,
@@ -301,6 +307,7 @@ fun MojiLargeTitle(
                             MojiIcon.Plus -> "添加"
                             MojiIcon.Edit -> "新建备忘"
                             MojiIcon.Ellipsis -> "更多"
+                            MojiIcon.Grid -> "计划库与模板"
                             else -> icon.name
                         }
                     },
@@ -324,9 +331,10 @@ fun MojiSheetBar(
     onTrailing: () -> Unit,
     trailingEnabled: Boolean = true,
     leadingIsBack: Boolean = leading == "返回",
+    transparentBackground: Boolean = true,
 ) {
     Row(
-        Modifier.fillMaxWidth().height(44.dp).padding(horizontal = 18.dp),
+        Modifier.fillMaxWidth().height(44.dp).background(if (transparentBackground) Color.Transparent else MaterialTheme.colorScheme.background).padding(horizontal = 18.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Row(Modifier.weight(1f).clickable(enabled = leading.isNotEmpty(), role = Role.Button, onClick = onLeading).padding(vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -337,7 +345,7 @@ fun MojiSheetBar(
         Text(
             trailing,
             modifier = Modifier.weight(1f).alpha(if (trailingEnabled) 1f else 0.35f)
-                .clickable(enabled = trailingEnabled, role = Role.Button, onClick = onTrailing).padding(vertical = 10.dp),
+                .clickable(enabled = trailingEnabled && trailing.isNotEmpty(), role = Role.Button, onClick = onTrailing).padding(vertical = 10.dp),
             fontSize = 17.sp,
             fontWeight = FontWeight.SemiBold,
             textAlign = TextAlign.End,

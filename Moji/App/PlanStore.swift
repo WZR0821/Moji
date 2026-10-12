@@ -326,6 +326,21 @@ final class PlanStore: ObservableObject {
     }
 
     @discardableResult
+    func quickUpdatePlan(_ id: UUID, change: PlanQuickChange) -> Bool {
+        var saved = false
+        mutateWorkflow { state in
+            guard let index = state.checkInItems.firstIndex(where: { $0.id == id }),
+                  let updated = change.applying(to: state.checkInItems[index]) else { return }
+            state.checkInItems[index] = updated
+            saved = true
+        }
+        if saved, case let .date(day) = change, !Calendar.current.isDateInToday(day) {
+            workflowNotice = "已移到 \(day.formatted(.dateTime.month().day()))，可在日历或计划库查看"
+        }
+        return saved
+    }
+
+    @discardableResult
     func convertMemo(id: UUID, itemID: UUID? = nil, day: Date, category: RecordCategory) -> UUID? {
         var planID: UUID?
         mutateWorkflow { state in

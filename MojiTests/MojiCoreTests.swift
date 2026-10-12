@@ -2,6 +2,61 @@ import XCTest
 import UniformTypeIdentifiers
 @testable import Moji
 
+final class MojiQuickEditingTests: XCTestCase {
+    private var calendar: Calendar { var c = Calendar(identifier: .gregorian); c.timeZone = TimeZone(identifier: "Asia/Tokyo")!; return c }
+    private func date(_ text: String) -> Date { ISO8601DateFormatter().date(from: text)! }
+    private func plan() -> CheckInItem {
+        var p = CheckInItem(title: "阅读", category: .study, scheduledStart: date("2026-10-12T05:30:00Z"), plannedMinutes: 45, note: "保留说明", plannedDurationEnabled: true)
+        p.repeatRule = .weekly; p.reminderMinutesBefore = 15; p.status = .inProgress
+        return p
+    }
+    func testContentPatchesLatestPlanWithoutResettingLiveState() throws {
+        var latest = plan(); latest.status = .completed; latest.completedAt = date("2026-10-12T06:00:00Z")
+        let updated = try XCTUnwrap(PlanQuickChange.content(title: " 新标题 ", note: " 新说明 ").applying(to: latest))
+        var expected = latest; expected.title = "新标题"; expected.note = "新说明"; expected.detailsConfigured = true
+        XCTAssertEqual(updated, expected)
+    }
+    func testDatePreservesWallTimeAndOtherSettings() throws {
+        let original = plan()
+        let updated = try XCTUnwrap(PlanQuickChange.date(date("2026-10-20T00:00:00Z")).applying(to: original, calendar: calendar))
+        var expected = original; expected.scheduledStart = date("2026-10-20T05:30:00Z"); expected.detailsConfigured = true
+        XCTAssertEqual(updated, expected)
+    }
+    func testDateHandlesSpringForwardWithoutLosingMinutes() throws {
+        var c = calendar; c.timeZone = TimeZone(identifier: "America/New_York")!
+        var original = plan(); original.scheduledStart = date("2026-03-07T07:30:00Z")
+        let updated = try XCTUnwrap(PlanQuickChange.date(date("2026-03-08T12:00:00Z")).applying(to: original, calendar: c))
+        XCTAssertEqual(updated.scheduledStart, date("2026-03-08T07:30:00Z"))
+    }
+    func testAllDayAndDurationAreIndependent() throws {
+        let updated = try XCTUnwrap(PlanQuickChange.schedule(.allDay, hour: 14, minute: 30, estimatedMinutes: nil).applying(to: plan(), calendar: calendar))
+        XCTAssertEqual(updated.scheduledStart, date("2026-10-11T15:00:00Z"))
+        XCTAssertFalse(updated.hasPlannedDuration); XCTAssertEqual(updated.plannedMinutes, 45)
+        XCTAssertEqual(updated.repeatRule, .weekly)
+    }
+    func testUnrelatedEditDoesNotEnableLegacyEstimate() throws {
+        var original = plan(); original.detailsConfigured = false; original.plannedDurationEnabled = nil
+        let updated = try XCTUnwrap(PlanQuickChange.category(.work).applying(to: original))
+        XCTAssertFalse(updated.hasPlannedDuration); XCTAssertEqual(updated.scheduledStart, original.scheduledStart)
+    }
+    func testCustomWeekdaysRequireValidSelection() throws {
+        XCTAssertNil(PlanQuickChange.recurrence(.customWeekdays, weekdays: [0, 8]).applying(to: plan()))
+        XCTAssertEqual(PlanQuickChange.recurrence(.customWeekdays, weekdays: [6, 2, 8]).applying(to: plan())?.repeatWeekdays, [2, 6])
+        XCTAssertEqual(PlanQuickChange.recurrence(.never, weekdays: [2]).applying(to: plan())?.repeatWeekdays, [])
+    }
+    func testEmptyContentAndCompletedRecordCannotBeQuickEdited() {
+        XCTAssertNil(PlanQuickChange.content(title: " \n ", note: "note").applying(to: plan()))
+        var original = plan(); original.kind = .completedLog
+        XCTAssertNil(PlanQuickChange.content(title: "title", note: "note").applying(to: original))
+    }
+    func testReminderAndEstimateAreBounded() {
+        XCTAssertNil(PlanQuickChange.reminder(nil).applying(to: plan())?.reminderMinutesBefore)
+        XCTAssertEqual(PlanQuickChange.reminder(Int.max).applying(to: plan())?.reminderMinutesBefore, 10080)
+        XCTAssertEqual(PlanQuickChange.schedule(.exactTime, hour: 12, minute: 0, estimatedMinutes: Int.max).applying(to: plan())?.plannedMinutes, 1440)
+    }
+}
+
+
 final class MojiWorkflowTests: XCTestCase {
     private var calendar: Calendar { var c = Calendar(identifier: .gregorian); c.timeZone = TimeZone(identifier: "Asia/Tokyo")!; return c }
     private func date(_ value: String) -> Date { ISO8601DateFormatter().date(from: value)! }
