@@ -125,6 +125,39 @@ class LocalInteractionTest {
         assertEquals(2, repo.freshSnapshot().checkInItems.size)
         assertEquals("inProgress", repo.freshSnapshot().checkInItems.first { it.id == next.id }.status)
     }
+    @Test fun togglingSkippedPlanReopensItInsteadOfCompleting() = runBlocking {
+        val repo = repository(); repo.savePlan(plan()); repo.skipPlan("p")
+        assertEquals(1, repo.freshSnapshot().checkInItems.count { it.generatedFromOccurrenceID == "p" })
+        repo.togglePlan("p", now)
+        val reopened = repo.freshSnapshot().checkInItems.single()
+        assertEquals("p", reopened.id)
+        assertEquals("planned", reopened.status)
+        assertNull(reopened.completedAt)
+    }
+    @Test fun reopeningFocusCompletedPlanKeepsEarlierPartialFocus() = runBlocking {
+        val repo = repository(); repo.savePlan(plan())
+        repo.recordFocus("学习", "study", "p", now.minusSeconds(3600), now.minusSeconds(3000), false)
+        repo.recordFocus("学习", "study", "p", now.minusSeconds(1500), now, true)
+        assertEquals(2, repo.freshSnapshot().records.size)
+        repo.togglePlan("p", now)
+        val state = repo.freshSnapshot()
+        assertEquals(listOf("planned"), state.checkInItems.map { it.status })
+        assertEquals(listOf(now.minusSeconds(3000).toString()), state.records.map { it.endDate })
+    }
+    @Test fun reopeningCheckboxCompletedPlanKeepsEveryFocusRecord() = runBlocking {
+        val repo = repository(); repo.savePlan(plan())
+        repo.recordFocus("学习", "study", "p", now.minusSeconds(1200), now.minusSeconds(600), false)
+        repo.togglePlan("p", now); repo.togglePlan("p", now)
+        val state = repo.freshSnapshot()
+        assertEquals(listOf("planned"), state.checkInItems.map { it.status })
+        assertEquals(1, state.records.size)
+    }
+    @Test fun reopeningLoggedCompletionRemovesItsOwnRecord() = runBlocking {
+        val repo = repository(); repo.savePlan(plan()); repo.saveCompletedPlan(plan(), record())
+        repo.togglePlan("p", now)
+        assertEquals(listOf("planned"), repo.freshSnapshot().checkInItems.map { it.status })
+        assertTrue(repo.freshSnapshot().records.isEmpty())
+    }
     @Test fun deletingLastRecordRestoresCompletedPlanAndRemovesPendingSuccessor() = runBlocking {
         val repo = repository(); repo.savePlan(plan()); repo.saveCompletedPlan(plan(), record())
         repo.deleteRecord("r")

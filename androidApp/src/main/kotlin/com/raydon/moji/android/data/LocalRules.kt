@@ -59,6 +59,19 @@ object LocalRules {
             generatedFromOccurrenceID = item.id, calendarEventIdentifier = null)
     }
 
+    /** The record that completed [item], matched on its actual start/end like
+     * iOS PlanCompletionReversion. Earlier partial focus records share the
+     * plan ID but are history, so they never match. */
+    fun isCompletionRecord(record: TimeRecord, item: CheckInItem): Boolean {
+        if (record.checkInItemID != item.id) return false
+        val start = item.actualStartDate ?: return false
+        val end = item.actualEndDate ?: return false
+        return runCatching {
+            kotlin.math.abs(Instant.parse(record.startDate).toEpochMilli() - Instant.parse(start).toEpochMilli()) < 500 &&
+                kotlin.math.abs(Instant.parse(record.endDate).toEpochMilli() - Instant.parse(end).toEpochMilli()) < 500
+        }.getOrDefault(false)
+    }
+
     fun appendSuccessor(state: PlanSnapshot, item: CheckInItem, now: Instant): PlanSnapshot {
         if (state.checkInItems.any { it.generatedFromOccurrenceID == item.id }) return state
         val next = successor(item, now) ?: return state

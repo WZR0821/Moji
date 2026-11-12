@@ -81,12 +81,21 @@ class MojiRepository(private val dao: SnapshotDao) {
 
     suspend fun togglePlan(id: String, now: Instant = Instant.now()) = mutate { state ->
         val original = state.checkInItems.firstOrNull { it.id == id } ?: return@mutate state
+        // Mirrors iOS PlanStore.toggleCheckIn: a finished occurrence (completed or
+        // skipped) reopens and drops its untouched successor; anything else completes.
+        val pendingSuccessor = { item: CheckInItem -> item.generatedFromOccurrenceID == id && item.status == "planned" }
         if (original.status == "completed") {
             state.copy(
                 checkInItems = state.checkInItems
-                    .filterNot { it.generatedFromOccurrenceID == id && it.status == "planned" }
+                    .filterNot(pendingSuccessor)
                     .map { if (it.id == id) it.copy(status = "planned", completedAt = null, actualStartDate = null, actualEndDate = null) else it },
-                records = state.records.filterNot { it.checkInItemID == id },
+                records = state.records.filterNot { LocalRules.isCompletionRecord(it, original) },
+            )
+        } else if (original.status == "skipped") {
+            state.copy(
+                checkInItems = state.checkInItems
+                    .filterNot(pendingSuccessor)
+                    .map { if (it.id == id) it.copy(status = "planned", completedAt = null) else it },
             )
         } else {
             val completed = original.copy(status = "completed", completedAt = now.toString())
