@@ -32,6 +32,8 @@
 		773ADA2BBDED4457E388AF65 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8345810D2752DD61637A598B /* ContentView.swift */; };
 		79473FAA219882CA76A8809D /* PlanColors.swift in Sources */ = {isa = PBXBuildFile; fileRef = 59A82384D309BAD4708FCF1F /* PlanColors.swift */; };
 		86795DBC134A9CA2B19ACC4E /* SharedPersistence.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3CF703C26466C2387B8C7374 /* SharedPersistence.swift */; };
+		F17000000000000000000001 /* AppGroupResolver.swift in Sources */ = {isa = PBXBuildFile; fileRef = F17000000000000000000002 /* AppGroupResolver.swift */; };
+		F17000000000000000000003 /* AppGroupResolver.swift in Sources */ = {isa = PBXBuildFile; fileRef = F17000000000000000000002 /* AppGroupResolver.swift */; };
 		903E63178A5D215F022C4E4B /* WidgetActions.swift in Sources */ = {isa = PBXBuildFile; fileRef = 79A42A5AC2425610F728B4B2 /* WidgetActions.swift */; };
 		9CB6568DC199EE263BEC07A4 /* WeeklySummaryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1E62E6F123A8660D45E5C1E /* WeeklySummaryView.swift */; };
 		A7C14E2B93D84F21A114C001 /* PlanCalendarView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A7C14E2B93D84F21A114C002 /* PlanCalendarView.swift */; };
@@ -89,6 +91,7 @@
 		C1D2E3F4A5B60718293A4B5C /* ExternalBackupService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExternalBackupService.swift; sourceTree = "<group>"; };
 		A1B2C3D4E5F60718293A4B5C /* PomodoroEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PomodoroEngine.swift; sourceTree = "<group>"; };
 		3AB07C47179E6508BCA19298 /* PlanModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlanModels.swift; sourceTree = "<group>"; };
+		F17000000000000000000002 /* AppGroupResolver.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppGroupResolver.swift; sourceTree = "<group>"; };
 		3CF703C26466C2387B8C7374 /* SharedPersistence.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SharedPersistence.swift; sourceTree = "<group>"; };
 		43932251CF5E7CA8DAE1246D /* MojiTests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = MojiTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		4A2FAE32E2172B2B0843064D /* PlanStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlanStore.swift; sourceTree = "<group>"; };
@@ -233,6 +236,7 @@
 		FEF2089649EFE430342A4C9D /* Shared */ = {
 			isa = PBXGroup;
 			children = (
+				F17000000000000000000002 /* AppGroupResolver.swift */,
 				F0A300000000000000000001 /* Fonts */,
 				59A82384D309BAD4708FCF1F /* PlanColors.swift */,
 				3AB07C47179E6508BCA19298 /* PlanModels.swift */,
@@ -408,6 +412,7 @@
 				CBB93044BEBF2B1F8ABB3D49 /* PlanStore.swift in Sources */,
 				5C49DE2AA0B407FCC52DD0AB /* RecordEditorView.swift in Sources */,
 				D45AA6445ED9780CF4DF6154 /* RecordsView.swift in Sources */,
+				F17000000000000000000001 /* AppGroupResolver.swift in Sources */,
 				C3F84366081E440414909A54 /* SharedPersistence.swift in Sources */,
 				9CB6568DC199EE263BEC07A4 /* WeeklySummaryView.swift in Sources */,
 				D949915FBB0859B0BABFD5EE /* WidgetActions.swift in Sources */,
@@ -424,6 +429,7 @@
 				46C203E07603B963A8D7C3FD /* PlanColors.swift in Sources */,
 				342558AA459EADB37A56A105 /* PlanModels.swift in Sources */,
 				F15000000000000000000003 /* PlanWorkflow.swift in Sources */,
+				F17000000000000000000003 /* AppGroupResolver.swift in Sources */,
 				86795DBC134A9CA2B19ACC4E /* SharedPersistence.swift in Sources */,
 				903E63178A5D215F022C4E4B /* WidgetActions.swift in Sources */,
 			);
@@ -556,7 +562,7 @@
 				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
 				CODE_SIGN_STYLE = Automatic;
 				COPY_PHASE_STRIP = NO;
-			CURRENT_PROJECT_VERSION = 43;
+			CURRENT_PROJECT_VERSION = 44;
 				DEBUG_INFORMATION_FORMAT = dwarf;
 				DEVELOPMENT_TEAM = "";
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
@@ -576,7 +582,7 @@
 				GCC_WARN_UNUSED_FUNCTION = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
-			MARKETING_VERSION = 1.6.1;
+			MARKETING_VERSION = 1.6.2;
 				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
 				MTL_FAST_MATH = YES;
 				ONLY_ACTIVE_ARCH = YES;
@@ -659,7 +665,7 @@
 				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
 				CODE_SIGN_STYLE = Automatic;
 				COPY_PHASE_STRIP = NO;
-			CURRENT_PROJECT_VERSION = 43;
+			CURRENT_PROJECT_VERSION = 44;
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
 				DEVELOPMENT_TEAM = "";
 				ENABLE_NS_ASSERTIONS = NO;
@@ -673,7 +679,7 @@
 				GCC_WARN_UNUSED_FUNCTION = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
-			MARKETING_VERSION = 1.6.1;
+			MARKETING_VERSION = 1.6.2;
 				MTL_ENABLE_DEBUG_INFO = NO;
 				MTL_FAST_MATH = YES;
 				PRODUCT_NAME = "$(TARGET_NAME)";

@@ -2943,3 +2943,306 @@ final class MojiCoreTests: XCTestCase {
     }
 
 }
+
+final class MojiAppGroupTests: XCTestCase {
+    private let declared = AppGroupResolver.declaredIdentifier
+
+    // MARK: Resolving the group
+
+    func testSignedCopyOfDeclaredGroupComesFirst() {
+        let candidates = AppGroupResolver.candidates(
+            declared: declared,
+            infoPlistGroups: ["group.other.tool", "\(declared).ABCDE12345"],
+            signedGroups: ["\(declared).ABCDE12345"]
+        )
+        XCTAssertEqual(candidates, ["\(declared).ABCDE12345", "group.other.tool", declared])
+    }
+
+    func testShortestDerivedGroupWins() {
+        let candidates = AppGroupResolver.candidates(
+            declared: declared,
+            infoPlistGroups: ["\(declared).TEAM.extra", "\(declared).TEAM"],
+            signedGroups: []
+        )
+        XCTAssertEqual(candidates.first, "\(declared).TEAM")
+        XCTAssertFalse(AppGroupResolver.isDerived("group.com.raydon.minuteplanner", from: declared))
+    }
+
+    func testSignatureIsUsedWhenInfoPlistHasNoGroups() {
+        // SideStore 0.7 no longer writes ALTAppGroups into Info.plist.
+        let resolved = AppGroupResolver.resolve(
+            declared: declared,
+            infoPlistGroups: [],
+            signedGroups: ["\(declared).Z6XP9AHRBT"],
+            isAvailable: { $0 == "\(self.declared).Z6XP9AHRBT" }
+        )
+        XCTAssertEqual(resolved, "\(declared).Z6XP9AHRBT")
+    }
+
+    func testUnavailableGroupsFallBackToDeclaredIdentifier() {
+        let resolved = AppGroupResolver.resolve(
+            declared: declared,
+            infoPlistGroups: ["\(declared).TEAM"],
+            signedGroups: ["\(declared).TEAM"],
+            isAvailable: { _ in false }
+        )
+        XCTAssertEqual(resolved, declared)
+    }
+
+    func testUnsignedTestHostKeepsDeclaredIdentifier() {
+        XCTAssertEqual(SharedPersistence.appGroupIdentifier, declared)
+    }
+
+    // MARK: Reading entitlements from a code signature
+
+    func testEntitlementsAreReadFromThinMachO() throws {
+        let binary = try machO(entitlements: [
+            CodeSignatureEntitlements.applicationGroupsKey: ["\(declared).TEAM"],
+            "get-task-allow": true
+        ])
+        let entitlements = try XCTUnwrap(CodeSignatureEntitlements.entitlements(inMachO: binary))
+        XCTAssertEqual(entitlements[CodeSignatureEntitlements.applicationGroupsKey] as? [String], ["\(declared).TEAM"])
+        XCTAssertEqual(entitlements["get-task-allow"] as? Bool, true)
+    }
+
+    func testEntitlementsAreReadFromFatMachO() throws {
+        let thin = try machO(entitlements: [CodeSignatureEntitlements.applicationGroupsKey: [declared]])
+        var fat = Data()
+        fat.appendBigEndian(0xCAFE_BABE)
+        fat.appendBigEndian(1)
+        fat.appendBigEndian(0x0100_000C)
+        fat.appendBigEndian(0)
+        fat.appendBigEndian(64)
+        fat.appendBigEndian(UInt32(thin.count))
+        fat.appendBigEndian(12)
+        fat.append(Data(count: 64 - fat.count))
+        fat.append(thin)
+        let entitlements = try XCTUnwrap(CodeSignatureEntitlements.entitlements(inMachO: fat))
+        XCTAssertEqual(entitlements[CodeSignatureEntitlements.applicationGroupsKey] as? [String], [declared])
+    }
+
+    func testExecutableFileOnDiskYieldsItsGroups() throws {
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("moji-entitlements-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: url) }
+        try machO(entitlements: [CodeSignatureEntitlements.applicationGroupsKey: ["\(declared).TEAM"]]).write(to: url)
+        XCTAssertEqual(CodeSignatureEntitlements.applicationGroups(ofExecutableAt: url), ["\(declared).TEAM"])
+        XCTAssertEqual(
+            CodeSignatureEntitlements.applicationGroups(ofExecutableAt: url.appendingPathExtension("missing")),
+            []
+        )
+    }
+
+    func testMalformedBinariesYieldNoEntitlements() throws {
+        XCTAssertNil(CodeSignatureEntitlements.entitlements(inMachO: Data()))
+        XCTAssertNil(CodeSignatureEntitlements.entitlements(inMachO: Data("not a binary".utf8)))
+        XCTAssertNil(CodeSignatureEntitlements.entitlements(inMachO: try machO(entitlements: nil)))
+
+        let valid = try machO(entitlements: [CodeSignatureEntitlements.applicationGroupsKey: [declared]])
+        for length in 0..<valid.count {
+            // Every truncation must fail cleanly instead of reading past the end.
+            if let partial = CodeSignatureEntitlements.entitlements(inMachO: valid.prefix(length)) {
+                XCTAssertEqual(partial[CodeSignatureEntitlements.applicationGroupsKey] as? [String], [declared])
+            }
+        }
+        var wrongSuperBlobMagic = valid
+        wrongSuperBlobMagic[wrongSuperBlobMagic.startIndex + 72] = 0
+        XCTAssertNil(CodeSignatureEntitlements.entitlements(inMachO: wrongSuperBlobMagic))
+    }
+
+    // MARK: Moving data into the re-signed group
+
+    func testDataLeftInSandboxIsCopiedIntoUnusedGroup() throws {
+        let fixture = try MigrationFixture()
+        defer { fixture.tearDown() }
+        let onlyKey = "minuteplan.tests.legacyOnly.\(UUID().uuidString)"
+        let newerPrefixKey = "moji.tests.legacyOnly.\(UUID().uuidString)"
+        let foreignKey = "com.example.tests.notMoji.\(UUID().uuidString)"
+        fixture.legacy.set(42, forKey: onlyKey)
+        fixture.legacy.set(true, forKey: newerPrefixKey)
+        fixture.legacy.set("ignore", forKey: foreignKey)
+        fixture.legacy.set(try encodedSnapshot(title: "旧计划"), forKey: SharedPersistence.snapshotKey)
+        try fixture.writeLegacyFile("snapshot.json", try encodedSnapshot(title: "旧计划"))
+        try fixture.writeLegacyFile("before-restore.mojibackup", Data("recovery".utf8))
+
+        XCTAssertTrue(fixture.migrate())
+
+        XCTAssertEqual(fixture.target.integer(forKey: onlyKey), 42)
+        XCTAssertEqual(fixture.target.object(forKey: newerPrefixKey) as? Bool, true)
+        XCTAssertNil(fixture.target.object(forKey: foreignKey))
+        XCTAssertEqual(
+            fixture.target.data(forKey: SharedPersistence.snapshotKey),
+            fixture.legacy.data(forKey: SharedPersistence.snapshotKey)
+        )
+        XCTAssertEqual(try fixture.targetFile("snapshot.json"), try fixture.legacyFile("snapshot.json"))
+        XCTAssertEqual(try fixture.targetFile("before-restore.mojibackup"), Data("recovery".utf8))
+        XCTAssertEqual(fixture.target.string(forKey: SharedPersistence.appGroupMigrationKey), "copied")
+        // The old copy stays where it was.
+        XCTAssertEqual(fixture.legacy.integer(forKey: onlyKey), 42)
+        XCTAssertNotNil(try fixture.legacyFile("snapshot.json"))
+    }
+
+    func testGroupThatAlreadyHoldsDataKeepsIt() throws {
+        let fixture = try MigrationFixture()
+        defer { fixture.tearDown() }
+        let sharedKey = "minuteplan.tests.both.\(UUID().uuidString)"
+        let onlyKey = "minuteplan.tests.legacyOnly.\(UUID().uuidString)"
+        let groupSnapshot = try encodedSnapshot(title: "新分组里的计划")
+        fixture.target.set(1, forKey: sharedKey)
+        fixture.target.set(groupSnapshot, forKey: SharedPersistence.snapshotKey)
+        try fixture.writeTargetFile("snapshot.json", groupSnapshot)
+        fixture.legacy.set(2, forKey: sharedKey)
+        fixture.legacy.set(3, forKey: onlyKey)
+        fixture.legacy.set(try encodedSnapshot(title: "旧计划"), forKey: SharedPersistence.snapshotKey)
+        try fixture.writeLegacyFile("snapshot.json", try encodedSnapshot(title: "旧计划"))
+
+        XCTAssertTrue(fixture.migrate())
+
+        XCTAssertEqual(fixture.target.integer(forKey: sharedKey), 1)
+        XCTAssertEqual(fixture.target.integer(forKey: onlyKey), 3)
+        XCTAssertEqual(fixture.target.data(forKey: SharedPersistence.snapshotKey), groupSnapshot)
+        XCTAssertEqual(try fixture.targetFile("snapshot.json"), groupSnapshot)
+    }
+
+    func testMigrationRunsOnlyOnce() throws {
+        let fixture = try MigrationFixture()
+        defer { fixture.tearDown() }
+        let key = "minuteplan.tests.once.\(UUID().uuidString)"
+        fixture.legacy.set("old", forKey: key)
+        XCTAssertTrue(fixture.migrate())
+        fixture.target.set("changed in the group", forKey: key)
+        fixture.legacy.set("old again", forKey: key)
+
+        XCTAssertFalse(fixture.migrate())
+        XCTAssertEqual(fixture.target.string(forKey: key), "changed in the group")
+    }
+
+    func testFreshInstallHasNothingToCopy() throws {
+        let fixture = try MigrationFixture()
+        defer { fixture.tearDown() }
+        let removed = fixture.legacy.dictionaryRepresentation().keys.filter {
+            $0.hasPrefix("minuteplan.") || $0.hasPrefix("moji.")
+        }
+        try XCTSkipIf(!removed.isEmpty, "The test host's own defaults already carry Moji keys.")
+
+        XCTAssertFalse(fixture.migrate())
+        XCTAssertEqual(fixture.target.string(forKey: SharedPersistence.appGroupMigrationKey), "nothing-to-copy")
+    }
+
+    // MARK: Helpers
+
+    private func encodedSnapshot(title: String) throws -> Data {
+        let plan = CheckInItem(
+            title: title,
+            category: .study,
+            scheduledStart: Date(timeIntervalSince1970: 1_790_000_000),
+            plannedMinutes: 30,
+            note: "",
+            plannedDurationEnabled: true
+        )
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        return try encoder.encode(PlanSnapshot(checkInItems: [plan]))
+    }
+
+    /// A 64-bit Mach-O with one unrelated load command and, unless
+    /// `entitlements` is nil, a code signature holding a placeholder code
+    /// directory and an entitlements blob.
+    private func machO(entitlements: [String: Any]?) throws -> Data {
+        var binary = Data()
+        let commandsSize: UInt32 = entitlements == nil ? 24 : 40
+        for value: UInt32 in [0xFEED_FACF, 0x0100_000C, 0, 2, entitlements == nil ? 1 : 2, commandsSize, 0, 0] {
+            binary.appendLittleEndian(value)
+        }
+        for value: UInt32 in [0x2, 24, 0, 0, 0, 0] {
+            binary.appendLittleEndian(value)
+        }
+        guard let entitlements else { return binary }
+
+        let plist = try PropertyListSerialization.data(fromPropertyList: entitlements, format: .xml, options: 0)
+        var codeDirectory = Data()
+        codeDirectory.appendBigEndian(0xFADE_0C02)
+        codeDirectory.appendBigEndian(8)
+        var entitlementsBlob = Data()
+        entitlementsBlob.appendBigEndian(0xFADE_7171)
+        entitlementsBlob.appendBigEndian(UInt32(8 + plist.count))
+        entitlementsBlob.append(plist)
+        let indexEnd: UInt32 = 12 + 2 * 8
+        var superBlob = Data()
+        superBlob.appendBigEndian(0xFADE_0CC0)
+        superBlob.appendBigEndian(indexEnd + UInt32(codeDirectory.count + entitlementsBlob.count))
+        superBlob.appendBigEndian(2)
+        superBlob.appendBigEndian(0)
+        superBlob.appendBigEndian(indexEnd)
+        superBlob.appendBigEndian(5)
+        superBlob.appendBigEndian(indexEnd + UInt32(codeDirectory.count))
+        superBlob.append(codeDirectory)
+        superBlob.append(entitlementsBlob)
+
+        let signatureOffset: UInt32 = 32 + 40
+        for value: UInt32 in [0x1D, 16, signatureOffset, UInt32(superBlob.count)] {
+            binary.appendLittleEndian(value)
+        }
+        XCTAssertEqual(binary.count, Int(signatureOffset))
+        binary.append(superBlob)
+        return binary
+    }
+}
+
+private struct MigrationFixture {
+    let legacySuite = "com.raydon.moji.legacy-group-tests.\(UUID().uuidString)"
+    let targetSuite = "com.raydon.moji.target-group-tests.\(UUID().uuidString)"
+    let legacy: UserDefaults
+    let target: UserDefaults
+    let root = FileManager.default.temporaryDirectory
+        .appendingPathComponent("moji-group-migration-\(UUID().uuidString)", isDirectory: true)
+    var legacyDirectory: URL { root.appendingPathComponent("legacy/MinutePlan", isDirectory: true) }
+    var targetDirectory: URL { root.appendingPathComponent("group/MinutePlan", isDirectory: true) }
+
+    init() throws {
+        legacy = try XCTUnwrap(UserDefaults(suiteName: legacySuite))
+        target = try XCTUnwrap(UserDefaults(suiteName: targetSuite))
+        try FileManager.default.createDirectory(at: legacyDirectory, withIntermediateDirectories: true)
+    }
+
+    func migrate() -> Bool {
+        SharedPersistence.migrateStorage(
+            fromDefaults: legacy,
+            directory: legacyDirectory,
+            toDefaults: target,
+            directory: targetDirectory
+        )
+    }
+
+    func writeLegacyFile(_ name: String, _ data: Data) throws {
+        try data.write(to: legacyDirectory.appendingPathComponent(name))
+    }
+
+    func writeTargetFile(_ name: String, _ data: Data) throws {
+        try FileManager.default.createDirectory(at: targetDirectory, withIntermediateDirectories: true)
+        try data.write(to: targetDirectory.appendingPathComponent(name))
+    }
+
+    func legacyFile(_ name: String) throws -> Data {
+        try Data(contentsOf: legacyDirectory.appendingPathComponent(name))
+    }
+
+    func targetFile(_ name: String) throws -> Data {
+        try Data(contentsOf: targetDirectory.appendingPathComponent(name))
+    }
+
+    func tearDown() {
+        legacy.removePersistentDomain(forName: legacySuite)
+        target.removePersistentDomain(forName: targetSuite)
+        try? FileManager.default.removeItem(at: root)
+    }
+}
+
+private extension Data {
+    mutating func appendBigEndian(_ value: UInt32) {
+        Swift.withUnsafeBytes(of: value.bigEndian) { append(contentsOf: $0) }
+    }
+
+    mutating func appendLittleEndian(_ value: UInt32) {
+        Swift.withUnsafeBytes(of: value.littleEndian) { append(contentsOf: $0) }
+    }
+}

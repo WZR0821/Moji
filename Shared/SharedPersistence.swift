@@ -289,12 +289,23 @@ enum SharedPersistence {
     // These identifiers intentionally retain their pre-Moji values. They are
     // persistent upgrade identities, not product-facing names: changing them
     // would disconnect existing installs from their App Group data.
-    static let appGroupIdentifier = "group.com.raydon.minuteplan"
+    static let declaredAppGroupIdentifier = AppGroupResolver.declaredIdentifier
+    /// The group this install was actually signed with. After SideStore or
+    /// AltStore re-signs the app it carries the team ID suffix; see
+    /// `AppGroupResolver`.
+    static let appGroupIdentifier = AppGroupResolver.resolveForCurrentProcess()
     static let snapshotKey = "minuteplan.snapshot.v1"
     static let sharedDefaults = UserDefaults(suiteName: appGroupIdentifier) ?? .standard
 
     private static let backupFormatVersion = 1
     private static let preferenceMigrationKey = "minuteplan.preferences.migratedToAppGroup.v1"
+    static let appGroupMigrationKey = "minuteplan.storage.appGroupMigration.v1"
+    static let migratedStorageFileNames = [
+        "snapshot.json",
+        "snapshot.previous.json",
+        "before-restore.mojibackup"
+    ]
+    private static var didCheckAppGroupMigration = false
     private static let lock = NSLock()
     private static let fileManager = FileManager.default
 
@@ -336,8 +347,17 @@ enum SharedPersistence {
         "minuteplan.settings.paperTextureEnabled"
     ]
 
+    /// Run once at app launch, before any view reads `sharedDefaults`.
+    /// Returns whether data was copied into the App Group, so the caller
+    /// can refresh the widget.
+    @discardableResult
+    static func prepareStorage() -> Bool {
+        withPersistenceLock { migrateDeclaredAppGroupUnlocked() }
+    }
+
     static func load() -> PlanSnapshot {
         withPersistenceLock {
+            migrateDeclaredAppGroupUnlocked()
             migrateLegacyPreferencesUnlocked()
             return loadUnlocked()
         }
@@ -346,6 +366,7 @@ enum SharedPersistence {
     @discardableResult
     static func mutate(_ mutation: (inout PlanSnapshot) -> Void) -> PlanSnapshot {
         let result: (snapshot: PlanSnapshot, didSave: Bool) = withPersistenceLock {
+            migrateDeclaredAppGroupUnlocked()
             migrateLegacyPreferencesUnlocked()
 
             var snapshot = loadUnlocked()
@@ -562,6 +583,104 @@ enum SharedPersistence {
         sharedDefaults.synchronize()
     }
 
+    /// Builds up to 1.6.1 shipped without any App Group entitlement, so after
+    /// SideStore re-signed them the declared group did not exist and all data
+    /// went to the app's own sandbox: a `group.com.raydon.minuteplan`
+    /// preferences file plus `Application Support/MinutePlan`. Once this
+    /// install can open its real group, that data is copied over exactly once
+    /// and the old copy is left in place. The widget cannot read the app's
+    /// sandbox, so only the app runs this.
+    @discardableResult
+    private static func migrateDeclaredAppGroupUnlocked() -> Bool {
+        guard !didCheckAppGroupMigration else { return false }
+        didCheckAppGroupMigration = true
+        guard appGroupIdentifier != declaredAppGroupIdentifier,
+              Bundle.main.bundleURL.pathExtension == "app",
+              let targetDirectory = storageDirectoryURL,
+              let legacyDefaults = UserDefaults(suiteName: declaredAppGroupIdentifier) else {
+            return false
+        }
+        return migrateStorage(
+            fromDefaults: legacyDefaults,
+            directory: storageDirectory(forGroup: declaredAppGroupIdentifier),
+            toDefaults: sharedDefaults,
+            directory: targetDirectory
+        )
+    }
+
+    /// Copies one storage location into another. Internal so tests can run
+    /// it against throwaway locations; the app only calls it through
+    /// `migrateDeclaredAppGroupUnlocked`.
+    ///
+    /// If the target already holds plans, records or other content it wins,
+    /// and only settings it has never stored are filled in. Otherwise the
+    /// legacy settings, snapshot and recovery files are copied as they are,
+    /// so the first launch shows exactly what the previous build showed.
+    @discardableResult
+    static func migrateStorage(
+        fromDefaults legacyDefaults: UserDefaults,
+        directory legacyDirectory: URL?,
+        toDefaults targetDefaults: UserDefaults,
+        directory targetDirectory: URL
+    ) -> Bool {
+        guard targetDefaults.object(forKey: appGroupMigrationKey) == nil else { return false }
+
+        // The representation also carries the argument, global and
+        // registration domains; only Moji's own keys are copied. Most use the
+        // old `minuteplan.` prefix, a few newer ones `moji.`.
+        let legacyValues = legacyDefaults.dictionaryRepresentation().filter {
+            ($0.key.hasPrefix("minuteplan.") || $0.key.hasPrefix("moji."))
+                && $0.key != appGroupMigrationKey
+        }
+        let legacyFiles: [(name: String, url: URL)] = migratedStorageFileNames.compactMap { name in
+            guard let url = legacyDirectory?.appendingPathComponent(name),
+                  fileManager.fileExists(atPath: url.path) else { return nil }
+            return (name, url)
+        }
+        // Only the files are checked. `saveUnlocked` writes one whenever the
+        // group is open, and unlike the defaults they cannot pick up a value
+        // from another domain, such as the pre-App-Group snapshot that
+        // `UserDefaults.standard` may still hold.
+        let targetInUse = ["snapshot.json", "snapshot.previous.json"].contains { name in
+            guard let data = try? Data(contentsOf: targetDirectory.appendingPathComponent(name)),
+                  let snapshot = try? decoder.decode(PlanSnapshot.self, from: data) else {
+                return false
+            }
+            return snapshot.hasContent
+        }
+
+        var copied = false
+        if targetInUse {
+            for (key, value) in legacyValues
+            where !isSnapshotKey(key) && targetDefaults.object(forKey: key) == nil {
+                targetDefaults.set(value, forKey: key)
+                copied = true
+            }
+        } else {
+            for (key, value) in legacyValues {
+                targetDefaults.set(value, forKey: key)
+                copied = true
+            }
+            if !legacyFiles.isEmpty {
+                try? fileManager.createDirectory(at: targetDirectory, withIntermediateDirectories: true)
+            }
+            for file in legacyFiles {
+                let destination = targetDirectory.appendingPathComponent(file.name)
+                try? fileManager.removeItem(at: destination)
+                if (try? fileManager.copyItem(at: file.url, to: destination)) != nil {
+                    copied = true
+                }
+            }
+        }
+        targetDefaults.set(copied ? "copied" : "nothing-to-copy", forKey: appGroupMigrationKey)
+        targetDefaults.synchronize()
+        return copied
+    }
+
+    private static func isSnapshotKey(_ key: String) -> Bool {
+        key == snapshotKey || key.hasPrefix(snapshotKey + ".")
+    }
+
     /// `NSLock` only protects threads inside one process. Widget App Intents run
     /// in another process, so every read-modify-write also takes an advisory
     /// lock in the shared App Group container.
@@ -596,8 +715,14 @@ enum SharedPersistence {
     }
 
     private static var storageDirectoryURL: URL? {
+        storageDirectory(forGroup: appGroupIdentifier)
+    }
+
+    /// The group container when this install may open it, otherwise the
+    /// app's own Application Support. Every build has resolved it this way.
+    private static func storageDirectory(forGroup identifier: String) -> URL? {
         if let groupURL = fileManager.containerURL(
-            forSecurityApplicationGroupIdentifier: appGroupIdentifier
+            forSecurityApplicationGroupIdentifier: identifier
         ) {
             return groupURL.appendingPathComponent("MinutePlan", isDirectory: true)
         }
@@ -637,5 +762,14 @@ enum SharedPersistence {
             return date
         }
         return decoder
+    }
+}
+
+private extension PlanSnapshot {
+    /// Whether this snapshot holds anything the user made.
+    var hasContent: Bool {
+        !records.isEmpty || !checkInItems.isEmpty || !countdowns.isEmpty || !memos.isEmpty
+            || !planTemplates.isEmpty || !weeklyGoals.isEmpty || !weeklyReflections.isEmpty
+            || activeSession != nil
     }
 }

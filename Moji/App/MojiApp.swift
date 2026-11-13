@@ -1,5 +1,6 @@
 import SwiftUI
 import UIKit
+import WidgetKit
 
 final class MojiApplicationDelegate: NSObject, UIApplicationDelegate {
     func applicationWillTerminate(_ application: UIApplication) {
@@ -21,6 +22,12 @@ struct MojiApp: App {
     private var appearanceModeRaw = AppAppearanceMode.system.rawValue
 
     init() {
+        // Copy data that earlier builds left in the app's own sandbox into the
+        // re-signed App Group before any view reads settings, then let the
+        // widget pick it up.
+        if SharedPersistence.prepareStorage() {
+            WidgetCenter.shared.reloadAllTimelines()
+        }
 #if DEBUG
         // Explicit opt-in, used only inside the disposable visual-QA simulator.
         if ProcessInfo.processInfo.environment["MOJI_QA_SEED"] == "1",
