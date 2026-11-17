@@ -42,3 +42,9 @@ keystore.properties
 .swiftpm/
 *.xccheckout
 *.xcscmblueprint
+
+# Kotlin compiler session cache
+.kotlin/
+
+# Local-only session handoff notes
+*.HANDOFF.md
