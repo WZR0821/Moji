@@ -61,7 +61,9 @@ class MainActivity : ComponentActivity() {
                 )
             }
             MojiTheme(dark) {
-                Surface(color = MaterialTheme.colorScheme.background) {
+                // iOS draws body text in the system label colour (pure black / white);
+                // icons, tints and ink artwork keep the graphite palette.
+                Surface(color = MaterialTheme.colorScheme.background, contentColor = if (dark) androidx.compose.ui.graphics.Color.White else androidx.compose.ui.graphics.Color.Black) {
                     MojiApp(
                         viewModel = viewModel,
                         onExportBackup = { exportBackup.launch("Moji-${java.time.LocalDate.now()}.mojibackup") },

@@ -10,6 +10,10 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.foundation.Canvas
+import androidx.compose.ui.graphics.luminance
+import androidx.compose.material3.LocalContentColor
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.graphics.SolidColor
@@ -107,7 +111,10 @@ fun PlanScreen(viewModel: MojiViewModel) {
         LazyColumn(Modifier.fillMaxSize(), state = listState) {
             item {
                 Box {
-                    MojiLargeTitle("计划", MojiIcon.Calendar, { showCalendar = true }, listOf(MojiIcon.Grid to { showLibrary = true }, MojiIcon.Plus to { addMenu = true }), bottomPadding = 0.dp, opaqueBackground = true)
+                    Column {
+                        MojiLargeTitle("计划", MojiIcon.CalendarFill, { showCalendar = true }, listOf(MojiIcon.GridSF to { showLibrary = true }, MojiIcon.Plus to { addMenu = true }), bottomPadding = 2.5.dp, opaqueBackground = true)
+                        NavigationBarHairline()
+                    }
                     Box(Modifier.align(Alignment.TopEnd).padding(end = 18.dp, top = 40.dp)) {
                         PlanAddMenu(addMenu && listState.firstVisibleItemIndex == 0, { addMenu = false }, openRecord, openPlan)
                     }
@@ -115,33 +122,34 @@ fun PlanScreen(viewModel: MojiViewModel) {
             }
             item {
                 InkCard(Modifier.fillMaxWidth().padding(start = 18.dp, end = 18.dp, top = 10.dp, bottom = 7.dp), padding = PaddingValues(0.dp)) {
-                    Row(Modifier.fillMaxWidth().height(52.dp).padding(start = 16.dp, end = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Row(Modifier.fillMaxWidth().height(52.dp).padding(start = 16.dp, end = 8.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                         androidx.compose.foundation.text.BasicTextField(quickTitle, { quickTitle = it }, Modifier.weight(1f),
                             keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(imeAction = androidx.compose.ui.text.input.ImeAction.Done),
                             keyboardActions = androidx.compose.foundation.text.KeyboardActions(onDone = { addQuickPlan() }),
                             singleLine = true, textStyle = MaterialTheme.typography.bodyLarge.copy(color = MaterialTheme.colorScheme.onSurface),
                             cursorBrush = SolidColor(MaterialTheme.colorScheme.onSurface),
                             decorationBox = { inner -> if (quickTitle.isEmpty()) Text("写下一件要做的事", fontSize = 17.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.24f)); inner() })
-                        Box(Modifier.size(44.dp).clickable(enabled = quickTitle.isNotBlank()) {
+                        Box(Modifier.size(44.dp).alpha(if (quickTitle.isBlank()) 0.35f else 1f).clickable(enabled = quickTitle.isNotBlank()) {
                             addQuickPlan()
                         }, contentAlignment = Alignment.Center) {
-                            InkAsset("InkIconLoop", Modifier.size(36.dp).alpha(if (quickTitle.isBlank()) 0.18f else 0.65f))
-                            MojiLineIcon(MojiIcon.Plus, 18.dp, MaterialTheme.colorScheme.onSurface.copy(alpha = if (quickTitle.isBlank()) 0.22f else 1f))
+                            InkBrushMedallion(MojiIcon.Plus, MaterialTheme.colorScheme.primary, 36.dp)
                         }
                     }
                 }
             }
             item {
-                Row(Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 5.dp).heightIn(min = 30.dp), verticalAlignment = Alignment.CenterVertically) {
+                Row(Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 5.dp).heightIn(min = 39.dp), verticalAlignment = Alignment.CenterVertically) {
                     InkSeal("今", 25)
                     Column(Modifier.padding(start = 10.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                         Text("今日计划", fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
-                        Text(today.format(DateTimeFormatter.ofPattern("M月d日 EEEE", Locale.SIMPLIFIED_CHINESE)), fontSize = 11.sp, color = MaterialTheme.colorScheme.secondary)
+                        // iOS .secondary in the list resolves to primary at 50%: (123,122,118) light, (136,136,135) dark.
+                        Text(today.format(DateTimeFormatter.ofPattern("M月d日 EEEE", Locale.SIMPLIFIED_CHINESE)), fontSize = 11.sp, color = LocalContentColor.current.copy(alpha = 0.5f))
                     }
                     Spacer(Modifier.weight(1f))
                     InkDivider(Modifier.width(44.dp), 0.26f, inkSeed("dashboard-today-heading"))
                     Text(if (total == 0) "今日无计划" else "完成 ${completed.count { it.status == "completed" }}/$total", Modifier.padding(start = 12.dp).widthIn(min = 78.dp),
-                        fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onSurface.copy(alpha = if (total == 0) 0.5f else 1f))
+                        fontSize = 12.sp, fontWeight = FontWeight.SemiBold, textAlign = androidx.compose.ui.text.style.TextAlign.End,
+                        color = if (total == 0) iosSecondaryLabel else MaterialTheme.colorScheme.primary)
                 }
             }
             if (snapshot.activeSession != null || timer.hasActiveFocus()) item {
@@ -174,8 +182,8 @@ fun PlanScreen(viewModel: MojiViewModel) {
             if (completed.isNotEmpty()) {
                 item {
                     Row(Modifier.fillMaxWidth().clickable { showsCompleted = !showsCompleted }.padding(start = 22.dp, end = 22.dp, top = 14.dp, bottom = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-                        Text("今日已结束 ${completed.size}", fontSize = 15.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f), modifier = Modifier.weight(1f))
-                        MojiChevronDown(showsCompleted)
+                        Text("今日已结束 ${completed.size}", fontSize = 15.sp, color = iosSecondaryLabel, modifier = Modifier.weight(1f))
+                        MojiChevronDown(showsCompleted, width = 13f, color = iosSecondaryLabel)
                     }
                 }
                 if (showsCompleted) items(completed, key = { "completed-" + it.id }) { item ->
@@ -185,16 +193,17 @@ fun PlanScreen(viewModel: MojiViewModel) {
             }
             item { Spacer(Modifier.height(8.dp)) }
         }
-        if (listState.firstVisibleItemIndex > 0) {
-            Row(Modifier.fillMaxWidth().height(44.dp).background(MaterialTheme.colorScheme.background).padding(horizontal = 18.dp), verticalAlignment = Alignment.CenterVertically) {
-                Box(Modifier.size(44.dp).clickable { showCalendar = true }, contentAlignment = Alignment.Center) { MojiLineIcon(MojiIcon.Calendar, 25.dp) }
+        if (listState.firstVisibleItemIndex > 0) Column(Modifier.background(MaterialTheme.colorScheme.background)) {
+            Row(Modifier.fillMaxWidth().height(44.dp).padding(start = 7.dp, end = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                Box(Modifier.size(44.dp).clickable { showCalendar = true }, contentAlignment = Alignment.Center) { MojiLineIcon(MojiIcon.CalendarFill, 28.dp) }
                 Text("计划", modifier = Modifier.weight(1f).padding(start = 44.dp), fontSize = 17.sp, fontWeight = FontWeight.SemiBold, textAlign = androidx.compose.ui.text.style.TextAlign.Center)
-                Box(Modifier.size(44.dp).clickable { showLibrary = true }, contentAlignment = Alignment.Center) { MojiLineIcon(MojiIcon.Grid, 23.dp) }
+                Box(Modifier.size(44.dp).clickable { showLibrary = true }, contentAlignment = Alignment.Center) { MojiLineIcon(MojiIcon.GridSF, 28.dp) }
                 Box {
                     Box(Modifier.size(44.dp).clickable { addMenu = true }, contentAlignment = Alignment.Center) { MojiLineIcon(MojiIcon.Plus, 23.dp) }
                     PlanAddMenu(addMenu, { addMenu = false }, openRecord, openPlan)
                 }
             }
+            NavigationBarHairline()
         }
         }
     }
@@ -274,11 +283,22 @@ fun InkSeal(character: String, size: Int = 25, style: Int = if (character == "�
     }
 }
 
+/** SF "chevron.down": [width] is the glyph width in dp; iOS draws it in the tertiary label colour. */
 @Composable
-fun MojiChevronDown(expanded: Boolean) {
-    Box(Modifier.size(20.dp).rotate(if (expanded) 180f else 0f).rotate(90f), contentAlignment = Alignment.Center) {
-        MojiLineIcon(MojiIcon.ChevronRight, 11.dp, MaterialTheme.colorScheme.onSurface.copy(alpha = 0.3f))
+fun MojiChevronDown(expanded: Boolean, width: Float = 9.4f, color: Color = iosTertiaryLabel) {
+    Canvas(Modifier.size(20.dp).rotate(if (expanded) 180f else 0f)) {
+        val d = density; val half = width / 2f; val stroke = width * 0.2f; val drop = (width - stroke) * 0.5f
+        val top = this.size.height / 2f - drop * d / 2f; val cx = this.size.width / 2f
+        val path = androidx.compose.ui.graphics.Path().apply { moveTo(cx - (half - stroke / 2) * d, top); lineTo(cx, top + drop * d); lineTo(cx + (half - stroke / 2) * d, top) }
+        drawPath(path, color, style = androidx.compose.ui.graphics.drawscope.Stroke(stroke * d, cap = androidx.compose.ui.graphics.StrokeCap.Round, join = androidx.compose.ui.graphics.StrokeJoin.Round))
     }
+}
+
+/** The 1px shadow line UIKit draws under a navigation bar whose background is visible. */
+@Composable
+fun NavigationBarHairline() {
+    val dark = MaterialTheme.colorScheme.background.luminance() < 0.5f
+    androidx.compose.material3.HorizontalDivider(thickness = devicePixel, color = if (dark) Color.White.copy(alpha = 0.17f) else Color.Black.copy(alpha = 0.3f))
 }
 
 @OptIn(ExperimentalFoundationApi::class)
@@ -323,18 +343,22 @@ private fun PlanRow(plan: CheckInItem, today: LocalDate, expanded: Boolean, arch
                 Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     Box {
                         Text(plan.title, fontSize = 17.sp, maxLines = if (expanded) Int.MAX_VALUE else 2, overflow = TextOverflow.Ellipsis,
-                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = if (plan.status == "completed") 0.5f else 1f))
+                            // iOS Color.primary: pure black / white (0,0,0 / 255,255,255), not the ink tone.
+                            color = if (plan.status == "completed") MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f) else LocalContentColor.current)
                         if (finished) Box(Modifier.matchParentSize(), contentAlignment = Alignment.Center) {
                             InkAsset("InkTaskStrike", Modifier.fillMaxWidth().height(11.dp).offset(y = 1.dp).alpha(if (plan.status == "skipped") 0.46f else 0.72f))
                         }
                     }
                     if (!expanded) {
                         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(5.dp)) {
-                            MojiLineIcon(if (plan.scheduleKind == "exactTime") MojiIcon.Clock else MojiIcon.Sun, 9.dp, MaterialTheme.colorScheme.secondary)
-                            Text(schedule + (if (hasDuration) " · ${editorDuration(plan.plannedMinutes.toLong())}" else "") + " · " + categoryName(plan.category),
-                                fontSize = 11.sp, maxLines = 2, color = MaterialTheme.colorScheme.secondary)
+                            val secondary = MaterialTheme.colorScheme.secondary
+                            MojiLineIcon(if (plan.scheduleKind == "exactTime") MojiIcon.Clock else MojiIcon.Sun, 10.dp, secondary)
+                            Text(schedule, fontSize = 11.sp, maxLines = 1, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.primary)
+                            if (hasDuration) { Text("·", fontSize = 11.sp, color = secondary); Text(editorDuration(plan.plannedMinutes.toLong()), fontSize = 11.sp, maxLines = 1, color = secondary) }
+                            Text("·", fontSize = 11.sp, color = secondary)
+                            Text(categoryName(plan.category), fontSize = 11.sp, maxLines = 1, color = secondary)
                         }
-                        if (plan.note.isNotEmpty()) Text(plan.note, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, color = MaterialTheme.colorScheme.secondary)
+                        if (plan.note.isNotEmpty()) Text(plan.note, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, color = LocalContentColor.current.copy(alpha = 0.5f))
                     }
                 }
                 if (daysLate > 0 && !finished) InkSeal(if (daysLate > 99) "99+" else daysLate.toString(), 22)
@@ -344,27 +368,27 @@ private fun PlanRow(plan: CheckInItem, today: LocalDate, expanded: Boolean, arch
                 InkDivider()
                 Column(Modifier.padding(top = 8.dp, bottom = 12.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     Row(Modifier.fillMaxWidth().heightIn(min = 32.dp).clickable { quickField = PlanQuickField.CONTENT }, verticalAlignment = Alignment.Top, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Text(plan.note.ifEmpty { "添加备注" }, fontSize = 15.sp, lineHeight = 21.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = if (plan.note.isEmpty()) 0.5f else 0.86f), modifier = Modifier.weight(1f))
-                        MojiLineIcon(MojiIcon.Edit, 12.dp, MaterialTheme.colorScheme.onSurface.copy(alpha = 0.3f))
+                        Text(plan.note.ifEmpty { "添加备注" }, fontSize = 15.sp, lineHeight = 21.sp, color = if (plan.note.isEmpty()) iosSecondaryLabel else LocalContentColor.current.copy(alpha = 0.86f), modifier = Modifier.weight(1f))
+                        Box(Modifier.padding(top = 3.dp)) { MojiLineIcon(MojiIcon.Pencil, 14.dp, iosTertiaryLabel) }
                     }
                     Column(Modifier.background(MaterialTheme.colorScheme.onSurface.copy(alpha = 0.045f), RoundedCornerShape(12.dp))) {
                         PlanDetailRow("日期", date.format(DateTimeFormatter.ofPattern("M月d日 E", Locale.SIMPLIFIED_CHINESE)), MojiIcon.Calendar) { quickField = PlanQuickField.DATE }
-                        HorizontalDivider(Modifier.padding(start = 38.dp), thickness = 0.5.dp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.12f))
+                        HorizontalDivider(Modifier.padding(start = 38.dp), thickness = devicePixel, color = iosSeparator)
                         PlanDetailRow("安排", timing, if (plan.scheduleKind == "exactTime") MojiIcon.Clock else MojiIcon.Sun) { quickField = PlanQuickField.SCHEDULE }
-                        HorizontalDivider(Modifier.padding(start = 38.dp), thickness = 0.5.dp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.12f))
+                        HorizontalDivider(Modifier.padding(start = 38.dp), thickness = devicePixel, color = iosSeparator)
                         PlanDetailRow("类型", categoryName(plan.category), when (plan.category) { "work" -> MojiIcon.Work; "study" -> MojiIcon.Book; else -> MojiIcon.Tag }) { quickField = PlanQuickField.CATEGORY }
                     }
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        PlanDetailPill(repeatText, MojiIcon.Repeat, Modifier.weight(1f)) { quickField = PlanQuickField.RECURRENCE }
-                        PlanDetailPill(reminderText, MojiIcon.Bell, Modifier.weight(1f)) { quickField = PlanQuickField.REMINDER }
+                        PlanDetailPill(repeatText, MojiIcon.RepeatLoop, Modifier.weight(1f)) { quickField = PlanQuickField.RECURRENCE }
+                        PlanDetailPill(reminderText, MojiIcon.BellPlain, Modifier.weight(1f)) { quickField = PlanQuickField.REMINDER }
                     }
                     if (plan.calendarEventIdentifier != null) Text("已写入系统日历", fontSize = 12.sp, color = MaterialTheme.colorScheme.secondary)
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         Box(Modifier.weight(1f)) {
                             Row(Modifier.fillMaxWidth().heightIn(min = 44.dp).background(MaterialTheme.colorScheme.onSurface.copy(alpha = 0.045f), RoundedCornerShape(11.dp)).clickable { menu = true },
-                                verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(7.dp, Alignment.CenterHorizontally)) {
-                                MojiLineIcon(MojiIcon.Ellipsis, 14.dp, MaterialTheme.colorScheme.secondary)
-                                Text("更多操作", fontSize = 13.sp, fontWeight = FontWeight.Medium, color = MaterialTheme.colorScheme.secondary)
+                                verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp, Alignment.CenterHorizontally)) {
+                                MojiLineIcon(MojiIcon.Ellipsis, 22.dp, MaterialTheme.colorScheme.primary)
+                                Text("更多操作", fontSize = 13.sp, fontWeight = FontWeight.Medium, color = MaterialTheme.colorScheme.primary)
                             }
                             PlanRowMenu(menu, { menu = false }, plan, today, viewModel, onEdit, onCopy, { confirmDelete = true })
                         }
@@ -372,7 +396,7 @@ private fun PlanRow(plan: CheckInItem, today: LocalDate, expanded: Boolean, arch
                             if (!timer.hasActiveFocus()) { viewModel.selectPomodoroPhase("focus"); viewModel.linkPomodoro(plan) }
                             viewModel.openFocus()
                         }.padding(horizontal = 11.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            MojiLineIcon(MojiIcon.Timer, 17.dp, MaterialTheme.colorScheme.background)
+                            MojiLineIcon(MojiIcon.TimerSF, 19.dp, MaterialTheme.colorScheme.background)
                             Column(verticalArrangement = Arrangement.spacedBy(1.dp)) {
                                 Text(if (timer.hasActiveFocus()) "继续专注" else "去专注", fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.background)
                                 Text(if (timer.hasActiveFocus()) "前往当前会话" else "选择时长后开始", fontSize = 11.sp, color = MaterialTheme.colorScheme.background.copy(alpha = 0.72f))
@@ -398,10 +422,15 @@ private fun PlanRow(plan: CheckInItem, today: LocalDate, expanded: Boolean, arch
 private fun PlanDetailRow(title: String, value: String, icon: MojiIcon, onClick: () -> Unit) {
     Row(Modifier.fillMaxWidth().clickable(onClick = onClick).heightIn(min = 44.dp).padding(horizontal = 10.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        MojiLineIcon(icon, 18.dp)
-        Text(title, fontSize = 13.sp, color = MaterialTheme.colorScheme.secondary, modifier = Modifier.width(32.dp))
+        // iOS centres the symbol on the text; Noto's ink sits about 0.8pt lower in its line than PingFang's.
+        // briefcase.fill is 16pt wide here, so it overflows the 18dp slot a little without moving the title.
+        Box(Modifier.size(18.dp).offset(y = 0.8.dp), contentAlignment = Alignment.Center) {
+            val glyphSize = if (icon == MojiIcon.Work) 19.2.dp else 18.dp
+            Box(Modifier.requiredSize(glyphSize)) { MojiLineIcon(icon, glyphSize) }
+        }
+        Text(title, fontSize = 13.sp, color = iosSecondaryLabel, modifier = Modifier.width(32.dp))
         Text(value, fontSize = 14.sp, fontWeight = FontWeight.Medium, modifier = Modifier.weight(1f))
-        MojiLineIcon(MojiIcon.ChevronRight, 10.dp, MaterialTheme.colorScheme.onSurface.copy(alpha = 0.3f))
+        MojiLineIcon(MojiIcon.Disclosure, 18.dp, iosTertiaryLabel)
     }
 }
 
@@ -409,9 +438,9 @@ private fun PlanDetailRow(title: String, value: String, icon: MojiIcon, onClick:
 private fun PlanDetailPill(value: String, icon: MojiIcon, modifier: Modifier, onClick: () -> Unit) {
     Row(modifier.heightIn(min = 36.dp).background(MaterialTheme.colorScheme.onSurface.copy(alpha = 0.045f), RoundedCornerShape(10.dp)).clickable(onClick = onClick).padding(horizontal = 10.dp, vertical = 6.dp),
         verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-        MojiLineIcon(icon, 12.dp)
+        MojiLineIcon(icon, 15.dp, MaterialTheme.colorScheme.primary)
         Text(value, fontSize = 12.sp, modifier = Modifier.weight(1f))
-        MojiLineIcon(MojiIcon.ChevronRight, 9.dp, MaterialTheme.colorScheme.onSurface.copy(alpha = 0.3f))
+        MojiLineIcon(MojiIcon.Disclosure, 15.dp, iosTertiaryLabel)
     }
 }
 

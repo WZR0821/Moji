@@ -48,3 +48,4 @@ keystore.properties
 
 # Local-only session handoff notes
 *.HANDOFF.md
+__pycache__/

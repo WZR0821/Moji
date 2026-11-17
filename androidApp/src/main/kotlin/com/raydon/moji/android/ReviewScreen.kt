@@ -14,6 +14,8 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -95,16 +97,17 @@ fun ReviewScreen(
     val pending = snapshot.checkInItems.count { it.kind == "planned" && it.isArchived != true && it.status in listOf("planned", "inProgress") && com.raydon.moji.core.ChecklistPolicy.isVisible(it.scheduledStart, it.status, Instant.now().toString(), viewModel.carriesOver, zone.id) }
     MojiScreen {
         LazyColumn(Modifier.fillMaxSize()) {
-            item { MojiLargeTitle("回顾", actions = listOf(MojiIcon.Gear to { showSettings = true })) }
+            item { MojiLargeTitle("回顾", actions = listOf(MojiIcon.Gear to { showSettings = true }), bottomPadding = 18.5.dp) }
             item {
                 InkCard(Modifier.padding(horizontal = 18.dp)) {
                     Column(verticalArrangement = Arrangement.spacedBy(15.dp)) {
-                        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.Top) {
-                            Column(Modifier.weight(1f)) {
+                        Row(Modifier.fillMaxWidth()) {
+                            Column(Modifier.weight(1f).alignByBaseline()) {
                                 Text("本周回顾", fontSize = 20.sp, fontWeight = FontWeight.Bold)
-                                Text("${weekStart.format(DateTimeFormatter.ofPattern("M月d日"))} – ${weekEnd.minusDays(1).format(DateTimeFormatter.ofPattern("M月d日"))}", color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.50f), fontSize = 12.sp, modifier = Modifier.padding(top = 3.dp))
+                                Text("${weekStart.format(DateTimeFormatter.ofPattern("M月d日"))} – ${weekEnd.minusDays(1).format(DateTimeFormatter.ofPattern("M月d日"))}", color = iosSecondaryLabel, fontSize = 12.sp, modifier = Modifier.padding(top = 3.dp))
                             }
-                            Text("完成率 ${if (weekPlans.isEmpty()) 0 else completed * 100 / weekPlans.size}%", color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.50f), fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                            val rate = if (weekPlans.isEmpty()) 0 else completed * 100 / weekPlans.size
+                            Text("完成率 $rate%", Modifier.alignByBaseline(), color = if (completed > 0) MaterialTheme.colorScheme.primary else iosSecondaryLabel, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
                         }
                         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(18.dp)) {
                             ReviewMetric(if (weekPlans.isEmpty()) "—" else "$completed/${weekPlans.size}", "完成计划", Modifier.weight(1f))
@@ -113,11 +116,14 @@ fun ReviewScreen(
                         }
                         WeeklyBars(snapshot.records)
                         if (pending > 0 || minutes == 0L) {
-                        HorizontalDivider(color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.10f), thickness = 0.6.dp)
-                        Row(Modifier.fillMaxWidth().height(38.dp).clickable { if (pending > 0) viewModel.openPlans() else viewModel.openFocus() }, verticalAlignment = Alignment.CenterVertically) {
-                            MojiLineIcon(if (pending > 0) MojiIcon.Checklist else MojiIcon.Timer, 24.dp)
-                            Text(if (pending > 0) "下一步：完成剩余 $pending 项计划" else "下一步：开始一个 25 分钟专注", modifier = Modifier.weight(1f).padding(start = 10.dp), fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
-                            MojiLineIcon(MojiIcon.ChevronRight, 19.dp, MaterialTheme.colorScheme.onSurface.copy(alpha = 0.50f))
+                        HorizontalDivider(color = iosSeparator.copy(alpha = iosSeparator.alpha * 0.22f), thickness = devicePixel)
+                        Row(Modifier.fillMaxWidth().heightIn(min = 44.dp).clickable { if (pending > 0) viewModel.openPlans() else viewModel.openFocus() }, verticalAlignment = Alignment.CenterVertically) {
+                            Box(Modifier.width(24.dp), contentAlignment = Alignment.Center) {
+                                if (pending > 0) MojiLineIcon(MojiIcon.TabChecklist, 19.dp, MaterialTheme.colorScheme.primary)
+                                else MojiLineIcon(MojiIcon.Timer, 21.dp, MaterialTheme.colorScheme.primary)
+                            }
+                            Text(if (pending > 0) "下一步：完成剩余 $pending 项计划" else "下一步：开始一个 25 分钟专注", modifier = Modifier.weight(1f).padding(start = 10.dp), fontSize = 15.sp, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.primary)
+                            Box(Modifier.offset(x = 6.dp)) { MojiLineIcon(MojiIcon.ArrowUpRight, 24.dp, MaterialTheme.colorScheme.secondary) }
                         }
                         }
                     }
@@ -126,15 +132,15 @@ fun ReviewScreen(
             }
             item {
                 Column(Modifier.fillMaxWidth().padding(horizontal = 32.dp)) {
-                    ReviewActionRow(MojiIcon.Chart, "周总结", "查看本周完成、专注和每日趋势") { secondaryRoute = "weekly" }
-                    InkDivider(opacity = 0.30f)
-                    ReviewActionRow(MojiIcon.Calendar, "月总结", "查看月度热力图和计划/实际对比") { secondaryRoute = "monthly" }
-                    InkDivider(opacity = 0.30f)
-                    ReviewActionRow(MojiIcon.Note, "时间记录", "查看、补记或修改全部记录") { secondaryRoute = "records" }
+                    ReviewActionRow({ MojiLineIcon(MojiIcon.TabChart, 20.5.dp, MaterialTheme.colorScheme.primary) }, "周总结", "查看本周完成、专注和每日趋势") { secondaryRoute = "weekly" }
+                    InkDivider(opacity = 0.32f)
+                    ReviewActionRow({ MojiLineIcon(MojiIcon.CalendarFill, 21.8.dp, MaterialTheme.colorScheme.primary) }, "月总结", "查看月度热力图和计划/实际对比") { secondaryRoute = "monthly" }
+                    InkDivider(opacity = 0.32f)
+                    ReviewActionRow({ ListBulletRectangleIcon(MaterialTheme.colorScheme.primary) }, "时间记录", "查看、补记或修改全部记录") { secondaryRoute = "records" }
                 }
             }
             item {
-                Text("数据本机优先，可自动备份到所选文件夹", modifier = Modifier.padding(horizontal = 18.dp, vertical = 20.dp), color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.46f), fontSize = 12.sp)
+                Text("数据本机优先，可自动备份到所选文件夹", modifier = Modifier.padding(start = 18.dp, end = 18.dp, top = 17.3.dp, bottom = 20.dp), color = MaterialTheme.colorScheme.secondary.copy(alpha = 0.78f), fontSize = 12.sp)
             }
         }
     }
@@ -146,7 +152,7 @@ fun ReviewScreen(
 private fun ReviewMetric(value: String, label: String, modifier: Modifier = Modifier) {
     Column(modifier, horizontalAlignment = Alignment.Start) {
         Text(value, fontSize = 20.sp, fontWeight = FontWeight.Bold, maxLines = 1)
-        Text(label, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.50f), fontSize = 11.sp)
+        Text(label, color = iosSecondaryLabel, fontSize = 12.sp, modifier = Modifier.padding(top = 3.dp))
     }
 }
 
@@ -170,7 +176,7 @@ private fun WeeklyBars(records: List<com.raydon.moji.core.TimeRecord>) {
             values.forEachIndexed { index, value ->
                 Column(Modifier.weight(1f).clickable { selectedDay = index }, horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Bottom) {
                     Box(Modifier.width(12.dp).height(maxOf(4f, 48 * value.toFloat() / max).dp).background(MaterialTheme.colorScheme.onSurface.copy(alpha = if (value > 0) 1f else 0.11f), RoundedCornerShape(8.dp)))
-                    Text("一二三四五六日"[index].toString(), color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.50f), fontSize = 11.sp, modifier = Modifier.padding(top = 4.dp))
+                    Text("一二三四五六日"[index].toString(), color = iosSecondaryLabel, fontSize = 11.sp, modifier = Modifier.padding(top = 4.dp))
                 }
             }
         }
@@ -179,14 +185,35 @@ private fun WeeklyBars(records: List<com.raydon.moji.core.TimeRecord>) {
 }
 
 @Composable
-private fun ReviewActionRow(icon: MojiIcon, title: String, detail: String, onClick: () -> Unit) {
-    Row(Modifier.fillMaxWidth().height(68.dp).clickable(onClick = onClick), verticalAlignment = Alignment.CenterVertically) {
-        Box(Modifier.width(28.dp), contentAlignment = Alignment.Center) { MojiLineIcon(icon, 20.dp) }
+private fun ReviewActionRow(icon: @Composable () -> Unit, title: String, detail: String, onClick: () -> Unit) {
+    Row(Modifier.fillMaxWidth().clickable(onClick = onClick).padding(vertical = 13.7.dp), verticalAlignment = Alignment.CenterVertically) {
+        Box(Modifier.width(28.dp), contentAlignment = Alignment.Center) { icon() }
         Column(Modifier.weight(1f).padding(start = 13.dp)) {
             Text(title, fontSize = 17.sp, fontWeight = FontWeight.Medium)
-            Text(detail, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.50f), fontSize = 12.sp, modifier = Modifier.padding(top = 4.dp))
+            Text(detail, color = iosSecondaryLabel, fontSize = 12.sp, modifier = Modifier.padding(top = 4.dp))
         }
-        MojiLineIcon(MojiIcon.ChevronRight, 13.dp, MaterialTheme.colorScheme.onSurface.copy(alpha = 0.46f))
+        // SF chevron.right (caption, bold) is 6.3 × 10.7 pt and sits flush with the row's trailing edge.
+        Box(Modifier.offset(x = 6.8.dp)) { MojiLineIcon(MojiIcon.Disclosure, 22.dp, MaterialTheme.colorScheme.secondary.copy(alpha = 0.72f)) }
+    }
+}
+
+/** SF Symbol list.bullet.rectangle, 19.33 × 15.33 pt: rounded frame, four bullets, long/short lines alternating. */
+@Composable
+private fun ListBulletRectangleIcon(color: Color) {
+    androidx.compose.foundation.Canvas(Modifier.size(width = 19.33.dp, height = 15.33.dp)) {
+        val u = 1.dp.toPx()
+        val frame = 1.43f * u
+        drawRoundRect(
+            color,
+            androidx.compose.ui.geometry.Offset(frame / 2, frame / 2),
+            androidx.compose.ui.geometry.Size(size.width - frame, size.height - frame),
+            androidx.compose.ui.geometry.CornerRadius(1.8f * u),
+            style = androidx.compose.ui.graphics.drawscope.Stroke(frame),
+        )
+        listOf(3.7f to 15.5f, 6.25f to 11.4f, 8.8f to 15.5f, 11.4f to 11.4f).forEach { (y, end) ->
+            drawCircle(color, 0.8f * u, androidx.compose.ui.geometry.Offset(3.7f * u, y * u))
+            drawLine(color, androidx.compose.ui.geometry.Offset(6.4f * u, y * u), androidx.compose.ui.geometry.Offset(end * u, y * u), 1.05f * u, androidx.compose.ui.graphics.StrokeCap.Round)
+        }
     }
 }
 
@@ -233,21 +260,23 @@ private fun SettingsIndex(viewModel: MojiViewModel, onOpen: (String) -> Unit) {
     val motion = when (viewModel.inkMotionLevel) { "reduced" -> "轻量"; "off" -> "关闭"; else -> "完整" }
     val reminder = if (viewModel.notificationsEnabled) "提醒开" else "提醒关"
     val sound = if (viewModel.soundEnabled) "声音开" else "静音"
-    LazyColumn(Modifier.fillMaxSize(), contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 20.dp, vertical = 24.dp)) {
+    // iPhone reference: "偏好" glyph top at 144pt, card-bottom→next header glyph 36.7pt, card→card 35.4pt.
+    LazyColumn(Modifier.fillMaxSize(), contentPadding = androidx.compose.foundation.layout.PaddingValues(start = 20.dp, end = 20.dp, top = 15.7.dp, bottom = 24.dp)) {
         item { SectionCaption("偏好", Modifier.padding(horizontal = 20.dp)) }
         item {
             SettingsGroup {
-                SettingsRow(MojiIcon.Checklist, "计划默认值", "${categoryName(viewModel.defaultCategory)} · $schedule · $estimate · $carry") { onOpen("defaults") }
+                // SF "checklist", "square.grid.2x2" and "timer" at body size use the SF look-alike glyphs.
+                SettingsRow(MojiIcon.TabChecklist, "计划默认值", "${categoryName(viewModel.defaultCategory)} · $schedule · $estimate · $carry", 21.dp) { onOpen("defaults") }
                 SettingsSeparator()
-                SettingsRow(MojiIcon.Grid, "小组件快速添加", "3 个桌面预设") { onOpen("widgets") }
+                SettingsRow(MojiIcon.GridSF, "小组件快速添加", "3 个桌面预设", 22.dp) { onOpen("widgets") }
                 SettingsSeparator()
-                SettingsRow(MojiIcon.Timer, "番茄钟", "专注 ${viewModel.defaultFocusMinutes} 分钟 · 短休 ${viewModel.shortBreakMinutes} 分钟") { onOpen("pomodoro") }
+                SettingsRow(MojiIcon.TimerSF, "番茄钟", "专注 ${viewModel.defaultFocusMinutes} 分钟 · 短休 ${viewModel.shortBreakMinutes} 分钟", 22.dp) { onOpen("pomodoro") }
                 SettingsSeparator()
                 SettingsRow(MojiIcon.Bell, "提醒与反馈", "全天 ${viewModel.allDayReminderHour.toString().padStart(2, '0')}:00 · $reminder · $sound") { onOpen("notifications") }
                 SettingsSeparator()
                 SettingsRow(MojiIcon.Brush, "外观", "$appearance · $texture · 运笔$motion") { onOpen("appearance") }
             }
-            Spacer(Modifier.height(28.dp))
+            Spacer(Modifier.height(34.4.dp))
         }
         item { SectionCaption("系统与数据", Modifier.padding(horizontal = 20.dp)) }
         item {
@@ -256,16 +285,16 @@ private fun SettingsIndex(viewModel: MojiViewModel, onOpen: (String) -> Unit) {
                 SettingsSeparator()
                 SettingsRow(MojiIcon.Backup, "数据备份", "导出、导入与换签保护") { onOpen("backup") }
                 SettingsSeparator()
-                SettingsRow(MojiIcon.Info, "关于 Moji", "版本与数据格式") { onOpen("about") }
+                SettingsRow(MojiIcon.Info, "关于 Moji", "版本与数据格式", 21.dp) { onOpen("about") }
             }
-            Spacer(Modifier.height(28.dp))
+            Spacer(Modifier.height(35.4.dp))
         }
         item {
             SettingsGroup {
                 Row(Modifier.fillMaxWidth().height(44.dp).padding(horizontal = 20.dp), verticalAlignment = Alignment.CenterVertically) {
                     Text("开发者", fontSize = 17.sp)
                     Spacer(Modifier.weight(1f))
-                    Text("Jerry Wong", color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.46f), fontSize = 17.sp)
+                    Text("Jerry Wong", color = iosSecondaryLabel, fontSize = 17.sp)
                 }
             }
             Spacer(Modifier.height(24.dp))
@@ -273,26 +302,37 @@ private fun SettingsIndex(viewModel: MojiViewModel, onOpen: (String) -> Unit) {
     }
 }
 
+private val settingsGroupColor: Color
+    @Composable get() = if (MaterialTheme.colorScheme.background == com.raydon.moji.ui.MojiPalette.PaperDark) Color(0xFF2C2C2E) else Color.White
+
 @Composable
 private fun SettingsGroup(content: @Composable () -> Unit) {
     val dark = MaterialTheme.colorScheme.background == com.raydon.moji.ui.MojiPalette.PaperDark
-    Surface(Modifier.fillMaxWidth(), shape = RoundedCornerShape(13.dp), color = if (dark) androidx.compose.ui.graphics.Color(0xFF2C2C2E) else androidx.compose.ui.graphics.Color.White) { Column { content() } }
+    // List rows use UIKit's label colour: pure black / white, not the ink tone.
+    Surface(Modifier.fillMaxWidth(), shape = RoundedCornerShape(13.dp), color = settingsGroupColor, contentColor = if (dark) Color.White else Color.Black) { Column { content() } }
 }
 
 @Composable
-private fun SettingsRow(icon: MojiIcon, title: String, detail: String, onClick: () -> Unit) {
-    Row(Modifier.fillMaxWidth().height(66.dp).clickable(onClick = onClick).padding(horizontal = 20.dp), verticalAlignment = Alignment.CenterVertically) {
-        MojiLineIcon(icon, 24.dp)
+private fun SettingsRow(icon: MojiIcon, title: String, detail: String, iconSize: androidx.compose.ui.unit.Dp = 24.dp, onClick: () -> Unit) {
+    // iOS row: 197px (65.67pt) tall; the symbol sits centred in a 24pt frame at its natural body size.
+    Row(Modifier.fillMaxWidth().height(65.67.dp).clickable(onClick = onClick).padding(horizontal = 20.dp), verticalAlignment = Alignment.CenterVertically) {
+        Box(Modifier.width(24.dp), contentAlignment = Alignment.Center) {
+            MojiLineIcon(icon, iconSize, MaterialTheme.colorScheme.primary, strokeWidth = 1.5f, cutoutColor = settingsGroupColor)
+        }
         Column(Modifier.weight(1f).padding(start = 12.dp)) {
             Text(title, fontSize = 17.sp, fontWeight = FontWeight.Medium)
             Text(detail, color = MaterialTheme.colorScheme.secondary.copy(alpha = 0.88f), fontSize = 12.sp, lineHeight = 16.sp, modifier = Modifier.padding(top = 3.dp))
         }
-        MojiLineIcon(MojiIcon.ChevronRight, 18.dp, MaterialTheme.colorScheme.onSurface.copy(alpha = 0.26f))
+        FormChevron()
     }
 }
 
 @Composable
-private fun SettingsSeparator() { HorizontalDivider(Modifier.padding(start = 56.dp), color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.10f), thickness = 0.6.dp) }
+private fun SettingsSeparator() {
+    // Dp.Hairline strokes on the pixel boundary and smears into two grey rows; draw exactly one device pixel like UITableView.
+    val onePixel = with(androidx.compose.ui.platform.LocalDensity.current) { 1f.toDp() }
+    HorizontalDivider(Modifier.overlayHairline().padding(start = 56.dp), color = iosSeparator, thickness = onePixel)
+}
 
 @Composable
 private fun SettingsDetail(

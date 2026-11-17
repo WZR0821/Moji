@@ -56,7 +56,7 @@ fun PlanCopyDialog(item: CheckInItem, viewModel: MojiViewModel, onDismiss: () ->
     var day by remember { mutableStateOf(LocalDate.now()) }
     val pick = rememberDatePicker { day = it }
     WorkflowDialog("复制计划", onDismiss, trailing = "复制", onSave = { viewModel.copyPlan(item.id, day, onSaved = onDismiss) }) {
-        LazyColumn(contentPadding = PaddingValues(top = 45.dp, bottom = 20.dp), verticalArrangement = Arrangement.spacedBy(24.dp)) {
+        LazyColumn(contentPadding = PaddingValues(top = 34.dp, bottom = 20.dp), verticalArrangement = Arrangement.spacedBy(24.dp)) {
             item { FormSection { FormRow(item.title); FormSeparator(); FormDateRow("目标日期", day) { pick(day) } } }
             item { WorkflowInfoSection("复制为独立的新计划，保留类型、说明、时段和预计投入，不复制完成状态、计时记录或重复序列。") }
         }
@@ -104,7 +104,7 @@ fun PlanLibraryDialog(viewModel: MojiViewModel, onDismiss: () -> Unit) {
         }
     }
     WorkflowDialog("计划库", onDismiss, leading = "", onSave = onDismiss) {
-        LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(top = 45.dp, bottom = 20.dp), verticalArrangement = Arrangement.spacedBy(24.dp)) {
+        LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(top = 34.7.dp, bottom = 20.dp), verticalArrangement = Arrangement.spacedBy(24.dp)) {
             item {
                 FormSection {
                     FormSegmentedControl(listOf("plans" to "全部计划", "templates" to "计划模板"), mode) { mode = it; selected = emptySet(); selecting = false }
@@ -113,16 +113,16 @@ fun PlanLibraryDialog(viewModel: MojiViewModel, onDismiss: () -> Unit) {
             }
             if (mode == "plans") {
                 item {
-                    FormSection {
+                    FormSection(topPadding = 11) {
                         Row(Modifier.fillMaxWidth().clickable { filtersExpanded = !filtersExpanded }.padding(horizontal = 20.dp, vertical = 11.dp), verticalAlignment = Alignment.CenterVertically) {
                             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
                                 Text("筛选", fontSize = 17.sp)
-                                Text(filterSummary, fontSize = 12.sp, color = MaterialTheme.colorScheme.secondary)
+                                Text(filterSummary, fontSize = 12.sp, color = iosSecondaryLabel)
                             }
-                            Box(Modifier.rotate(if (filtersExpanded) 90f else 0f)) { MojiLineIcon(MojiIcon.ChevronRight, 14.dp) }
+                            Box(Modifier.rotate(if (filtersExpanded) 90f else 0f)) { MojiLineIcon(MojiIcon.Disclosure, 26.dp, MaterialTheme.colorScheme.primary) }
                         }
-                        if (filtersExpanded) {
-                        FormSeparator()
+                        if (filtersExpanded) FormSeparator()
+                        if (filtersExpanded) Column(Modifier.padding(start = 20.dp)) {
                         FormChoiceRow("计划类型", category, listOf("all" to "全部类型") + categoryChoices(viewModel)) { category = it }
                         FormSeparator()
                         FormChoiceRow("状态", status, listOf("all" to "全部状态", "planned" to "待完成", "inProgress" to "进行中", "completed" to "已完成", "skipped" to "已跳过", "archived" to "已归档")) { status = it }
@@ -134,26 +134,30 @@ fun PlanLibraryDialog(viewModel: MojiViewModel, onDismiss: () -> Unit) {
                     }
                 }
                 item {
-                    FormSection(topPadding = 10) {
-                        Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {
-                            Text("${plans.size} 个计划", fontSize = 15.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f), modifier = Modifier.weight(1f))
-                            TextButton(onClick = { selecting = !selecting; selected = emptySet() }) { Text(if (selecting) "取消选择" else "批量选择") }
+                    FormSection(topPadding = 11) {
+                        Row(Modifier.fillMaxWidth().heightIn(min = 44.dp).padding(horizontal = 20.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Text("${plans.size} 个计划", fontSize = 15.sp, color = iosSecondaryLabel, modifier = Modifier.weight(1f))
+                            Text(if (selecting) "取消选择" else "批量选择", fontSize = 17.sp, color = MaterialTheme.colorScheme.primary, modifier = Modifier.clickable { selecting = !selecting; selected = emptySet() })
                         }
-                        if (selecting) Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp), horizontalArrangement = Arrangement.SpaceBetween) {
-                            TextButton(onClick = { selected = plans.filter { it.status != "inProgress" }.map { it.id }.toSet() }) { Text("全选结果") }
-                            TextButton(enabled = selected.isNotEmpty(), onClick = { batch = true }) { Text("整理 ${selected.size} 项") }
+                        if (selecting) {
+                            FormSeparator()
+                            Row(Modifier.fillMaxWidth().heightIn(min = 44.dp).padding(horizontal = 20.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
+                                Text("全选结果", fontSize = 17.sp, color = MaterialTheme.colorScheme.primary, modifier = Modifier.clickable { selected = plans.filter { it.status != "inProgress" }.map { it.id }.toSet() })
+                                Text("整理 ${selected.size} 项", fontSize = 17.sp, color = MaterialTheme.colorScheme.primary.copy(alpha = if (selected.isNotEmpty()) 1f else 0.3f), modifier = Modifier.clickable(enabled = selected.isNotEmpty()) { batch = true })
+                            }
                         }
-                        if (plans.isEmpty()) FormRow("没有符合条件的计划")
+                        FormSeparator()
+                        if (plans.isEmpty()) FormRow("没有符合条件的计划", titleColor = iosSecondaryLabel)
                         plans.forEach { item ->
                             Box {
                                 Row(Modifier.fillMaxWidth().combinedClickable(enabled = !selecting || item.status != "inProgress", onLongClick = { if (!selecting) menuId = item.id }, onClick = {
                                     if (selecting) { if (item.status != "inProgress") selected = if (item.id in selected) selected - item.id else selected + item.id } else editing = item
-                                }).padding(horizontal = 16.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+                                }).padding(start = 20.dp, end = 20.dp, top = 14.5.dp, bottom = 15.dp), verticalAlignment = Alignment.CenterVertically) {
                                     if (selecting) { SelectionCircle(item.id in selected); Spacer(Modifier.width(12.dp)) }
                                     Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(5.dp)) {
                                         Text(item.title, fontSize = 17.sp)
                                         val date = Instant.parse(item.scheduledStart).atZone(ZoneId.systemDefault()).format(DateTimeFormatter.ofPattern("M月d日"))
-                                        Text("$date · ${categoryName(item.category)} · ${if (item.isArchived == true) "已归档" else planStatusName(item.status)}", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f))
+                                        Text("$date · ${categoryName(item.category)} · ${if (item.isArchived == true) "已归档" else planStatusName(item.status)}", fontSize = 12.sp, color = iosSecondaryLabel)
                                     }
                                 }
                                 DropdownMenu(menuId == item.id, { menuId = null }) {
@@ -168,14 +172,15 @@ fun PlanLibraryDialog(viewModel: MojiViewModel, onDismiss: () -> Unit) {
                     }
                 }
             } else {
-                item { FormSection(topPadding = 10) { FormDateRow("添加到", templateDay) { pickTemplate(templateDay) } } }
+                item { FormSection(topPadding = 11) { FormDateRow("添加到", templateDay) { pickTemplate(templateDay) } } }
                 item {
-                    FormSection("计划模板") {
-                        if (snapshot.planTemplates.isEmpty()) Text("在计划的更多菜单中选择“保存为模板”", fontSize = 15.sp, modifier = Modifier.padding(16.dp), color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f))
+                    FormSection("计划模板", titleLineHeight = 17, topPadding = 9) {
+                        if (snapshot.planTemplates.isEmpty()) Text("在计划的更多菜单中选择“保存为模板”", fontSize = 15.sp, modifier = Modifier.padding(horizontal = 20.dp, vertical = 12.dp), color = iosSecondaryLabel)
                         snapshot.planTemplates.filter { query.isBlank() || it.title.contains(query, true) || it.note.contains(query, true) }.forEach { template ->
-                            Column(Modifier.padding(horizontal = 20.dp, vertical = 11.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            // iOS: title ink 16.3pt below the card top, buttons' ink 16pt above its bottom.
+                            Column(Modifier.padding(start = 20.dp, end = 20.dp, top = 15.4.dp, bottom = 15.7.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                                 Text(template.title, fontSize = 17.sp)
-                                Text("${categoryName(template.category)} · ${scheduleOptions.first { it.first == template.scheduleKind }.second}${if (template.plannedDurationEnabled) " · ${template.plannedMinutes} 分钟" else ""}", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f))
+                                Text("${categoryName(template.category)} · ${scheduleOptions.first { it.first == template.scheduleKind }.second}${if (template.plannedDurationEnabled) " · ${template.plannedMinutes} 分钟" else ""}", fontSize = 12.sp, color = iosSecondaryLabel)
                                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                                     Text("添加计划", fontSize = 17.sp, modifier = Modifier.heightIn(min = 22.dp).clickable { viewModel.applyTemplate(template.id, templateDay) })
                                     Text("删除", fontSize = 17.sp, color = mojiDestructive, modifier = Modifier.heightIn(min = 22.dp).clickable { viewModel.deleteTemplate(template.id) })
@@ -212,12 +217,12 @@ fun SelectionCircle(selected: Boolean) {
 
 @Composable
 private fun WorkflowCaption(text: String) {
-    Text(text, fontSize = 13.sp, lineHeight = 16.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f), modifier = Modifier.padding(horizontal = 20.dp, vertical = 7.dp))
+    Text(text, fontSize = 13.sp, lineHeight = 18.sp, color = iosSecondaryLabel, modifier = Modifier.padding(start = 20.dp, end = 20.dp, top = 3.8.dp, bottom = 4.9.dp))
 }
 
 @Composable
 private fun WorkflowInfoSection(text: String) {
-    Column(Modifier.padding(top = 12.dp)) { FormSection { WorkflowCaption(text) } }
+    Column(Modifier.padding(top = 10.7.dp)) { FormSection { WorkflowCaption(text) } }
 }
 
 @Composable
@@ -228,7 +233,7 @@ private fun PlanBatchDialog(ids: Set<String>, viewModel: MojiViewModel, onDismis
     var confirm by remember { mutableStateOf(false) }
     val pick = rememberDatePicker { day = it }
     WorkflowDialog("批量整理", onDismiss, trailing = "应用", onSave = { confirm = true }) {
-        LazyColumn(contentPadding = PaddingValues(vertical = 20.dp), verticalArrangement = Arrangement.spacedBy(24.dp)) {
+        LazyColumn(contentPadding = PaddingValues(top = 14.dp, bottom = 20.dp), verticalArrangement = Arrangement.spacedBy(24.dp)) {
             item { FormSection("已选择 ${ids.size} 个计划") {
                 FormChoiceRow("整理方式", action, listOf("date" to "修改日期", "category" to "修改类型", "archive" to "归档", "unarchive" to "取消归档")) { action = it }
                 if (action == "date") { FormSeparator(); FormDateRow("目标日期", day) { pick(day) } }
@@ -250,9 +255,9 @@ fun MemoConversionDialog(memo: MemoItem, viewModel: MojiViewModel, onDismiss: ()
     var editing by remember { mutableStateOf<CheckInItem?>(null) }
     val pick = rememberDatePicker { day = it }
     WorkflowDialog("备忘转计划", onDismiss, leading = "", onSave = onDismiss) {
-        LazyColumn(contentPadding = PaddingValues(top = 48.dp, bottom = 20.dp), verticalArrangement = Arrangement.spacedBy(24.dp)) {
+        LazyColumn(contentPadding = PaddingValues(top = 34.dp, bottom = 20.dp), verticalArrangement = Arrangement.spacedBy(24.dp)) {
             item { FormSection { FormDateRow("计划日期", day) { pick(day) }; FormSeparator(); FormChoiceRow("计划类型", category, categoryChoices(viewModel, category)) { category = it } } }
-            item { FormSection("转为计划") {
+            item { FormSection("转为计划", topPadding = 9) {
                 val rows = listOf(null to "整则备忘") + if (memo.mode == "checklist") memo.checklistItems.filter { it.text.isNotBlank() }.map { it.id to it.text } else emptyList()
                 rows.forEach { (itemId, title) ->
                     val plan = snapshot.checkInItems.firstOrNull { it.sourceMemoID == memo.id && it.sourceMemoChecklistItemID == itemId }
@@ -283,15 +288,15 @@ fun WorkflowWeekSection(viewModel: MojiViewModel, week: LocalDate) {
                 Text("计划 / 实际", fontSize = 17.sp, fontWeight = FontWeight.SemiBold)
                 Row { WorkflowMetric("待完成", "${summary.pending.size} 项", Modifier.weight(1f)); WorkflowMetric("结转待办", "${summary.carryover.size} 项", Modifier.weight(1f)); WorkflowMetric("未记录", "${summary.untrackedCount} 项", Modifier.weight(1f)) }
                 Row { WorkflowMetric("预计投入", "${summary.estimatedMinutes} 分钟", Modifier.weight(1f)); WorkflowMetric("实际专注", "${summary.actualMinutes} 分钟", Modifier.weight(1f)) }
-                Text("勾选完成不等于已计时；未计时的完成计划显示“未记录”，不计入专注时长。", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f))
+                Text("勾选完成不等于已计时；未计时的完成计划显示“未记录”，不计入专注时长。", fontSize = 12.sp, color = iosSecondaryLabel)
                 summary.scheduled.forEach { item ->
                     val timed = snapshot.records.filter { it.checkInItemID == item.id && (it.scheduleKind ?: "exactTime") == "exactTime" }
                     val duration = workflowSummary(snapshot.copy(records = timed), week).actualMinutes
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         Text(item.title, fontSize = 15.sp, maxLines = 2, modifier = Modifier.weight(1f))
                         Column(horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(3.dp)) {
-                            Text(if (item.plannedDurationEnabled ?: ((item.scheduleKind ?: "exactTime") == "exactTime" && item.detailsConfigured != false)) "预计 ${item.plannedMinutes} 分钟" else "未估算", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f))
-                            Text(if (timed.isEmpty()) "未记录" else "实际 $duration 分钟", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f))
+                            Text(if (item.plannedDurationEnabled ?: ((item.scheduleKind ?: "exactTime") == "exactTime" && item.detailsConfigured != false)) "预计 ${item.plannedMinutes} 分钟" else "未估算", fontSize = 12.sp, color = iosSecondaryLabel)
+                            Text(if (timed.isEmpty()) "未记录" else "实际 $duration 分钟", fontSize = 12.sp, color = iosSecondaryLabel)
                         }
                     }
                 }
@@ -301,7 +306,7 @@ fun WorkflowWeekSection(viewModel: MojiViewModel, week: LocalDate) {
             Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
                 WorkflowCardHeading("周目标", "设置目标") { editingGoal = null; goalEditor = true }
                 val goals = snapshot.weeklyGoals.filter { it.weekStart == key }
-                if (goals.isEmpty()) Text("可选：给这一周一个轻量目标", fontSize = 15.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f))
+                if (goals.isEmpty()) Text("可选：给这一周一个轻量目标", fontSize = 15.sp, color = iosSecondaryLabel)
                 goals.forEach { goal ->
                     val progress = workflowSummary(snapshot, week, goal.category)
                     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -315,9 +320,9 @@ fun WorkflowWeekSection(viewModel: MojiViewModel, week: LocalDate) {
         InkCard {
             Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
                 WorkflowCardHeading("周复盘", "编辑") { reflectionEditor = true }
-                Text(reflection?.note?.takeIf { it.isNotEmpty() } ?: "记录这一周做得好的事、遇到的问题。", fontSize = 15.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f))
+                Text(reflection?.note?.takeIf { it.isNotEmpty() } ?: "记录这一周做得好的事、遇到的问题。", fontSize = 15.sp, color = iosSecondaryLabel)
                 Text("下周关注", fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
-                Text(reflection?.nextFocus?.takeIf { it.isNotEmpty() } ?: "给下周留下一句提醒。", fontSize = 15.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f))
+                Text(reflection?.nextFocus?.takeIf { it.isNotEmpty() } ?: "给下周留下一句提醒。", fontSize = 15.sp, color = iosSecondaryLabel)
                 Text("选择待办移至下周", fontSize = 15.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.clickable { carryEditor = true }.padding(vertical = 5.dp))
             }
         }
@@ -337,7 +342,7 @@ private fun WorkflowCardHeading(title: String, action: String, onClick: () -> Un
 
 @Composable
 private fun WorkflowMetric(title: String, value: String, modifier: Modifier) {
-    Column(modifier, verticalArrangement = Arrangement.spacedBy(3.dp)) { Text(value, fontSize = 15.sp, fontWeight = FontWeight.SemiBold); Text(title, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f)) }
+    Column(modifier, verticalArrangement = Arrangement.spacedBy(3.dp)) { Text(value, fontSize = 15.sp, fontWeight = FontWeight.SemiBold); Text(title, fontSize = 12.sp, color = iosSecondaryLabel) }
 }
 
 @Composable
@@ -359,14 +364,14 @@ fun WeeklyGoalDialog(viewModel: MojiViewModel, week: LocalDate, goal: WeeklyGoal
     WorkflowDialog("周目标", requestDismiss, trailing = "保存", enabled = valid, onSave = {
         viewModel.saveWeeklyGoal(WeeklyGoal(draftId, workflowWeek(week).toString(), category.takeIf { it != "all" }, count.toIntOrNull(), minutes.toIntOrNull(), Instant.now().toString()), onSaved = onDismiss)
     }) {
-        LazyColumn(contentPadding = PaddingValues(vertical = 20.dp), verticalArrangement = Arrangement.spacedBy(24.dp)) {
+        LazyColumn(contentPadding = PaddingValues(top = 15.dp, bottom = 20.dp), verticalArrangement = Arrangement.spacedBy(24.dp)) {
             item { FormSection("${workflowWeek(week)} 起的一周") {
                 FormChoiceRow("目标范围", category, listOf("all" to "全部类型") + categoryChoices(viewModel, goal?.category)) { category = it }
                 FormSeparator(); FormLabelledNumberField("完成计划（项）", count) { count = it }
                 FormSeparator(); FormLabelledNumberField("实际专注（分钟）", minutes) { minutes = it }
             } }
             item { WorkflowInfoSection("至少填写一项正整数目标（1–100000）。专注目标仅统计真实计时，不把勾选完成换算成分钟。") }
-            if (goal != null) item { FormSection { TextButton(onClick = { viewModel.deleteWeeklyGoal(goal.id); onDismiss() }) { Text("删除目标", color = mojiDestructive) } } }
+            if (goal != null) item { FormSection(topPadding = 11) { Text("删除目标", color = mojiDestructive, fontSize = 17.sp, modifier = Modifier.fillMaxWidth().clickable { viewModel.deleteWeeklyGoal(goal.id); onDismiss() }.padding(horizontal = 20.dp, vertical = 11.8.dp)) } }
         }
     }
 }
@@ -378,9 +383,9 @@ fun WeeklyReflectionDialog(viewModel: MojiViewModel, week: LocalDate, reflection
     val draftId = remember { reflection?.id ?: UUID.randomUUID().toString() }
     val requestDismiss = rememberEditorDismiss(note != (reflection?.note ?: "") || nextFocus != (reflection?.nextFocus ?: ""), onDismiss)
     WorkflowDialog("周复盘", requestDismiss, trailing = "保存", onSave = { viewModel.saveWeeklyReflection(WeeklyReflection(draftId, workflowWeek(week).toString(), note, nextFocus, Instant.now().toString()), onSaved = onDismiss) }) {
-        LazyColumn(contentPadding = PaddingValues(vertical = 20.dp), verticalArrangement = Arrangement.spacedBy(24.dp)) {
-            item { FormSection("本周复盘") { FormTextField(note, { note = it }, "做得好的事、遇到的问题", singleLine = false, minHeight = 132) } }
-            item { FormSection("下周关注") { FormTextField(nextFocus, { nextFocus = it }, "给下周留下一句提醒", singleLine = false, minHeight = 88) } }
+        LazyColumn(contentPadding = PaddingValues(top = 15.dp, bottom = 20.dp), verticalArrangement = Arrangement.spacedBy(30.6.dp)) {
+            item { FormSection("本周复盘") { FormTextField(note, { note = it }, "做得好的事、遇到的问题", singleLine = false, minHeight = 131) } }
+            item { FormSection("下周关注") { FormTextField(nextFocus, { nextFocus = it }, "给下周留下一句提醒", singleLine = false, minHeight = 87) } }
         }
     }
 }
@@ -392,15 +397,16 @@ fun NextWeekPlansDialog(viewModel: MojiViewModel, week: LocalDate, onDismiss: ()
     val candidates = (summary.carryover + summary.pending).sortedBy { it.scheduledStart }
     var selected by remember { mutableStateOf(setOf<String>()) }
     WorkflowDialog("移至下周", onDismiss, trailing = "移动 ${selected.size} 项", enabled = selected.isNotEmpty(), onSave = { viewModel.batchPlans(selected, nextWeekOf = week); onDismiss() }) {
-        LazyColumn(contentPadding = PaddingValues(top = 48.dp, bottom = 20.dp), verticalArrangement = Arrangement.spacedBy(24.dp)) {
+        LazyColumn(contentPadding = PaddingValues(top = 34.7.dp, bottom = 20.dp), verticalArrangement = Arrangement.spacedBy(32.4.dp)) {
             item { FormSection { WorkflowCaption("移动原计划到下周对应星期，保留时间和说明，不复制、不改变重复序列。专注中的计划不会移动。") } }
             item { FormSection("待办 ${candidates.size} 项") {
                 FormRow("全选", onClick = { selected = candidates.map { it.id }.toSet() })
                 if (candidates.isEmpty()) FormRow("没有可结转的待办")
-                candidates.forEach { item ->
-                    FormSeparator()
+                candidates.forEachIndexed { index, item ->
+                    // Each separator belongs to the row above it: 全选 is inset to 20, a selectable row to its text.
+                    FormSeparator(if (index == 0) 20.dp else 47.7.dp)
                     Row(Modifier.fillMaxWidth().heightIn(min = 44.dp).clickable { selected = if (item.id in selected) selected - item.id else selected + item.id }.padding(horizontal = 20.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
-                        SelectionCircle(item.id in selected); Spacer(Modifier.width(12.dp)); Text(item.title, fontSize = 17.sp, modifier = Modifier.weight(1f)); Text(Instant.parse(item.scheduledStart).atZone(ZoneId.systemDefault()).format(DateTimeFormatter.ofPattern("M月d日")), fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f))
+                        SelectionCircle(item.id in selected); Spacer(Modifier.width(12.dp)); Text(item.title, fontSize = 17.sp, modifier = Modifier.weight(1f)); Text(Instant.parse(item.scheduledStart).atZone(ZoneId.systemDefault()).format(DateTimeFormatter.ofPattern("M月d日")), fontSize = 12.sp, color = iosSecondaryLabel)
                     }
                 }
             } }

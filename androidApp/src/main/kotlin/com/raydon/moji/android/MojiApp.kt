@@ -74,10 +74,10 @@ fun MojiApp(
         confirmButton = { TextButton(onClick = { viewModel.clearMessage() }) { Text("好") } },
     )
     val tabs = listOf(
-        Triple("计划", MojiIcon.Checklist, 0),
-        Triple("备忘", MojiIcon.Note, 1),
-        Triple("时刻", MojiIcon.Timer, 2),
-        Triple("回顾", MojiIcon.Chart, 3),
+        Triple("计划", MojiIcon.TabChecklist, 0),
+        Triple("备忘", MojiIcon.TabNote, 1),
+        Triple("时刻", MojiIcon.TabTimer, 2),
+        Triple("回顾", MojiIcon.TabChart, 3),
     )
     val texture = remember(revision) { viewModel.paperTextureEnabled }
     CompositionLocalProvider(LocalPaperTexture provides texture) {
@@ -94,7 +94,7 @@ fun MojiApp(
             Column(
                 Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.background).navigationBarsPadding().padding(bottom = bottomExtra)
             ) {
-                HorizontalDivider(color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f), thickness = 0.5.dp)
+                HorizontalDivider(color = MaterialTheme.colorScheme.primary.copy(alpha = 0.10f), thickness = devicePixel)
                 Row(Modifier.fillMaxWidth().height(49.dp)) {
                     tabs.forEach { (label, icon, index) ->
                         val active = selected == index
@@ -108,16 +108,16 @@ fun MojiApp(
                             Box(Modifier.weight(1f), contentAlignment = Alignment.BottomCenter) {
                                 MojiLineIcon(
                                     icon,
-                                    size = 25.dp,
-                                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = if (active) 1f else 0.58f),
+                                    size = 28.dp,
+                                    color = if (active) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.secondary,
                                 )
                             }
                             Text(
                                 label,
                                 modifier = Modifier.padding(top = 2.dp, bottom = 3.dp),
-                                color = MaterialTheme.colorScheme.onSurface.copy(alpha = if (active) 1f else 0.58f),
+                                color = if (active) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.secondary,
                                 fontSize = 10.sp,
-                                fontWeight = if (active) FontWeight.Medium else FontWeight.Normal,
+                                fontWeight = FontWeight.Medium,
                             )
                         }
                     }

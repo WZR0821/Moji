@@ -29,6 +29,10 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.luminance
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -51,6 +55,7 @@ fun CountdownEditorScreenDialog(existing: CountdownEvent?, viewModel: MojiViewMo
     var pinned by remember(existing?.id) { mutableStateOf(existing?.isPinned ?: false) }
     var calendarSync by remember(existing?.id) { mutableStateOf(existing?.calendarSyncEnabled ?: false) }
     var advanced by remember { mutableStateOf(BuildConfig.DEBUG && viewModel.visualQaRoute.value == "moment-advanced") }
+    var titleFocused by remember { mutableStateOf(false) }
     val picker = rememberDatePicker { date = it }
     val summary = buildList { add(countdownRepeatLabel(repeat)); if (includesToday) add("含当天"); if (pinned) add("重点"); if (calendarSync || existing?.calendarEventIdentifier != null) add("日历") }.joinToString(" · ")
     val occurrence = com.raydon.moji.core.CountdownPolicy.nextOccurrenceDate(date.toKotlinDate(), repeat, LocalDate.now().toKotlinDate())
@@ -61,22 +66,27 @@ fun CountdownEditorScreenDialog(existing: CountdownEvent?, viewModel: MojiViewMo
     val editorTitle = if (existing != null) "编辑这个日子" else if (context == "past") "添加纪念日" else "添加倒数日"
     Dialog(onDismissRequest = { if (advanced) advanced = false else requestDismiss() }, properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false)) {
         MojiScreen {
+            // The Dialog window has its own focus owner.
+            val focusManager = LocalFocusManager.current
             Column(Modifier.fillMaxSize()) {
+                // iOS: .disabled(cleanTitle.isEmpty && !isTitleFocused); tapping commits the IME, then save() guards the title.
                 MojiSheetBar(if (advanced) "更多设置" else editorTitle,
                     if (advanced) editorTitle else "取消", if (advanced) "" else "保存", { if (advanced) advanced = false else requestDismiss() }, {
-                        viewModel.saveCountdown(draftId, title, date, repeat, includesToday, pinned, calendarSync,
+                        focusManager.clearFocus()
+                        if (title.isNotBlank()) viewModel.saveCountdown(draftId, title, date, repeat, includesToday, pinned, calendarSync,
                             existing?.symbolName ?: if (context == "past") "seal" else "hourglass", existing?.colorName ?: "vermilion", onSaved = onDismiss)
-                    }, title.isNotBlank(), leadingIsBack = advanced)
-                LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(top = 18.dp, bottom = 36.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    }, title.isNotBlank() || titleFocused, leadingIsBack = advanced)
+                // The main form uses 12pt section spacing; the pushed settings page keeps the inset-grouped default.
+                LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(top = 7.dp, bottom = 36.dp), verticalArrangement = Arrangement.spacedBy(if (advanced) 24.dp else 12.dp)) {
                     if (!advanced) {
                         item { FormSection {
-                            FormTextField(title, { title = it }, "这个日子叫什么？"); FormSeparator()
+                            Box(Modifier.onFocusChanged { titleFocused = it.hasFocus }) { FormTextField(title, { title = it }, "这个日子叫什么？") }; FormSeparator()
                             FormDateRow("日期", date) { picker(date) }
                         } }
                         item { FormSection {
-                            Row(Modifier.fillMaxWidth().clickable { advanced = true }.padding(horizontal = 20.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-                                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) { Text("更多设置", fontSize = 17.sp); Text(summary, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f)) }
-                                MojiLineIcon(MojiIcon.ChevronRight, 17.dp, MaterialTheme.colorScheme.onSurface.copy(alpha = 0.28f))
+                            Row(Modifier.fillMaxWidth().clickable { advanced = true }.padding(horizontal = 20.dp, vertical = 11.dp), verticalAlignment = Alignment.CenterVertically) {
+                                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) { Text("更多设置", fontSize = 17.sp); Text(summary, fontSize = 12.sp, color = iosSecondaryLabel) }
+                                FormChevron()
                             }
                         } }
                     } else {
@@ -85,7 +95,7 @@ fun CountdownEditorScreenDialog(existing: CountdownEvent?, viewModel: MojiViewMo
                             FormSeparator(); FormToggle("包含当天（+1）", includesToday, { includesToday = it })
                             FormSeparator(); FormToggle("重点标记", pinned, { pinned = it })
                         } }
-                        item { Column { androidx.compose.foundation.layout.Spacer(Modifier.height(18.dp)); FormSection("计日预览", "未来日期自动倒数，过去日期自动正数；重复纪念日按下一次发生日期倒数。") {
+                        item { Column { androidx.compose.foundation.layout.Spacer(Modifier.height(15.dp)); FormSection("计日预览", "未来日期自动倒数，过去日期自动正数；重复纪念日按下一次发生日期倒数。") {
                             FormRow("方式", if (preview == 0) "今天" else if (preview < 0) "正数日" else "倒数日"); FormSeparator()
                             FormRow("显示", if (preview == 0) "今天" else if (preview < 0) "已过 ${kotlin.math.abs(preview)} 天" else "还有 $preview 天")
                         } } }
@@ -107,17 +117,20 @@ fun PomodoroDurationDialog(phase: String, currentMinutes: Int, viewModel: MojiVi
     Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false)) {
         MojiScreen(sheetFraction = 0.532f) {
             Column(Modifier.fillMaxSize()) {
-                Box(Modifier.fillMaxWidth().height(14.dp), contentAlignment = Alignment.Center) {
-                    Box(Modifier.width(36.dp).height(5.dp).background(MaterialTheme.colorScheme.onSurface.copy(alpha = 0.23f), androidx.compose.foundation.shape.CircleShape))
+                // UIKit draws the grabber over the sheet's navigation bar.
+                Box(Modifier.fillMaxWidth()) {
+                    MojiSheetBar("${phaseName(phase)}时长", "取消", "保存", onDismiss, { viewModel.setPhaseMinutes(phase, (minuteText.toIntOrNull() ?: minutes).coerceIn(1, maximum)); onDismiss() })
+                    // System sheet grabber: black 25% / white 33%, not the ink colour.
+                    val grabber = if (MaterialTheme.colorScheme.background.luminance() < 0.5f) Color.White.copy(alpha = 0.33f) else Color.Black.copy(alpha = 0.25f)
+                    Box(Modifier.align(Alignment.TopCenter).padding(top = 5.dp).width(36.dp).height(5.dp).background(grabber, androidx.compose.foundation.shape.CircleShape))
                 }
-                MojiSheetBar("${phaseName(phase)}时长", "取消", "保存", onDismiss, { viewModel.setPhaseMinutes(phase, (minuteText.toIntOrNull() ?: minutes).coerceIn(1, maximum)); onDismiss() })
-                LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(top = 14.dp, bottom = 30.dp), verticalArrangement = Arrangement.spacedBy(28.dp)) {
-                    item { FormSection("自定义分钟数", "可设置 1–$maximum 分钟。") {
+                LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(top = 14.8.dp, bottom = 30.dp), verticalArrangement = Arrangement.spacedBy(38.9.dp)) {
+                    item { FormSection("自定义分钟数", "可设置 1–$maximum 分钟。", firstHeader = true) {
                         FormStepper(phaseName(phase), "$minutes 分钟", { minutes = (minutes - 1).coerceAtLeast(1); minuteText = minutes.toString() }, { minutes = (minutes + 1).coerceAtMost(maximum); minuteText = minutes.toString() }, valueStyle = MaterialTheme.typography.titleMedium.copy(fontSize = 20.sp, fontWeight = FontWeight.Medium, color = MaterialTheme.colorScheme.onSurface))
                         FormSeparator()
                         FormTextField(minuteText, { raw -> minuteText = raw.filter(Char::isDigit).take(3); minuteText.toIntOrNull()?.let { minutes = it.coerceIn(1, maximum) } }, "分钟", keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number))
                     } }
-                    item { FormSection("常用时长") { DurationPills(phasePresets(phase)) { minutes = it; minuteText = it.toString() } } }
+                    item { FormSection("常用时长") { DurationPills(phasePresets(phase), verticalPadding = 6) { minutes = it; minuteText = it.toString() } } }
                 }
             }
         }

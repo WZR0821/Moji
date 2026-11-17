@@ -13,11 +13,18 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.StrokeJoin
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.luminance
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
@@ -68,27 +75,38 @@ fun PlanQuickEditorDialog(item: CheckInItem, field: PlanQuickField, viewModel: M
     }
     val initialChange = remember { change }
     val dismiss = rememberEditorDismiss(change != initialChange || newCategoryName.isNotEmpty(), onDismiss)
+    val canSave = change.applyTo(original) != null
+    var titleFocused by remember { mutableStateOf(false) }
     Dialog(onDismissRequest = dismiss, properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false)) {
         MojiScreen(sheetHeight = (field.height + 34).dp) {
+            // The Dialog window has its own focus owner.
+            val focusManager = LocalFocusManager.current
             Column(Modifier.fillMaxSize()) {
+                // Capsule().fill(Color.primary.opacity(0.23)): the label colour, not ink.
                 Box(Modifier.fillMaxWidth().height(14.dp), contentAlignment = Alignment.Center) {
-                    Box(Modifier.width(36.dp).height(5.dp).background(MaterialTheme.colorScheme.onSurface.copy(alpha = 0.23f), CircleShape))
+                    Box(Modifier.width(36.dp).height(5.dp).background(quickLabel.copy(alpha = 0.23f), CircleShape))
                 }
-                MojiSheetBar(field.label, "取消", "保存", dismiss,
-                    { viewModel.quickUpdatePlan(item.id, change, onDismiss) }, change.applyTo(original) != null, transparentBackground = true)
+                // iOS draws its own 44pt header here (ZStack .frame(height: 44)), not a 56pt sheet navigation bar.
+                // iOS: .disabled(!canSave && !isTitleFocused); tapping commits the IME, then save() guards canSave.
+                Box(Modifier.fillMaxWidth().height(44.dp)) {
+                    MojiSheetBar(field.label, "取消", "保存", dismiss, {
+                        focusManager.clearFocus()
+                        if (canSave) viewModel.quickUpdatePlan(item.id, change, onDismiss)
+                    }, canSave || (field == PlanQuickField.CONTENT && titleFocused), transparentBackground = true)
+                }
                 Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(start = 20.dp, end = 20.dp, top = 12.dp, bottom = 20.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
-                    if (field != PlanQuickField.CONTENT) Text(original.title, fontSize = 15.sp, color = MaterialTheme.colorScheme.secondary)
+                    if (field != PlanQuickField.CONTENT) Text(original.title, fontSize = 15.sp, color = quickSecondary)
                     when (field) {
                         PlanQuickField.CONTENT -> {
                             QuickCaption("标题")
-                            QuickTextInput(title, { title = it }, "计划标题", false)
+                            Box(Modifier.onFocusChanged { titleFocused = it.hasFocus }) { QuickTextInput(title, { title = it }, "计划标题", false) }
                             QuickCaption("备注")
                             QuickTextInput(note, { note = it }, "添加背景、步骤或注意事项", true)
                         }
                         PlanQuickField.DATE -> {
                             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                 listOf("今天" to 0, "明天" to 1, "一周后" to 7).forEach { (label, offset) ->
-                                    Box(Modifier.weight(1f).heightIn(min = 44.dp).quickSurface().clickable { day = LocalDate.now().plusDays(offset.toLong()) }, contentAlignment = Alignment.Center) { Text(label, fontSize = 15.sp) }
+                                    Box(Modifier.weight(1f).heightIn(min = 44.dp).quickSurface().clickable { day = LocalDate.now().plusDays(offset.toLong()) }, contentAlignment = Alignment.Center) { Text(label, fontSize = 15.sp, color = MaterialTheme.colorScheme.primary) }
                                 }
                             }
                             Box(Modifier.quickSurface()) { FormDateRow("日期", day, minHeight = 58, horizontalPadding = 12) { pickDate(day) } }
@@ -98,16 +116,20 @@ fun PlanQuickEditorDialog(item: CheckInItem, field: PlanQuickField, viewModel: M
                             QuickChoices(scheduleOptions, schedule) { schedule = it }
                             if (schedule == "exactTime") Row(Modifier.fillMaxWidth().quickSurface().heightIn(min = 44.dp).clickable { pickTime(time) }.padding(horizontal = 12.dp), verticalAlignment = Alignment.CenterVertically) {
                                 Text("开始时间", fontSize = 17.sp, modifier = Modifier.weight(1f))
+                                // Compact DatePicker capsule: tertiarySystemFill, 70 x 35.7pt, radius 8.
                                 Text(time.format(java.time.format.DateTimeFormatter.ofPattern("HH:mm")), fontSize = 17.sp,
-                                    modifier = Modifier.background(MaterialTheme.colorScheme.onSurface.copy(alpha = 0.06f), RoundedCornerShape(6.dp)).padding(horizontal = 11.dp, vertical = 5.dp))
+                                    modifier = Modifier.background(iosFill, RoundedCornerShape(8.dp)).padding(horizontal = 13.65.dp, vertical = 8.dp))
                             }
                             Column(Modifier.quickSurface()) {
-                                FormToggle("预计投入", durationEnabled, { durationEnabled = it }, horizontalPadding = 12)
-                                if (durationEnabled) {
-                                    FormStepper(editorDuration(minutes.toLong()), "", { minutes = (minutes - 1).coerceAtLeast(1) }, { minutes = (minutes + 1).coerceAtMost(1440) }, horizontalPadding = 12)
-                                    Row(Modifier.padding(horizontal = 12.dp)) {
-                                        listOf(15, 25, 45, 60).forEach { amount ->
-                                            Box(Modifier.weight(1f).heightIn(min = 36.dp).clickable { minutes = amount }, contentAlignment = Alignment.Center) { Text("$amount 分钟", fontSize = 13.sp) }
+                                // Toggle and Stepper labels/glyphs are label-coloured here; the amount buttons take the tint.
+                                QuickLabelTheme {
+                                    FormToggle("预计投入", durationEnabled, { durationEnabled = it }, horizontalPadding = 12)
+                                    if (durationEnabled) {
+                                        FormStepper(editorDuration(minutes.toLong()), "", { minutes = (minutes - 1).coerceAtLeast(1) }, { minutes = (minutes + 1).coerceAtMost(1440) }, horizontalPadding = 12)
+                                        Row(Modifier.padding(horizontal = 12.dp)) {
+                                            listOf(15, 25, 45, 60).forEach { amount ->
+                                                Box(Modifier.weight(1f).heightIn(min = 36.dp).clickable { minutes = amount }, contentAlignment = Alignment.Center) { Text("$amount 分钟", fontSize = 13.sp, color = MaterialTheme.colorScheme.primary) }
+                                            }
                                         }
                                     }
                                 }
@@ -115,15 +137,18 @@ fun PlanQuickEditorDialog(item: CheckInItem, field: PlanQuickField, viewModel: M
                         }
                         PlanQuickField.CATEGORY -> {
                             QuickChoices(categories, category) { category = it }
-                            if (adding) Row(Modifier.quickSurface().padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                            // HStack { TextField; Button }.padding(12): 12 + 22pt field + 12.
+                            if (adding) Row(Modifier.quickSurface().heightIn(min = 46.dp).padding(horizontal = 12.dp), verticalAlignment = Alignment.CenterVertically) {
                                 BasicTextField(newCategoryName, { newCategoryName = it.take(20) }, Modifier.weight(1f), singleLine = true,
-                                    textStyle = MaterialTheme.typography.bodyLarge.copy(color = MaterialTheme.colorScheme.onSurface),
+                                    textStyle = MaterialTheme.typography.bodyLarge.copy(color = quickLabel),
                                     decorationBox = { inner -> if (newCategoryName.isEmpty()) Text("例如：阅读、运动", color = MaterialTheme.colorScheme.secondary); inner() })
                                 Text("添加", Modifier.clickable(enabled = newCategoryName.isNotBlank()) {
                                     viewModel.addCategory(newCategoryName); category = "custom:${newCategoryName.trim()}"; newCategoryName = ""; adding = false
-                                })
-                            } else Row(Modifier.heightIn(min = 44.dp).clickable { adding = true }, verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                MojiLineIcon(MojiIcon.Plus, 17.dp); Text("新建类型", fontSize = 17.sp)
+                                }, color = MaterialTheme.colorScheme.primary.copy(alpha = if (newCategoryName.isNotBlank()) 1f else 0.35f))
+                            } else Row(Modifier.heightIn(min = 44.dp).clickable { adding = true }, verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(9.dp)) {
+                                // Label("新建类型", systemImage: "plus"), tinted: 13.7pt plus in a 17pt slot.
+                                Box(Modifier.size(17.dp), contentAlignment = Alignment.Center) { MojiLineIcon(MojiIcon.Plus, 16.4.dp, MaterialTheme.colorScheme.primary) }
+                                Text("新建类型", fontSize = 17.sp, color = MaterialTheme.colorScheme.primary)
                             }
                         }
                         PlanQuickField.RECURRENCE -> {
@@ -152,8 +177,17 @@ fun PlanQuickEditorDialog(item: CheckInItem, field: PlanQuickField, viewModel: M
 @Composable
 private fun Modifier.quickSurface() = background(MaterialTheme.colorScheme.onSurface.copy(alpha = 0.045f), RoundedCornerShape(12.dp))
 
+/** SwiftUI .primary / .secondary in this sheet: black or white, the latter at 50%. */
+private val quickLabel: Color @Composable get() = if (MaterialTheme.colorScheme.background.luminance() < 0.5f) Color.White else Color.Black
+private val quickSecondary: Color @Composable get() = quickLabel.copy(alpha = 0.5f)
+
 @Composable
-private fun QuickCaption(value: String) { Text(value, fontSize = 12.sp, color = MaterialTheme.colorScheme.secondary) }
+private fun QuickLabelTheme(content: @Composable () -> Unit) {
+    MaterialTheme(colorScheme = MaterialTheme.colorScheme.copy(onSurface = quickLabel), content = content)
+}
+
+@Composable
+private fun QuickCaption(value: String) { Text(value, fontSize = 12.sp, color = quickSecondary) }
 
 @Composable
 private fun QuickTextInput(value: String, onChange: (String) -> Unit, placeholder: String, multiline: Boolean) {
@@ -168,8 +202,20 @@ private fun QuickChoices(options: List<Pair<String, String>>, selected: String, 
         options.forEach { (value, label) ->
             Row(Modifier.fillMaxWidth().heightIn(min = 40.dp).semantics { this.selected = value == selected }.clickable(role = Role.RadioButton) { onSelect(value) }.padding(horizontal = 12.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 Text(label, fontSize = 17.sp, modifier = Modifier.weight(1f))
-                Text(if (value == selected) "✓" else "", fontSize = 15.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.width(18.dp))
+                QuickCheckmark(value == selected)
             }
         }
+    }
+}
+
+/** SF Symbol "checkmark" at 15pt semibold: 13.3 x 13pt ink, 2pt stroke, ink ending 2pt inside the row inset. */
+@Composable
+private fun QuickCheckmark(visible: Boolean) {
+    val color = quickLabel
+    androidx.compose.foundation.Canvas(Modifier.size(15.3.dp, 14.dp)) {
+        if (!visible) return@Canvas
+        val d = density
+        val path = Path().apply { moveTo(1f * d, 7.4f * d); lineTo(4.9f * d, 12.5f * d); lineTo(12.3f * d, 1.5f * d) }
+        drawPath(path, color, style = Stroke(2f * d, cap = StrokeCap.Round, join = StrokeJoin.Round))
     }
 }

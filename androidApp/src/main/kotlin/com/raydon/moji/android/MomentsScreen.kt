@@ -15,10 +15,15 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.offset
+import androidx.compose.foundation.layout.requiredSize
+import androidx.compose.foundation.layout.wrapContentHeight
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.AlertDialog
@@ -45,6 +50,7 @@ import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -88,64 +94,46 @@ fun MomentsScreen(viewModel: MojiViewModel) {
         else if (sort == "manual") compareBy<CountdownEvent> { it.sortOrder ?: Int.MAX_VALUE }.thenBy { it.createdAt }
         else compareBy<CountdownEvent> { val origin = Instant.parse(it.targetDate).atZone(zone).toLocalDate(); val next = LocalDate.parse(CountdownPolicy.nextOccurrenceDate(origin.toKotlinDate(), it.repeatRule ?: "never", today.toKotlinDate()).toString()); kotlin.math.abs(java.time.temporal.ChronoUnit.DAYS.between(today, next)) }.thenBy { it.createdAt })
     MojiScreen {
-        BoxWithConstraints {
-        val focusHeight = (maxHeight - 150.dp).coerceAtLeast(480.dp)
+        if (scope == "focus") {
+            // iOS keeps the mode cards fixed; PomodoroView's GeometryReader gets only the space below them.
+            Column(Modifier.fillMaxSize()) {
+                MomentsTitle(scope, { more = true }, { editing = null; showEditor = true })
+                MomentsModeRow(scope) { scope = it }
+                BoxWithConstraints(Modifier.fillMaxWidth().weight(1f)) {
+                    val available = maxHeight
+                    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) { PomodoroPanel(viewModel, available) }
+                }
+            }
+        } else {
         androidx.compose.foundation.lazy.LazyColumn(Modifier.fillMaxSize()) {
-            item {
-                MojiLargeTitle(
-                    title = "时刻",
-                    actions = if (scope == "focus") emptyList() else listOf(
-                        MojiIcon.Ellipsis to { more = true },
-                        MojiIcon.Plus to { editing = null; showEditor = true },
-                    ),
-                )
+            item { MomentsTitle(scope, { more = true }, { editing = null; showEditor = true }) }
+            item { MomentsModeRow(scope) { scope = it } }
+            if (sort == "date" && events.isNotEmpty()) item { Text("已按时间排序 · 离今天最近的在前", fontSize = 12.sp, modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp), textAlign = TextAlign.Center) }
+            if (reordering) item { Text("调整顺序", fontSize = 12.sp, modifier = Modifier.fillMaxWidth().clickable { reordering = false }.padding(vertical = 6.dp), textAlign = TextAlign.Center) }
+            if (events.isEmpty()) item {
+                Column(Modifier.fillMaxWidth().padding(top = 92.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                    Box(Modifier.size(92.dp), contentAlignment = Alignment.Center) {
+                        InkAsset("InkFocusBloom", Modifier.fillMaxSize().alpha(0.10f))
+                        MojiLineIcon(MojiIcon.Timer, 38.dp, MaterialTheme.colorScheme.onSurface.copy(alpha = 0.52f))
+                    }
+                    Text(if (scope == "upcoming") "还没有要倒数的日期" else "还没有纪念的日期", fontSize = 17.sp, fontWeight = FontWeight.SemiBold)
+                    Text(if (scope == "upcoming") "未来的日期会出现在这里，不足三天时以朱红标记。" else "日期过去之后会自动移到这里，改为正数计日。", modifier = Modifier.padding(horizontal = 34.dp, vertical = 6.dp), color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.50f), fontSize = 13.sp, textAlign = TextAlign.Center)
+                }
             }
-            item {
-                Row(Modifier.fillMaxWidth().padding(horizontal = 22.dp), horizontalArrangement = Arrangement.spacedBy(0.dp)) {
-                    listOf("upcoming" to "倒数日", "past" to "纪念日", "focus" to "专注").forEach { (raw, label) ->
-                        Column(
-                            Modifier.weight(1f).height(38.dp).clickable { scope = raw },
-                            horizontalAlignment = Alignment.CenterHorizontally,
-                            verticalArrangement = Arrangement.Center,
-                        ) {
-                            Text(label, fontSize = 15.sp, fontWeight = if (scope == raw) FontWeight.SemiBold else FontWeight.Normal, color = MaterialTheme.colorScheme.onSurface.copy(alpha = if (scope == raw) 1f else 0.50f))
-                            Box(Modifier.width(42.dp).height(7.dp).padding(top = 2.dp)) {
-                                if (scope == raw) InkDivider(opacity = 0.62f)
+            items(events.size, key = { events[it].id }) { index ->
+                val event = events[index]
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    Box(Modifier.weight(1f)) { CountdownRow(event, { editing = event; showEditor = true }, { viewModel.toggleCountdownPin(event.id) }, { viewModel.deleteCountdown(event.id) }) }
+                    if (reordering) {
+                        var drag by remember(event.id) { mutableStateOf(0f) }
+                        val density = androidx.compose.ui.platform.LocalDensity.current.density
+                        Box(Modifier.size(40.dp).pointerInput(event.id) {
+                            detectDragGestures(onDragStart = { drag = 0f }, onDragEnd = { viewModel.reorderCountdowns(reorderIds); drag = 0f }, onDragCancel = { drag = 0f }) { change, amount ->
+                                change.consume(); drag += amount.y
+                                val direction = if (drag > 48 * density) 1 else if (drag < -48 * density) -1 else 0
+                                if (direction != 0) { val position = reorderIds.indexOf(event.id); val target = position + direction; if (position >= 0 && target in reorderIds.indices) { val ids = reorderIds.toMutableList(); java.util.Collections.swap(ids, position, target); reorderIds = ids; drag = 0f } }
                             }
-                        }
-                    }
-                }
-            }
-            if (scope == "focus") {
-                item { PomodoroPanel(viewModel, focusHeight) }
-            } else {
-                if (sort == "date" && events.isNotEmpty()) item { Text("已按时间排序 · 离今天最近的在前", fontSize = 12.sp, modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp), textAlign = TextAlign.Center) }
-                if (reordering) item { Text("调整顺序", fontSize = 12.sp, modifier = Modifier.fillMaxWidth().clickable { reordering = false }.padding(vertical = 6.dp), textAlign = TextAlign.Center) }
-                if (events.isEmpty()) item {
-                    Column(Modifier.fillMaxWidth().padding(top = 92.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                        Box(Modifier.size(92.dp), contentAlignment = Alignment.Center) {
-                            InkAsset("InkFocusBloom", Modifier.fillMaxSize().alpha(0.10f))
-                            MojiLineIcon(MojiIcon.Timer, 38.dp, MaterialTheme.colorScheme.onSurface.copy(alpha = 0.52f))
-                        }
-                        Text(if (scope == "upcoming") "还没有要倒数的日期" else "还没有纪念的日期", fontSize = 17.sp, fontWeight = FontWeight.SemiBold)
-                        Text(if (scope == "upcoming") "未来的日期会出现在这里，不足三天时以朱红标记。" else "日期过去之后会自动移到这里，改为正数计日。", modifier = Modifier.padding(horizontal = 34.dp, vertical = 6.dp), color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.50f), fontSize = 13.sp, textAlign = TextAlign.Center)
-                    }
-                }
-                items(events.size, key = { events[it].id }) { index ->
-                    val event = events[index]
-                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                        Box(Modifier.weight(1f)) { CountdownRow(event, { editing = event; showEditor = true }, { viewModel.toggleCountdownPin(event.id) }, { viewModel.deleteCountdown(event.id) }) }
-                        if (reordering) {
-                            var drag by remember(event.id) { mutableStateOf(0f) }
-                            val density = androidx.compose.ui.platform.LocalDensity.current.density
-                            Box(Modifier.size(40.dp).pointerInput(event.id) {
-                                detectDragGestures(onDragStart = { drag = 0f }, onDragEnd = { viewModel.reorderCountdowns(reorderIds); drag = 0f }, onDragCancel = { drag = 0f }) { change, amount ->
-                                    change.consume(); drag += amount.y
-                                    val direction = if (drag > 48 * density) 1 else if (drag < -48 * density) -1 else 0
-                                    if (direction != 0) { val position = reorderIds.indexOf(event.id); val target = position + direction; if (position >= 0 && target in reorderIds.indices) { val ids = reorderIds.toMutableList(); java.util.Collections.swap(ids, position, target); reorderIds = ids; drag = 0f } }
-                                }
-                            }, contentAlignment = Alignment.Center) { Text("≡", fontSize = 24.sp, color = MaterialTheme.colorScheme.secondary) }
-                        }
+                        }, contentAlignment = Alignment.Center) { Text("≡", fontSize = 24.sp, color = MaterialTheme.colorScheme.secondary) }
                     }
                 }
             }
@@ -161,6 +149,38 @@ fun MomentsScreen(viewModel: MojiViewModel) {
         } },
         confirmButton = { TextButton(onClick = { more = false }) { Text("完成") } })
     if (showEditor) CountdownEditorScreenDialog(editing, viewModel, context = scope) { showEditor = false; editing = null }
+}
+
+@Composable
+private fun MomentsTitle(scope: String, onMore: () -> Unit, onAdd: () -> Unit) {
+    MojiLargeTitle(
+        title = "时刻",
+        actions = if (scope == "focus") emptyList() else listOf(
+            MojiIcon.Ellipsis to onMore,
+            MojiIcon.Plus to onAdd,
+        ),
+        // iOS nav bar ends at 150pt and the mode cards add .padding(.top, 5): row 155–193pt.
+        bottomPadding = 3.5.dp,
+    )
+}
+
+/** iOS modeCards: VStack(spacing 3) { subheadline; ZStack(height 5) + InkBrushDivider(height 7) width 42 }, frame height 38. */
+@Composable
+private fun MomentsModeRow(scope: String, onSelect: (String) -> Unit) {
+    Row(Modifier.fillMaxWidth().padding(start = 22.dp, end = 22.dp, top = 5.dp), horizontalArrangement = Arrangement.spacedBy(0.dp)) {
+        listOf("upcoming" to "倒数日", "past" to "纪念日", "focus" to "专注").forEach { (raw, label) ->
+            Column(
+                Modifier.weight(1f).height(38.dp).clickable { onSelect(raw) },
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.Center,
+            ) {
+                Text(label, fontSize = 15.sp, fontWeight = if (scope == raw) FontWeight.SemiBold else FontWeight.Normal, color = if (scope == raw) MaterialTheme.colorScheme.onSurface else iosSecondaryLabel)
+                Box(Modifier.padding(top = 3.dp).width(42.dp).height(7.dp)) {
+                    if (scope == raw) InkDivider(opacity = 1f)
+                }
+            }
+        }
+    }
 }
 
 @OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
@@ -195,17 +215,19 @@ private fun CountdownRow(event: CountdownEvent, onEdit: () -> Unit, onPin: () ->
                 Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(5.dp)) {
                         Text(event.title, fontSize = 17.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
-                        if (event.isPinned) MojiLineIcon(MojiIcon.Pin, 9.dp, mojiVermilion)
-                        if (event.calendarEventIdentifier != null) MojiLineIcon(MojiIcon.Calendar, 11.dp, MaterialTheme.colorScheme.secondary)
+                        if (event.isPinned) MojiLineIcon(MojiIcon.Pin, 12.dp, mojiVermilion)
+                        if (event.calendarEventIdentifier != null) MojiLineIcon(MojiIcon.Calendar, 11.dp, iosSecondaryLabel)
                     }
-                    Text(dateText, fontSize = 12.sp, color = MaterialTheme.colorScheme.secondary)
+                    // iOS .secondary inside the plain list button resolves to primary at 50%: (123,122,118) on paper.
+                    Text(dateText, fontSize = 12.sp, color = if (MaterialTheme.colorScheme.background.luminance() < 0.5f) Color.White.copy(alpha = 0.5f) else Color.Black.copy(alpha = 0.5f))
                     if (elapsed != null && days >= 0) Text(elapsed, fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.62f))
                 }
                 if (urgent) InkSeal("急", 25)
                 Column(horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(1.dp)) {
-                    Text(if (days == 0) "今天" else if (days < 0) "正数" else "倒数", fontSize = 11.sp, fontWeight = FontWeight.SemiBold, color = if (urgent) color else MaterialTheme.colorScheme.secondary)
-                    Box {
-                        InkAsset("InkHeaderWash", Modifier.align(Alignment.BottomCenter).width(70.dp).height(9.dp).alpha(if (urgent) 0.18f else 0.065f), tint = color)
+                    Text(if (days == 0) "今天" else if (days < 0) "正数" else "倒数", fontSize = 11.sp, fontWeight = FontWeight.SemiBold, color = if (urgent) color else iosSecondaryLabel)
+                    Box(contentAlignment = Alignment.BottomEnd) {
+                        // SwiftUI .background(alignment: .bottom): the wash takes the number's width, 9pt high, 5pt low.
+                        InkAsset("InkHeaderWash", Modifier.matchParentSize().wrapContentHeight(Alignment.Bottom).height(9.dp).offset(y = 5.dp).alpha(if (urgent) 0.18f else 0.065f), tint = color)
                         if (days == 0) Text("今天", fontSize = 20.sp, fontWeight = FontWeight.SemiBold, color = color)
                         else Row(verticalAlignment = Alignment.Bottom, horizontalArrangement = Arrangement.spacedBy(2.dp)) {
                             Text(kotlin.math.abs(days).toString(), fontSize = 27.sp, fontWeight = FontWeight.SemiBold, color = color)
@@ -214,8 +236,8 @@ private fun CountdownRow(event: CountdownEvent, onEdit: () -> Unit, onPin: () ->
                     }
                 }
             }
-            if (!urgent) InkDivider(opacity = 0.22f)
         }
+        if (!urgent) InkDivider(Modifier.align(Alignment.BottomStart), opacity = 0.22f, seed = inkSeed(event.id.uppercase()))
         DropdownMenu(menu, { menu = false }) {
             DropdownMenuItem({ Text(if (event.isPinned) "取消重点" else "设为重点") }, { menu = false; onPin() })
             DropdownMenuItem({ Text("修改") }, { menu = false; onEdit() })
@@ -239,22 +261,29 @@ private fun PomodoroPanel(viewModel: MojiViewModel, availableHeight: androidx.co
     var endDialog by remember { mutableStateOf(false) }
     var durationPhase by remember { mutableStateOf(if (BuildConfig.DEBUG && viewModel.visualQaRoute.value == "focus-duration") "focus" else null) }
     var switchPhase by remember { mutableStateOf<String?>(null) }
+    // SwiftUI VStack(spacing 20) { Spacer(min 20); ring 252; phases 44; 60; controls 76; Spacer(min 30) } with minHeight = available.
+    val rigid = 252.dp + 44.dp + 60.dp + 76.dp + 20.dp * 5
+    val extra = availableHeight - rigid
+    val topSpace = if (extra >= 60.dp) extra / 2 else if (extra >= 50.dp) extra - 30.dp else 20.dp
+    val bottomSpace = if (extra >= 60.dp) extra / 2 else 30.dp
     Column(
-        Modifier.fillMaxWidth().height(availableHeight).padding(horizontal = 30.dp),
+        Modifier.fillMaxWidth().padding(horizontal = 30.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        Spacer(Modifier.weight(1f))
+        Spacer(Modifier.height(topSpace + 20.dp))
         Box(Modifier.size(252.dp), contentAlignment = Alignment.Center) {
             PomodoroInkRing(progress, active, state.running && viewModel.inkMotionLevel != "off", Modifier.fillMaxSize())
             if (state.completedPhase == "focus") Box(Modifier.align(Alignment.Center).padding(start = 168.dp, top = 168.dp)) { InkSeal("专", 32) }
             Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                Text(state.completedPhase?.takeIf { state.pendingNextPhase != null }?.let { "${phaseName(it)}完成" } ?: phaseName(state.phase), color = MaterialTheme.colorScheme.secondary, fontSize = 12.sp)
+                Text(state.completedPhase?.takeIf { state.pendingNextPhase != null }?.let { "${phaseName(it)}完成" } ?: phaseName(state.phase), color = iosSecondaryLabel, fontSize = 12.sp)
                 Text(if (state.pendingNextPhase != null) "00:00" else "${(remaining / 60).toString().padStart(2, '0')}:${(remaining % 60).toString().padStart(2, '0')}", fontSize = 50.sp, fontWeight = FontWeight.Light)
                 Box {
                     Row(Modifier.clickable(enabled = canChoose) { planMenu = true }, verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                         val label = if (state.pendingNextPhase != null) if (state.completedPhase == "focus") state.title else "休息结束" else if (state.phase == "focus") state.title else if (state.running) "休息中" else "轻触开始休息"
-                        Text(label, color = MaterialTheme.colorScheme.secondary, fontSize = 13.sp, maxLines = 1)
-                        if (canChoose) Text("⌃⌄", fontSize = 8.sp, color = MaterialTheme.colorScheme.secondary)
+                        // The Menu label is tinted: .secondary resolves to planPrimary at 50% (141,139,134).
+                        val menuInk = MaterialTheme.colorScheme.primary.copy(alpha = 0.5f)
+                        Text(label, color = menuInk, fontSize = 12.sp, maxLines = 1)
+                        if (canChoose) UpDownChevron(menuInk)
                     }
                     DropdownMenu(planMenu, { planMenu = false }) {
                         DropdownMenuItem(text = { Text("不关联计划") }, onClick = { planMenu = false; viewModel.linkPomodoro(null) })
@@ -277,7 +306,7 @@ private fun PomodoroPanel(viewModel: MojiViewModel, availableHeight: androidx.co
                 ) {
                     Box(contentAlignment = Alignment.Center) {
                         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(5.dp)) {
-                            MojiLineIcon(when (raw) { "shortBreak" -> MojiIcon.Cup; "longBreak" -> MojiIcon.Leaf; else -> MojiIcon.Timer }, 14.dp, if (selected) MaterialTheme.colorScheme.background else MaterialTheme.colorScheme.onSurface)
+                            MojiLineIcon(when (raw) { "shortBreak" -> MojiIcon.Cup; "longBreak" -> MojiIcon.Leaf; else -> MojiIcon.TimerSF }, if (raw == "focus") 16.dp else 14.dp, if (selected) MaterialTheme.colorScheme.background else MaterialTheme.colorScheme.onSurface)
                             Text(label, fontSize = 12.sp, fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal, color = if (selected) MaterialTheme.colorScheme.background else MaterialTheme.colorScheme.onSurface)
                         }
                     }
@@ -289,7 +318,7 @@ private fun PomodoroPanel(viewModel: MojiViewModel, availableHeight: androidx.co
         if (state.pendingNextPhase != null) {
             Text("轻触中间开始${phaseName(state.pendingNextPhase!!)}", fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.85f))
         } else if (state.running) {
-            Text("进行中 · 预计 ${Instant.ofEpochMilli(state.targetEpochMillis).atZone(ZoneId.systemDefault()).format(DateTimeFormatter.ofPattern("HH:mm"))} 结束", color = MaterialTheme.colorScheme.secondary, fontSize = 13.sp)
+            Text("进行中 · 预计 ${Instant.ofEpochMilli(state.targetEpochMillis).atZone(ZoneId.systemDefault()).format(DateTimeFormatter.ofPattern("HH:mm"))} 结束", color = iosSecondaryLabel, fontSize = 13.sp)
         } else {
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
             Row(Modifier.fillMaxWidth()) {
@@ -301,19 +330,18 @@ private fun PomodoroPanel(viewModel: MojiViewModel, availableHeight: androidx.co
                     DurationCell("长休", "longBreak", viewModel.durationForPhase("longBreak") / 60, viewModel, Modifier.weight(1f)) { durationPhase = "longBreak" }
                 }
             }
-            Text("点击时长调整", color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.48f), fontSize = 12.sp, modifier = Modifier.padding(top = 5.dp))
+            Text("点击时长调整", color = MaterialTheme.colorScheme.secondary.copy(alpha = 0.92f), fontSize = 11.sp, modifier = Modifier.padding(top = 5.dp))
         }
         }
         }
         Spacer(Modifier.height(20.dp))
-        Row(horizontalArrangement = Arrangement.spacedBy(24.dp), verticalAlignment = Alignment.CenterVertically) {
+        Row(Modifier.heightIn(min = 76.dp), horizontalArrangement = Arrangement.spacedBy(24.dp), verticalAlignment = Alignment.CenterVertically) {
             TimerControl(MojiIcon.Stop, "结束", mojiVermilion, active) { endDialog = true }
             TimerControl(if (state.running) MojiIcon.Pause else MojiIcon.Play, state.pendingNextPhase?.let { "开始${phaseName(it)}" } ?: if (state.running) "暂停" else "开始", MaterialTheme.colorScheme.onSurface, true) {
                 if (state.running) viewModel.pausePomodoro() else viewModel.startPomodoro()
             }
         }
-        Spacer(Modifier.weight(1f))
-        Spacer(Modifier.height(10.dp))
+        Spacer(Modifier.height(20.dp + bottomSpace))
     }
     if (endDialog) AlertDialog(
         onDismissRequest = { endDialog = false },
@@ -336,8 +364,12 @@ private fun DurationCell(label: String, phase: String, minutes: Int, viewModel: 
     var menu by remember { mutableStateOf(false) }
     Box(modifier, contentAlignment = Alignment.Center) {
     Column(Modifier.fillMaxWidth().clickable { menu = true }, horizontalAlignment = Alignment.CenterHorizontally) {
-        Text(label, color = MaterialTheme.colorScheme.secondary, fontSize = 11.sp)
-        Text("$minutes 分⌄", fontSize = 15.sp, fontWeight = FontWeight.Medium, modifier = Modifier.padding(top = 2.dp))
+        val current by viewModel.pomodoro.collectAsStateWithLifecycle()
+        Text(label, color = if (current.phase == phase) MaterialTheme.colorScheme.primary else iosSecondaryLabel, fontSize = 11.sp)
+        Row(Modifier.padding(top = 2.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(2.dp)) {
+            Text("$minutes 分", fontSize = 15.sp, fontWeight = FontWeight.Medium, color = MaterialTheme.colorScheme.primary)
+            Box(Modifier.size(width = 7.dp, height = 16.dp), contentAlignment = Alignment.Center) { Box(Modifier.requiredSize(16.dp).rotate(90f)) { MojiLineIcon(MojiIcon.Disclosure, 16.dp, MaterialTheme.colorScheme.primary) } }
+        }
     }
     DropdownMenu(menu, { menu = false }) {
         phasePresets(phase).forEach { preset -> DropdownMenuItem({ Text("${if (preset == minutes) "✓ " else ""}$preset 分钟") }, { menu = false; viewModel.setPhaseMinutes(phase, preset) }) }
@@ -351,11 +383,10 @@ fun phasePresets(phase: String): List<Int> = when (phase) { "shortBreak" -> list
 
 @Composable
 private fun TimerControl(icon: MojiIcon, label: String, color: Color, enabled: Boolean, onClick: () -> Unit) {
-    Column(Modifier.width(if (icon == MojiIcon.Play || icon == MojiIcon.Pause) 88.dp else 64.dp).alpha(if (enabled) 1f else 0.34f).clickable(enabled = enabled, onClick = onClick), horizontalAlignment = Alignment.CenterHorizontally) {
-        Box(Modifier.size(if (icon == MojiIcon.Play || icon == MojiIcon.Pause) 56.dp else 44.dp), contentAlignment = Alignment.Center) {
-            InkAsset("InkIconLoop", Modifier.fillMaxSize().alpha(0.72f), tint = color)
-            MojiLineIcon(icon, if (icon == MojiIcon.Play || icon == MojiIcon.Pause) 24.dp else 18.dp, color)
-        }
+    Column(Modifier.width(if (icon == MojiIcon.Play || icon == MojiIcon.Pause) 88.dp else 64.dp).alpha(if (enabled) 1f else 0.18f).clickable(enabled = enabled, onClick = onClick), horizontalAlignment = Alignment.CenterHorizontally) {
+        // iOS seeds the stop medallion 2 and the start medallion 0 (artwork, angle, scale, opacity).
+        val primaryControl = icon == MojiIcon.Play || icon == MojiIcon.Pause
+        InkBrushMedallion(icon, color, if (primaryControl) 56.dp else 44.dp, seed = if (primaryControl) 0 else 2, iconSize = if (primaryControl) 28.dp else 22.dp)
         Text(label, fontSize = 11.sp, modifier = Modifier.padding(top = 4.dp))
     }
 }
@@ -369,3 +400,14 @@ private fun repeatName(raw: String?): String = when (raw) {
 }
 
 fun LocalDate.toKotlinDate() = kotlinx.datetime.LocalDate(year, monthValue, dayOfMonth)
+
+/** SF chevron.up.chevron.down at 8pt bold. */
+@Composable
+private fun UpDownChevron(color: Color) {
+    androidx.compose.foundation.Canvas(Modifier.size(width = 6.dp, height = 10.dp)) {
+        val u = size.width / 6f
+        val stroke = androidx.compose.ui.graphics.drawscope.Stroke(1.4f * u, cap = androidx.compose.ui.graphics.StrokeCap.Round, join = androidx.compose.ui.graphics.StrokeJoin.Round)
+        drawPath(androidx.compose.ui.graphics.Path().apply { moveTo(0.9f*u, 3.8f*u); lineTo(3f*u, 1.4f*u); lineTo(5.1f*u, 3.8f*u) }, color, style = stroke)
+        drawPath(androidx.compose.ui.graphics.Path().apply { moveTo(0.9f*u, 6.2f*u); lineTo(3f*u, 8.6f*u); lineTo(5.1f*u, 6.2f*u) }, color, style = stroke)
+    }
+}

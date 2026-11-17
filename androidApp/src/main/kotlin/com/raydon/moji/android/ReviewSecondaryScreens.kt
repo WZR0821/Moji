@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -18,6 +19,9 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.requiredSize
+import androidx.compose.material3.LocalContentColor
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.draw.alpha
@@ -67,7 +71,8 @@ fun ReviewSecondaryDialog(route: String, viewModel: MojiViewModel, onDismiss: ()
             Column(Modifier.fillMaxSize()) {
                 MojiSheetBar(
                     when (route) { "weekly" -> "周总结"; "monthly" -> "月总结"; else -> "时间记录" },
-                    "返回",
+                    // iOS shows these sheets without a leading button; system back dismisses.
+                    "",
                     if (route == "records") "+" else "",
                     onDismiss,
                     { if (route == "records") { recordEditor = null; showRecordEditor = true } },
@@ -106,8 +111,8 @@ private fun WeeklySummaryContent(plans: List<com.raydon.moji.core.CheckInItem>, 
                         if (week < current) Text("回到本周", fontSize = 12.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.clickable { week = current })
                     }
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                        WeeklyMetric("${weekPlans.count { it.status == "completed" }}/${weekPlans.size}", "完成计划", MojiIcon.Checklist, Modifier.weight(1f))
-                        WeeklyMetric(durationText(weekPlans.sumOf(::estimated).toLong()), "计划时间", MojiIcon.Calendar, Modifier.weight(1f))
+                        WeeklyMetric("${weekPlans.count { it.status == "completed" }}/${weekPlans.size}", "完成计划", { CheckCircleFillIcon() }, Modifier.weight(1f))
+                        WeeklyMetric(durationText(weekPlans.sumOf(::estimated).toLong()), "计划时间", { MojiLineIcon(MojiIcon.CalendarFill, 22.dp) }, Modifier.weight(1f))
                     }
                     SummaryChart(records, week, 7)
                     SummaryLegend(records, week, week.plusDays(7))
@@ -151,13 +156,18 @@ private fun MonthlySummaryContent(plans: List<com.raydon.moji.core.CheckInItem>,
 
 @Composable
 private fun SummaryNavigation(title: String, subtitle: String, canNext: Boolean, previous: () -> Unit, next: () -> Unit) {
+    // SF chevron.left / chevron.right in .primary, 8.3 × 14.3 pt; a disabled button draws secondary at 0.3.
+    val ink = LocalContentColor.current
+    val disabled = iosSecondaryLabel.copy(alpha = iosSecondaryLabel.alpha * 0.3f)
     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-        Box(Modifier.size(44.dp).clickable(onClick = previous), contentAlignment = Alignment.Center) { Box(Modifier.rotate(180f)) { MojiLineIcon(MojiIcon.ChevronRight, 17.dp) } }
+        Box(Modifier.size(44.dp).clickable(onClick = previous), contentAlignment = Alignment.Center) { Box(Modifier.offset(x = (-1.2).dp)) { MojiLineIcon(MojiIcon.ChevronLeft, 22.dp, ink) } }
         Column(Modifier.weight(1f), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(2.dp)) {
             Text(title, fontSize = 17.sp, fontWeight = FontWeight.SemiBold)
-            Text(subtitle, fontSize = 12.sp, color = MaterialTheme.colorScheme.secondary)
+            Text(subtitle, fontSize = 12.sp, color = iosSecondaryLabel)
         }
-        Box(Modifier.size(44.dp).alpha(if (canNext) 1f else 0.3f).clickable(enabled = canNext, onClick = next), contentAlignment = Alignment.Center) { MojiLineIcon(MojiIcon.ChevronRight, 17.dp) }
+        Box(Modifier.size(44.dp).clickable(enabled = canNext, onClick = next), contentAlignment = Alignment.Center) {
+            Box(Modifier.offset(x = 0.8.dp).rotate(180f)) { MojiLineIcon(MojiIcon.ChevronLeft, 22.dp, if (canNext) ink else disabled) }
+        }
     }
 }
 
@@ -166,40 +176,86 @@ private fun SummaryChart(records: List<TimeRecord>, start: LocalDate, days: Int)
     val groups = listOf(records.filter { it.category == "study" }, records.filter { it.category == "work" }, records.filter { it.category !in listOf("study", "work") })
     val values = (0 until days).map { offset -> groups.map { com.raydon.moji.android.data.LocalRules.minutes(it, start.plusDays(offset.toLong()), start.plusDays(offset + 1L)) } }
     val maximum = values.maxOf { it.sum() }.coerceAtLeast(1)
-    val scale = if (maximum <= 1) 1L else kotlin.math.ceil(maximum / 25.0).toLong() * 25
+    val week = days == 7
+    // The weekly chart rounds its domain to the axis ticks; the monthly chart (hidden y axis) scales to its tallest day, as Swift Charts does.
+    val scale = if (!week || maximum <= 1) maximum else kotlin.math.ceil(maximum / 25.0).toLong() * 25
     val colors = chartColors()
-    Column(Modifier.fillMaxWidth().height(if (days == 7) 180.dp else 118.dp)) {
-        Row(Modifier.fillMaxWidth().weight(1f)) {
-            if (days == 7) Column(Modifier.width(42.dp).fillMaxHeight(), verticalArrangement = Arrangement.SpaceBetween) {
-                (4 downTo 0).forEach { Text(durationText(scale * it / 4), fontSize = 10.sp, maxLines = 1, softWrap = false, color = MaterialTheme.colorScheme.secondary) }
-            }
-            Box(Modifier.fillMaxHeight().weight(1f)) {
-                if (days == 7) Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.SpaceBetween) {
-                    repeat(5) { HorizontalDivider(color = MaterialTheme.colorScheme.secondary.copy(alpha = 0.15f), thickness = 0.5.dp) }
+    val labelColor = iosSecondaryLabel
+    val gridColor = labelColor.copy(alpha = labelColor.alpha * 0.15f)
+    // Swift Charts frame: 180 / 118 pt in total, of which 35.3 pt below the plot hold the x labels and the legend.
+    Column(Modifier.fillMaxWidth().height(if (week) 180.dp else 118.dp)) {
+        Row(Modifier.fillMaxWidth().height(if (week) 144.7.dp else 82.7.dp)) {
+            if (week) ChartYAxis((4 downTo 0).map { durationText(scale * it / 4) }, labelColor)
+            androidx.compose.foundation.Canvas(Modifier.fillMaxHeight().weight(1f)) {
+                if (week) for (line in 0..4) {
+                    val y = (kotlin.math.round(size.height * line / 4f - 0.5f) + 0.5f).coerceIn(0.5f, size.height - 0.5f)
+                    drawLine(gridColor, androidx.compose.ui.geometry.Offset(0f, y), androidx.compose.ui.geometry.Offset(size.width, y), 1f)
                 }
-                androidx.compose.foundation.Canvas(Modifier.fillMaxSize()) {
-                    val slot = size.width / days
-                    values.forEachIndexed { index, segments ->
-                        var bottom = size.height
-                        segments.forEachIndexed { category, value ->
-                            val height = size.height * value / scale
-                            if (height > 0f) drawRoundRect(colors[category], androidx.compose.ui.geometry.Offset(slot * (index + 0.2f), bottom - height), androidx.compose.ui.geometry.Size(slot * 0.6f, height), androidx.compose.ui.geometry.CornerRadius(4.dp.toPx()))
-                            bottom -= height
+                val slot = size.width / days
+                val barWidth = slot * 0.705f
+                val radius = if (week) 4.dp.toPx() else 0f
+                values.forEachIndexed { index, segments ->
+                    val left = slot * index + (slot - barWidth) / 2
+                    val topCategory = segments.indexOfLast { it > 0 }
+                    var bottom = size.height
+                    segments.forEachIndexed { category, value ->
+                        val height = size.height * value / scale
+                        if (height > 0f) {
+                            val top = bottom - height
+                            // A stacked BarMark keeps square joins; only the top of the stack is rounded.
+                            if (category == topCategory && radius > 0f) {
+                                val r = androidx.compose.ui.geometry.CornerRadius(minOf(radius, barWidth / 2, height))
+                                drawPath(androidx.compose.ui.graphics.Path().apply { addRoundRect(androidx.compose.ui.geometry.RoundRect(left, top, left + barWidth, bottom, topLeftCornerRadius = r, topRightCornerRadius = r)) }, colors[category])
+                            } else drawRect(colors[category], androidx.compose.ui.geometry.Offset(left, top), androidx.compose.ui.geometry.Size(barWidth, height))
+                            bottom = top
                         }
                     }
                 }
             }
         }
-        Row(Modifier.fillMaxWidth().padding(start = if (days == 7) 42.dp else 0.dp, top = 5.dp)) {
-            (0 until days).forEach { index -> Text(if (days == 7) "一二三四五六日"[index].toString() else if (index % 7 == 0) "${index + 1}日" else "", Modifier.weight(1f), textAlign = TextAlign.Center, fontSize = 10.sp, maxLines = 1, softWrap = false, overflow = androidx.compose.ui.text.style.TextOverflow.Visible, color = MaterialTheme.colorScheme.secondary) }
-        }
-        Row(Modifier.padding(top = 4.dp), horizontalArrangement = Arrangement.spacedBy(7.dp)) {
+        // Week: one label per day; month: AxisMarks(stride 7 days, centered) puts each label mid-interval and drops one past the end.
+        val xLabels = if (week) (0 until 7).map { "一二三四五六日"[it].toString() to (it + 0.5f) / 7f }
+            else (0 until days step 7).filter { it + 3.5f <= days }.map { "${it + 1}日" to (it + 3.5f) / days }
+        ChartXAxis(xLabels, labelColor, Modifier.fillMaxWidth().padding(start = if (week) 50.dp else 0.dp, top = 3.5.dp))
+        Row(Modifier.padding(top = 4.dp), horizontalArrangement = Arrangement.spacedBy(9.dp)) {
             listOf("学习", "工作", "其他").forEachIndexed { index, label ->
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                    Box(Modifier.size(6.dp).background(colors[index], CircleShape))
-                    Text(label, fontSize = 10.sp, color = MaterialTheme.colorScheme.secondary)
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(5.dp)) {
+                    Box(Modifier.size(8.dp).background(colors[index], CircleShape))
+                    Text(label, fontSize = 11.sp, color = labelColor)
                 }
             }
+        }
+    }
+}
+
+/** Leading y axis: 50 pt wide, labels right-aligned 4.5 pt before the plot and centred on their gridlines. */
+@Composable
+private fun ChartYAxis(labels: List<String>, color: Color) {
+    androidx.compose.ui.layout.Layout(
+        content = { labels.forEach { Text(it, fontSize = 11.sp, color = color, maxLines = 1, softWrap = false) } },
+        modifier = Modifier.width(50.dp).fillMaxHeight(),
+    ) { measurables, constraints ->
+        val placeables = measurables.map { it.measure(androidx.compose.ui.unit.Constraints()) }
+        val gap = 4.5.dp.roundToPx()
+        layout(constraints.maxWidth, constraints.maxHeight) {
+            placeables.forEachIndexed { index, placeable ->
+                val y = constraints.maxHeight * index / (placeables.size - 1).coerceAtLeast(1)
+                placeable.place(constraints.maxWidth - gap - placeable.width, y - placeable.height / 2)
+            }
+        }
+    }
+}
+
+/** X axis labels centred at fractions of the plot width. */
+@Composable
+private fun ChartXAxis(labels: List<Pair<String, Float>>, color: Color, modifier: Modifier) {
+    androidx.compose.ui.layout.Layout(
+        content = { labels.forEach { Text(it.first, fontSize = 11.sp, color = color, maxLines = 1, softWrap = false) } },
+        modifier = modifier,
+    ) { measurables, constraints ->
+        val placeables = measurables.map { it.measure(androidx.compose.ui.unit.Constraints()) }
+        layout(constraints.maxWidth, placeables.maxOfOrNull { it.height } ?: 0) {
+            placeables.forEachIndexed { index, placeable -> placeable.place((constraints.maxWidth * labels[index].second).toInt() - placeable.width / 2, 0) }
         }
     }
 }
@@ -215,7 +271,7 @@ private fun SummaryLegend(records: List<TimeRecord>, from: LocalDate, until: Loc
         listOf("study" to "学习", "work" to "工作", "custom" to "其他").forEachIndexed { index, (category, label) ->
             val matching = records.filter { if (category == "custom") it.category !in listOf("study", "work") else it.category == category }
             Column(Modifier.weight(1f), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(5.dp)) {
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) { Box(Modifier.size(8.dp).background(colors[index], CircleShape)); Text(label, fontSize = 12.sp, color = MaterialTheme.colorScheme.secondary) }
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) { Box(Modifier.size(8.dp).background(colors[index], CircleShape)); Text(label, fontSize = 12.sp, color = iosSecondaryLabel) }
                 val minutes = com.raydon.moji.android.data.LocalRules.minutes(matching, from, until)
                 Text(if (compact) durationText(minutes) else fullDuration(minutes), fontSize = 12.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
             }
@@ -224,27 +280,41 @@ private fun SummaryLegend(records: List<TimeRecord>, from: LocalDate, until: Loc
 }
 
 @Composable
-private fun WeeklyMetric(value: String, label: String, icon: MojiIcon, modifier: Modifier) {
+private fun WeeklyMetric(value: String, label: String, icon: @Composable () -> Unit, modifier: Modifier) {
     Row(modifier.background(MaterialTheme.colorScheme.onSurface.copy(alpha = 0.04f), RoundedCornerShape(12.dp)).padding(10.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        MojiLineIcon(icon, 17.dp)
-        Column(verticalArrangement = Arrangement.spacedBy(1.dp)) { Text(value, fontSize = 15.sp, fontWeight = FontWeight.Bold); Text(label, fontSize = 11.sp, color = MaterialTheme.colorScheme.secondary) }
+        // A 20 pt symbol slot: checkmark.circle.fill is 17 pt, calendar 16.6 × 15.3 pt.
+        Box(Modifier.width(20.dp), contentAlignment = Alignment.Center) { Box(Modifier.requiredSize(22.dp), contentAlignment = Alignment.Center) { icon() } }
+        Column(verticalArrangement = Arrangement.spacedBy(1.dp)) { Text(value, fontSize = 15.sp, fontWeight = FontWeight.Bold); Text(label, fontSize = 11.sp, color = iosSecondaryLabel) }
+    }
+}
+
+/** SF Symbol checkmark.circle.fill at 17 pt: a filled disc with the check knocked out. */
+@Composable
+private fun CheckCircleFillIcon(color: Color = MaterialTheme.colorScheme.onSurface) {
+    androidx.compose.foundation.Canvas(Modifier.size(17.dp).graphicsLayer { compositingStrategy = androidx.compose.ui.graphics.CompositingStrategy.Offscreen }) {
+        val u = 1.dp.toPx()
+        drawCircle(color, size.minDimension / 2)
+        val check = androidx.compose.ui.graphics.Path().apply {
+            moveTo(center.x - 3.6f * u, center.y - 0.2f * u); lineTo(center.x - 1.1f * u, center.y + 3.3f * u); lineTo(center.x + 3.0f * u, center.y - 3.8f * u)
+        }
+        drawPath(check, Color.Black, style = androidx.compose.ui.graphics.drawscope.Stroke(1.4f * u, cap = androidx.compose.ui.graphics.StrokeCap.Round, join = androidx.compose.ui.graphics.StrokeJoin.Round), blendMode = androidx.compose.ui.graphics.BlendMode.Clear)
     }
 }
 
 @Composable
 private fun MonthMetric(value: String, label: String, modifier: Modifier) {
-    Column(modifier, horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(4.dp)) { Text(value, fontSize = 15.sp, fontWeight = FontWeight.Bold); Text(label, fontSize = 11.sp, color = MaterialTheme.colorScheme.secondary) }
+    Column(modifier, horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(4.dp)) { Text(value, fontSize = 15.sp, fontWeight = FontWeight.Bold); Text(label, fontSize = 11.sp, color = iosSecondaryLabel) }
 }
 
 @Composable
 private fun ComparisonRow(title: String, minutes: Long, maximum: Long, opacity: Float) {
     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(9.dp)) {
-        Text(title, fontSize = 12.sp, color = MaterialTheme.colorScheme.secondary, modifier = Modifier.width(30.dp))
+        Text(title, fontSize = 12.sp, color = iosSecondaryLabel, modifier = Modifier.width(30.dp))
         Box(Modifier.weight(1f).height(9.dp)) {
             InkAsset("InkThinDivider", Modifier.fillMaxSize().alpha(0.10f))
             InkAsset("InkProgressBar", Modifier.fillMaxWidth(if (maximum > 0) minutes.toFloat() / maximum else 0f).fillMaxHeight().alpha(opacity))
         }
-        Text(durationText(minutes), fontSize = 12.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.width(56.dp), textAlign = TextAlign.End)
+        Text(durationText(minutes), fontSize = 12.sp, fontWeight = FontWeight.SemiBold, style = androidx.compose.material3.LocalTextStyle.current.copy(fontFeatureSettings = "tnum"), modifier = Modifier.width(56.dp), textAlign = TextAlign.End)
     }
 }
 
@@ -254,7 +324,7 @@ private fun MonthHeatmap(month: LocalDate, plans: List<com.raydon.moji.core.Chec
     val blanks = month.dayOfWeek.value - 1
     val cells = (0 until blanks).map { null } + (0 until month.lengthOfMonth()).map { month.plusDays(it.toLong()) }
     Column(verticalArrangement = Arrangement.spacedBy(7.dp)) {
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) { "一二三四五六日".forEach { Text(it.toString(), Modifier.weight(1f), textAlign = TextAlign.Center, fontSize = 11.sp, color = MaterialTheme.colorScheme.secondary) } }
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) { "一二三四五六日".forEach { Text(it.toString(), Modifier.weight(1f), textAlign = TextAlign.Center, fontSize = 11.sp, color = iosSecondaryLabel) } }
         Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
             cells.chunked(7).forEach { row ->
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -282,7 +352,7 @@ private fun RecordsContent(records: List<TimeRecord>, onEdit: (TimeRecord) -> Un
     val zone = ZoneId.systemDefault()
     val grouped = records.groupBy { Instant.parse(it.startDate).atZone(zone).toLocalDate() }
         .toSortedMap(compareByDescending { it })
-    LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(vertical = 20.dp), verticalArrangement = Arrangement.spacedBy(24.dp)) {
+    LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(top = 15.dp, bottom = 20.dp), verticalArrangement = Arrangement.spacedBy(32.3.dp)) {
         if (records.isEmpty()) item {
             Column(Modifier.fillMaxWidth().padding(top = 100.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                 MojiLineIcon(MojiIcon.Note, 40.dp, MaterialTheme.colorScheme.onSurface.copy(alpha = 0.32f))
@@ -294,7 +364,7 @@ private fun RecordsContent(records: List<TimeRecord>, onEdit: (TimeRecord) -> Un
             item(key = "records-$date") {
                 FormSection(when (date) { LocalDate.now() -> "今天"; LocalDate.now().minusDays(1) -> "昨天"; else -> date.format(DateTimeFormatter.ofPattern("yyyy年M月d日 EEEE", Locale.SIMPLIFIED_CHINESE)) }) {
                     dayRecords.forEachIndexed { index, record ->
-                        if (index > 0) FormSeparator()
+                        if (index > 0) FormSeparator(62.dp)
                         RecordListRow(record, onEdit, onDelete)
                     }
                 }
@@ -310,15 +380,16 @@ private fun RecordListRow(record: TimeRecord, onEdit: (TimeRecord) -> Unit, onDe
     val end = Instant.parse(record.endDate).atZone(zone)
     var menu by remember(record.id) { mutableStateOf(false) }
     Box {
-    Row(Modifier.fillMaxWidth().combinedClickable(onClick = { onEdit(record) }, onLongClick = { menu = true }).padding(horizontal = 16.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-        Box(Modifier.width(30.dp), contentAlignment = Alignment.Center) { MojiLineIcon(when (record.category) { "study" -> MojiIcon.Book; "work" -> MojiIcon.Work; else -> MojiIcon.Tag }, 18.dp, MaterialTheme.colorScheme.secondary) }
+    val tint = chartColors()[when (record.category) { "study" -> 0; "work" -> 1; else -> 2 }]
+    Row(Modifier.fillMaxWidth().combinedClickable(onClick = { onEdit(record) }, onLongClick = { menu = true }).padding(horizontal = 20.dp, vertical = 11.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+        Box(Modifier.width(30.dp), contentAlignment = Alignment.Center) { MojiLineIcon(when (record.category) { "study" -> MojiIcon.Book; "work" -> MojiIcon.Work; else -> MojiIcon.Tag }, 21.dp, tint) }
         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
             Text(record.title, fontSize = 17.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
-            val timing = if ((record.scheduleKind ?: "exactTime") == "exactTime") "${start.format(DateTimeFormatter.ofPattern("HH:mm"))} – ${end.format(DateTimeFormatter.ofPattern("HH:mm"))}" else scheduleOptions.firstOrNull { it.first == record.scheduleKind }?.second ?: "全天"
-            Text(timing, color = MaterialTheme.colorScheme.secondary, fontSize = 12.sp)
+            val timing = if ((record.scheduleKind ?: "exactTime") == "exactTime") "${start.format(DateTimeFormatter.ofPattern("H:mm"))} – ${end.format(DateTimeFormatter.ofPattern("H:mm"))}" else scheduleOptions.firstOrNull { it.first == record.scheduleKind }?.second ?: "全天"
+            Text(timing, color = iosSecondaryLabel, fontSize = 12.sp)
         }
         val seconds = Duration.between(start, end).seconds.coerceAtLeast(0)
-        Text(if ((record.scheduleKind ?: "exactTime") == "exactTime") fullDuration((seconds + 59) / 60) else "已记录", fontSize = 15.sp, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.secondary, textAlign = TextAlign.End)
+        Text(if ((record.scheduleKind ?: "exactTime") == "exactTime") fullDuration((seconds + 59) / 60) else "已记录", fontSize = 15.sp, fontWeight = FontWeight.SemiBold, color = tint, textAlign = TextAlign.End)
     }
             DropdownMenu(menu, { menu = false }) {
                 DropdownMenuItem(text = { Text("编辑") }, onClick = { menu = false; onEdit(record) })
@@ -355,12 +426,12 @@ fun RecordEditorScreenDialog(existing: TimeRecord?, viewModel: MojiViewModel, on
             Column(Modifier.fillMaxSize()) {
                 MojiSheetBar(if (existing == null) "添加记录" else "编辑记录", "取消", "保存", requestDismiss, {
                     viewModel.saveRecord(draftId, title, category, date, start, end, note, endDate, schedule, onSaved = onDismiss)
-                }, title.isNotBlank() && (schedule != "exactTime" || endDate.atTime(end).isAfter(date.atTime(start))), transparentBackground = false)
-                LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(top = 27.dp, bottom = 36.dp), verticalArrangement = Arrangement.spacedBy(19.dp)) {
+                }, title.isNotBlank() && (schedule != "exactTime" || endDate.atTime(end).isAfter(date.atTime(start))))
+                LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(top = 15.dp, bottom = 36.dp), verticalArrangement = Arrangement.spacedBy(26.6.dp)) {
                     item {
-                        FormSection("标题") { FormTextField(title, { title = it }, "例如：复习高等数学") }
+                        FormSection("标题", firstHeader = true) { FormTextField(title, { title = it }, "例如：复习高等数学") }
                     }
-                    item { FormSection("详细说明（可选）") { FormTextField(note, { note = it }, "补充这段记录的细节", singleLine = false, minHeight = 90) } }
+                    item { FormSection("详细说明（可选）") { FormTextField(note, { note = it }, "补充这段记录的细节", singleLine = false, minHeight = 89) } }
                     item { FormSection("类型") { CategoryFields(category, viewModel) { category = it } }
                     }
                     item {
@@ -371,16 +442,24 @@ fun RecordEditorScreenDialog(existing: TimeRecord?, viewModel: MojiViewModel, on
                                 FormDateTimeRow("开始", date, start, { pickDate(date) }, { pickStart(start) })
                                 FormSeparator()
                                 FormDateTimeRow("结束", endDate, end, { pickEndDate(endDate) }, { pickEnd(end) })
-                                DurationPills(listOf(25, 45, 60, 90)) { val result = date.atTime(start).plusMinutes(it.toLong()); end = result.toLocalTime(); endDate = result.toLocalDate() }
-                                FormRow("本次合计", editorDuration(Duration.between(date.atTime(start), endDate.atTime(end)).toMinutes().coerceAtLeast(0)))
+                                FormSeparator()
+                                DurationPills(listOf(25, 45, 60, 90), unit = "分钟") { val result = date.atTime(start).plusMinutes(it.toLong()); end = result.toLocalTime(); endDate = result.toLocalDate() }
+                                FormSeparator()
+                                val canSave = title.isNotBlank() && endDate.atTime(end).isAfter(date.atTime(start))
+                                Row(Modifier.fillMaxWidth().heightIn(min = 44.dp).padding(horizontal = 20.dp), verticalAlignment = Alignment.CenterVertically) {
+                                    Text("本次合计", fontSize = 17.sp, modifier = Modifier.weight(1f))
+                                    Text(editorDuration(Duration.between(date.atTime(start), endDate.atTime(end)).toMinutes().coerceAtLeast(0)), fontSize = 17.sp, fontWeight = FontWeight.SemiBold,
+                                        color = if (canSave) chartColors()[when (category) { "study" -> 0; "work" -> 1; else -> 2 }] else iosSecondaryLabel)
+                                }
                             } else {
                                 FormDateRow("日期", date) { pickDate(date) }
-                                EditorCaption("只记录“${scheduleOptions.first { it.first == schedule }.second}”这一事实，不自动估算分钟数。")
+                                FormSeparator()
+                                Box(Modifier.fillMaxWidth().heightIn(min = 44.dp), contentAlignment = Alignment.CenterStart) { EditorCaption("只记录“${scheduleOptions.first { it.first == schedule }.second}”这一事实，不自动估算分钟数。", fontSize = 12) }
                             }
                         }
                     }
-                    if (existing != null) item { Column(Modifier.offset(y = (-7).dp)) { FormSection(footer = if (existing.checkInItemID != null) "若记录关联计划，删除后对应计划会恢复为未完成。" else null) {
-                        Text("删除这条记录", color = mojiDestructive, fontSize = 17.sp, modifier = Modifier.fillMaxWidth().clickable { deleting = true }.padding(horizontal = 20.dp, vertical = 11.dp))
+                    if (existing != null) item { Column(Modifier.offset(y = (-14.8).dp)) { FormSection(footer = if (existing.checkInItemID != null) "若记录关联计划，删除后对应计划会恢复为未完成。" else null) {
+                        Text("删除这条记录", color = mojiDestructive, fontSize = 17.sp, modifier = Modifier.fillMaxWidth().clickable { deleting = true }.padding(horizontal = 20.dp, vertical = 11.8.dp))
                     } } }
                 }
             }

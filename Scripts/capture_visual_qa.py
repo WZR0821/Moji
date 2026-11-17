@@ -15,6 +15,7 @@ from PIL import Image, ImageDraw, ImageStat
 ROOT = Path(__file__).resolve().parents[1]
 ADB = "/Users/Shared/JerreaderAndroidSdk/platform-tools/adb"
 SIM = "4DB16103-3C6C-4FCB-A567-142F58531965"
+SERIAL = "emulator-5554"
 ENV = dict(os.environ, DEVELOPER_DIR="/Users/raydon/Downloads/Xcode.app/Contents/Developer")
 ROUTES = ["plans", "plan-expanded", "plan-completed", "plan-editor", "plan-copy", "library", "templates", "memo", "memo-note", "memo-checklist", "memo-convert", "moments", "moment-past", "moment-editor", "focus", "review", "review-week", "review-month", "review-records", "record-editor", "record-untimed", "goal", "reflection", "next-week", "settings"]
 
@@ -40,8 +41,8 @@ def verify_android_route(route):
     expected = {"plan-inline": "编辑内容", "record-untimed": "编辑记录", "plan-editor-advanced": "高级设置", "calendar-jump": "跳转到", "memo-note": "转为清单", "memo-checklist": "转为正文"}.get(route)
     if not expected: return
     for attempt in range(3):
-        run([ADB, "-s", "emulator-5554", "shell", "uiautomator", "dump", "/sdcard/moji-qa-window.xml"], stdout=subprocess.DEVNULL)
-        xml = run([ADB, "-s", "emulator-5554", "shell", "cat", "/sdcard/moji-qa-window.xml"], capture_output=True, text=True).stdout
+        run([ADB, "-s", SERIAL, "shell", "uiautomator", "dump", "/sdcard/moji-qa-window.xml"], stdout=subprocess.DEVNULL)
+        xml = run([ADB, "-s", SERIAL, "shell", "cat", "/sdcard/moji-qa-window.xml"], capture_output=True, text=True).stdout
         texts = [node.get("text", "") for node in ET.fromstring(xml).iter("node")]
         if expected in texts: return
         time.sleep(2)
@@ -78,15 +79,15 @@ def capture(platform, route, mode, output, settle_seconds=15, ocr_tool=None):
             if not blank and colorful < 0.04 and verify_ios_route(route, staging, ocr_tool): break
         else: raise RuntimeError(f"iOS screenshot did not settle into Moji: {route}")
     else:
-        run([ADB, "-s", "emulator-5554", "shell", "cmd", "uimode", "night", "yes" if mode == "dark" else "no"], stdout=subprocess.DEVNULL)
-        run([ADB, "-s", "emulator-5554", "shell", "am", "force-stop", "com.raydon.moji.android"], stdout=subprocess.DEVNULL)
-        run([ADB, "-s", "emulator-5554", "shell", "am", "start", "-W", "-n", "com.raydon.moji.android/.MainActivity", "--ez", "moji_qa_seed", "true", "--es", "moji_qa_route", route], stdout=subprocess.DEVNULL)
+        run([ADB, "-s", SERIAL, "shell", "cmd", "uimode", "night", "yes" if mode == "dark" else "no"], stdout=subprocess.DEVNULL)
+        run([ADB, "-s", SERIAL, "shell", "am", "force-stop", "com.raydon.moji.android"], stdout=subprocess.DEVNULL)
+        run([ADB, "-s", SERIAL, "shell", "am", "start", "-W", "-n", "com.raydon.moji.android/.MainActivity", "--ez", "moji_qa_seed", "true", "--es", "moji_qa_route", route], stdout=subprocess.DEVNULL)
         # `am start -W` waits for the first draw. Allow the fixture route and
         # its sheet animation to settle after that, instead of timing splash.
         time.sleep(3)
         verify_android_route(route)
         with staging.open("wb") as stream:
-            run([ADB, "-s", "emulator-5554", "exec-out", "screencap", "-p"], stdout=stream)
+            run([ADB, "-s", SERIAL, "exec-out", "screencap", "-p"], stdout=stream)
     with Image.open(staging) as captured:
         captured.verify()
     staging.replace(destination)
@@ -122,13 +123,17 @@ if __name__ == "__main__":
     parser.add_argument("--output", type=Path, default=ROOT / "build/1.6.0-qa")
     parser.add_argument("--settle-seconds", type=int, default=15)
     parser.add_argument("--ocr-tool", type=Path, help="Optional compiled Scripts/qa_ocr.swift on macOS")
+    parser.add_argument("--fixture", type=Path, default=ROOT / "Scripts/fixtures/workflow-1.6.json",
+                        help="iOS fixture; use the same shifted copy the Android debug build bundled")
+    parser.add_argument("--serial", default=SERIAL, help="adb serial of the Android emulator")
     args = parser.parse_args()
+    SERIAL = args.serial
     output = args.output
     output.mkdir(parents=True, exist_ok=True)
     routes = args.routes.split(",")
     if args.platform in ["ios", "both"]:
         container = run(["xcrun", "simctl", "get_app_container", SIM, "com.raydon.minuteplan", "data"], capture_output=True, text=True).stdout.strip()
-        run(["ditto", str(ROOT / "Scripts/fixtures/workflow-1.6.json"), str(Path(container) / "Documents/MojiVisualQA.json")])
+        run(["ditto", str(args.fixture), str(Path(container) / "Documents/MojiVisualQA.json")])
     if args.platform != "compare":
         for route in routes:
             for platform in ["ios", "android"] if args.platform == "both" else [args.platform]: capture(platform, route, args.mode, output, args.settle_seconds, args.ocr_tool)

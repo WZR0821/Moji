@@ -56,7 +56,10 @@ android {
         buildConfig = true
     }
     sourceSets.getByName("main").assets.directories.add("../Moji/Assets.xcassets")
-    sourceSets.getByName("debug").assets.directories.add("../Scripts/fixtures")
+    // Visual QA can point the debug fixture at a copy shifted to the capture day.
+    sourceSets.getByName("debug").assets.directories.add(
+        providers.gradleProperty("mojiQaFixtures").getOrElse("../Scripts/fixtures")
+    )
     packaging { resources.excludes += "/META-INF/{AL2.0,LGPL2.1}" }
 }
 

@@ -9,6 +9,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -22,6 +23,10 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.draw.rotate
+import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.layout.layout
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -76,28 +81,35 @@ fun PlanEditorScreenDialog(
     val pickActualEnd = rememberTimePicker { actualEnd = it }
     val listState = rememberLazyListState()
     val titleFocus = remember { androidx.compose.ui.focus.FocusRequester() }
+    var titleFocused by remember { mutableStateOf(false) }
     val qaScrollInset = with(androidx.compose.ui.platform.LocalDensity.current) { 44.dp.roundToPx() }
 
     val editState = listOf(kind, title, note, category, date, time, schedule, plannedDurationEnabled, plannedMinutes,
         actualStart, actualEnd, endDate, weekdays.sorted(), repeatRule, reminderEnabled, reminderMinutes, calendarSync)
     val initialEditState = remember(existing?.id) { editState }
     val requestDismiss = rememberEditorDismiss(editState != initialEditState, onDismiss)
+    val canSave = title.isNotBlank() && (kind != "completed" || schedule != "exactTime" || endDate.atTime(actualEnd).isAfter(date.atTime(actualStart))) && (kind != "planned" || repeatRule != "customWeekdays" || weekdays.isNotEmpty())
 
     Dialog(
         onDismissRequest = requestDismiss,
         properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false),
     ) {
         MojiScreen {
+            // The Dialog window has its own focus owner.
+            val focusManager = LocalFocusManager.current
             Column(Modifier.fillMaxSize()) {
                 MojiSheetBar(
                     title = if (kind == "completed") "记录已做" else if (existing == null) "新建计划" else "编辑计划",
                     leading = "取消",
                     trailing = "保存",
                     transparentBackground = false,
+                    separator = true,
                     onLeading = requestDismiss,
-                    trailingEnabled = title.isNotBlank() && (kind != "completed" || schedule != "exactTime" || endDate.atTime(actualEnd).isAfter(date.atTime(actualStart))) && (kind != "planned" || repeatRule != "customWeekdays" || weekdays.isNotEmpty()),
+                    // iOS: .disabled(!canSave && !isTitleFocused); tapping commits the IME, then save() guards canSave.
+                    trailingEnabled = canSave || titleFocused,
                     onTrailing = {
-                        viewModel.savePlan(
+                        focusManager.clearFocus()
+                        if (canSave) viewModel.savePlan(
                             existingId = draftId,
                             title = title,
                             note = note,
@@ -121,15 +133,19 @@ fun PlanEditorScreenDialog(
                 LazyColumn(
                     Modifier.fillMaxSize(),
                     state = listState,
-                    contentPadding = PaddingValues(top = 31.dp, bottom = 34.dp),
-                    verticalArrangement = Arrangement.spacedBy(23.dp),
+                    contentPadding = PaddingValues(top = 15.dp, bottom = 34.dp),
+                    verticalArrangement = Arrangement.spacedBy(26.5.dp),
                 ) {
                     item {
-                        FormSection("标题") { FormTextField(title, { title = it }, if (kind == "planned") "例如：完成报告第一章" else "例如：整理会议纪要", focusRequester = titleFocus) }
+                        FormSection("标题", firstHeader = true) {
+                            Box(Modifier.onFocusChanged { titleFocused = it.hasFocus }) {
+                                FormTextField(title, { title = it }, if (kind == "planned") "例如：完成报告第一章" else "例如：整理会议纪要", focusRequester = titleFocus)
+                            }
+                        }
                     }
                     item {
                         FormSection("详细说明（可选）", "保存后，展开计划即可直接阅读完整内容。") {
-                            FormTextField(note, { note = it }, "补充背景、步骤或注意事项", singleLine = false, minHeight = 90)
+                            FormTextField(note, { note = it }, "补充背景、步骤或注意事项", singleLine = false, minHeight = 88)
                         }
                     }
                     item {
@@ -177,8 +193,9 @@ fun PlanEditorScreenDialog(
                         }.joinToString(" · ").ifEmpty { "未设置" }
                         FormSection {
                             Row(Modifier.fillMaxWidth().clickable { advanced = !advanced }.padding(horizontal = 20.dp, vertical = 11.dp), verticalAlignment = Alignment.CenterVertically) {
-                                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) { Text("高级设置", fontSize = 17.sp, fontWeight = FontWeight.Medium); Text(advancedSummary, fontSize = 12.sp, color = if (advancedSummary == "未设置") MaterialTheme.colorScheme.secondary else MaterialTheme.colorScheme.onSurface) }
-                                Box(Modifier.rotate(if (advanced) 90f else 0f)) { MojiLineIcon(MojiIcon.ChevronRight, 14.dp) }
+                                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.5.dp)) { Text("高级设置", fontSize = 17.sp, fontWeight = FontWeight.Medium); Text(advancedSummary, fontSize = 12.sp, color = if (advancedSummary == "未设置") MaterialTheme.colorScheme.secondary else MaterialTheme.colorScheme.primary) }
+                                // DisclosureGroup chevron: 7 x 12 pt ink centred at x = 348.4 (row inset ends at 353).
+                                Box(Modifier.offset(x = 7.4.dp).rotate(if (advanced) 90f else 0f)) { MojiLineIcon(MojiIcon.Disclosure, 24.dp, MaterialTheme.colorScheme.primary) }
                             }
                             if (advanced) {
                                 FormSeparator()
@@ -186,17 +203,17 @@ fun PlanEditorScreenDialog(
                                 if (kind == "planned") {
                                     Column(verticalArrangement = Arrangement.spacedBy(9.dp)) {
                                     DenseEditorCaption("投入估算（可选）", true)
-                                    FormToggle("添加预计投入", plannedDurationEnabled, { plannedDurationEnabled = it }, minHeight = 32)
+                                    FormToggle("添加预计投入", plannedDurationEnabled, { plannedDurationEnabled = it }, minHeight = 31)
                                     if (plannedDurationEnabled) {
                                         FormStepper("预计投入", editorDuration(plannedMinutes.toLong()), { plannedMinutes = (plannedMinutes - 1).coerceAtLeast(1) }, { plannedMinutes = (plannedMinutes + 1).coerceAtMost(1440) }, valueStyle = MaterialTheme.typography.bodyLarge.copy(color = MaterialTheme.colorScheme.onSurface, fontWeight = FontWeight.SemiBold), minHeight = 32)
                                         DurationPills(verticalPadding = 0) { plannedMinutes = it }
                                     }
                                     DenseEditorCaption("预计投入用于番茄钟和周总结，与全天或具体时间相互独立。")
                                     }
-                                    androidx.compose.material3.HorizontalDivider(Modifier.padding(horizontal = 20.dp), color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.1f), thickness = 0.6.dp)
+                                    AdvancedDivider()
                                     Column(verticalArrangement = Arrangement.spacedBy(9.dp)) {
                                     DenseEditorCaption("重复与提醒", true)
-                                    FormChoiceRow("重复", repeatRule, repeatOptions, minHeight = 32) { repeatRule = it }
+                                    FormChoiceRow("重复", repeatRule, repeatOptions, minHeight = 35) { repeatRule = it }
                                     if (repeatRule == "customWeekdays") {
                                         Row(Modifier.fillMaxWidth().padding(horizontal = 18.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                                             listOf(2, 3, 4, 5, 6, 7, 1).forEachIndexed { index, day ->
@@ -206,13 +223,13 @@ fun PlanEditorScreenDialog(
                                             }
                                         }
                                     }
-                                    FormChoiceRow("提醒", if (reminderEnabled) reminderMinutes.toString() else "-1", reminderOptions + if (reminderOptions.none { it.first == reminderMinutes.toString() }) listOf(reminderMinutes.toString() to "提前 $reminderMinutes 分钟") else emptyList(), minHeight = 32) { reminderEnabled = it != "-1"; if (reminderEnabled) reminderMinutes = it.toInt() }
+                                    FormChoiceRow("提醒", if (reminderEnabled) reminderMinutes.toString() else "-1", reminderOptions + if (reminderOptions.none { it.first == reminderMinutes.toString() }) listOf(reminderMinutes.toString() to "提前 $reminderMinutes 分钟") else emptyList(), minHeight = 35) { reminderEnabled = it != "-1"; if (reminderEnabled) reminderMinutes = it.toInt() }
                                     DenseEditorCaption("重复计划会在完成或跳过后生成下一次；提醒只保存在本机。")
                                     }
-                                    androidx.compose.material3.HorizontalDivider(Modifier.padding(horizontal = 20.dp), color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.1f), thickness = 0.6.dp)
+                                    AdvancedDivider()
                                 }
                                 Column(verticalArrangement = Arrangement.spacedBy(9.dp)) {
-                                FormToggle("添加到系统日历", calendarSync, { calendarSync = it }, enabled = existing?.calendarEventIdentifier == null, minHeight = 32)
+                                FormToggle("添加到系统日历", calendarSync, { calendarSync = it }, enabled = existing?.calendarEventIdentifier == null, minHeight = 31)
                                 if (existing?.calendarEventIdentifier != null) DenseEditorCaption("已添加到系统日历")
                                 DenseEditorCaption("默认不上传。开启后仅单向添加一次；之后如需修改或删除日历事件，请在系统日历中操作。")
                                 }
@@ -235,14 +252,28 @@ fun PlanEditorScreenDialog(
     }
 }
 
+// SwiftUI .caption: 16.3pt line pitch, a 14.3pt box with the glyph 2pt below its top.
 @Composable
 private fun DenseEditorCaption(text: String, heading: Boolean = false) {
-    Text(text, fontSize = 12.sp, lineHeight = 17.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f), fontWeight = if (heading) FontWeight.SemiBold else FontWeight.Normal, modifier = Modifier.padding(horizontal = 20.dp))
+    Text(text, fontSize = 12.sp, lineHeight = 16.3.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f), fontWeight = if (heading) FontWeight.SemiBold else FontWeight.Normal, modifier = Modifier.padding(horizontal = 20.dp).trimVertical(top = 1.7.dp, bottom = 1.4.dp))
+}
+
+/** Divider().opacity(0.45) between the advanced groups: 1px, separator colour at 45%. */
+@Composable
+private fun AdvancedDivider() {
+    androidx.compose.material3.HorizontalDivider(Modifier.padding(horizontal = 20.dp), color = iosSeparator.copy(alpha = iosSeparator.alpha * 0.45f), thickness = devicePixel)
+}
+
+private fun Modifier.trimVertical(top: Dp, bottom: Dp) = layout { measurable, constraints ->
+    val placeable = measurable.measure(constraints)
+    val t = top.roundToPx()
+    val b = bottom.roundToPx()
+    layout(placeable.width, (placeable.height - t - b).coerceAtLeast(0)) { placeable.place(0, -t) }
 }
 
 @Composable
-fun EditorCaption(text: String, heading: Boolean = false) {
-    Text(text, fontSize = 13.sp, lineHeight = 18.sp, color = MaterialTheme.colorScheme.secondary, fontWeight = if (heading) FontWeight.SemiBold else FontWeight.Normal, modifier = Modifier.padding(horizontal = 20.dp, vertical = 11.dp))
+fun EditorCaption(text: String, heading: Boolean = false, fontSize: Int = 13) {
+    Text(text, fontSize = fontSize.sp, lineHeight = 18.sp, color = MaterialTheme.colorScheme.secondary, fontWeight = if (heading) FontWeight.SemiBold else FontWeight.Normal, modifier = Modifier.padding(horizontal = 20.dp, vertical = 11.dp))
 }
 
 fun editorDuration(minutes: Long) = when { minutes < 60 -> "$minutes 分钟"; minutes % 60 == 0L -> "${minutes / 60} 小时"; else -> "${minutes / 60} 小时 ${minutes % 60} 分钟" }

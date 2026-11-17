@@ -22,7 +22,6 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextAlign
-import androidx.compose.ui.text.style.LineHeightStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
@@ -70,7 +69,6 @@ fun PlanCalendarScreen(viewModel: MojiViewModel, initialDate: LocalDate, onDismi
         }
     }
     val requestDelete: (LocalCalendarEntry, Boolean) -> Unit = { entry, onlyRecord -> deletion = entry; deleteRecordOnly = onlyRecord }
-    ProvideTextStyle(LocalTextStyle.current.copy(lineHeightStyle = LineHeightStyle(LineHeightStyle.Alignment.Center, LineHeightStyle.Trim.Both))) {
     MojiScreen {
         Column(Modifier.fillMaxSize()) {
             Box {
@@ -108,10 +106,10 @@ fun PlanCalendarScreen(viewModel: MojiViewModel, initialDate: LocalDate, onDismi
                         } }
                         item {
                             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                                Text("当日安排", fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.secondary)
+                                Text("当日安排", fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = iosSecondaryLabel)
                                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                                     Text(dayTitle(selected), fontSize = 17.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
-                                    Text("${data.entriesOn(selected).size} 项", fontSize = 12.sp, color = MaterialTheme.colorScheme.secondary)
+                                    Text("${data.entriesOn(selected).size} 项", fontSize = 12.sp, color = iosSecondaryLabel)
                                 }
                                 CalendarEntries(data.entriesOn(selected), "这一天尚未落墨", open, { plan = it; kind = "planned"; editor = true }, { record = it }, requestDelete, { countdown = it }, viewModel)
                             }
@@ -128,13 +126,13 @@ fun PlanCalendarScreen(viewModel: MojiViewModel, initialDate: LocalDate, onDismi
                                     Row(Modifier.fillMaxWidth().clickable { selected = day; mode = "day" }.padding(vertical = 11.dp), verticalAlignment = Alignment.CenterVertically) {
                                         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                                             Text(day.format(DateTimeFormatter.ofPattern("EEEE", Locale.SIMPLIFIED_CHINESE)), fontSize = 17.sp, lineHeight = 20.sp, fontWeight = FontWeight.SemiBold)
-                                            Text(day.format(DateTimeFormatter.ofPattern("M月d日")), fontSize = 12.sp, lineHeight = 14.sp, color = if (day == LocalDate.now()) mojiVermilion else MaterialTheme.colorScheme.secondary)
+                                            Text(day.format(DateTimeFormatter.ofPattern("M月d日")), fontSize = 12.sp, lineHeight = 14.sp, color = if (day == LocalDate.now()) mojiVermilion else iosSecondaryLabel)
                                         }
-                                        Text(if (entries.isEmpty()) "留白" else "${entries.size} 项", fontSize = 12.sp, color = MaterialTheme.colorScheme.secondary)
-                                        Spacer(Modifier.width(8.dp)); MojiLineIcon(MojiIcon.ChevronRight, 12.dp, MaterialTheme.colorScheme.secondary.copy(alpha = 0.6f))
+                                        Text(if (entries.isEmpty()) "留白" else "${entries.size} 项", fontSize = 12.sp, color = iosSecondaryLabel)
+                                        Spacer(Modifier.width(8.dp)); MojiLineIcon(MojiIcon.ChevronRight, 12.dp, iosTertiaryLabel)
                                     }
                                     if (entries.isNotEmpty()) {
-                                        InkDivider(opacity = 0.13f, seed = inkSeed(day.toString()))
+                                        InkDivider(opacity = 0.42f, seed = inkSeed(day.toString()))
                                         entries.forEach { entry -> CalendarEntryRow(entry, open, { plan = it; kind = "planned"; editor = true }, { record = it }, requestDelete, { countdown = it }, viewModel) }
                                     }
                                     }
@@ -150,8 +148,8 @@ fun PlanCalendarScreen(viewModel: MojiViewModel, initialDate: LocalDate, onDismi
                             if (group.isNotEmpty()) item {
                                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                                     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                        MojiLineIcon(if (schedule == "exactTime") MojiIcon.Clock else MojiIcon.Sun, 17.dp, MaterialTheme.colorScheme.secondary)
-                                        Text(label, fontSize = 15.sp, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.secondary)
+                                        MojiLineIcon(if (schedule == "exactTime") MojiIcon.Clock else MojiIcon.Sun, 17.dp, iosSecondaryLabel)
+                                        Text(label, fontSize = 15.sp, fontWeight = FontWeight.SemiBold, color = iosSecondaryLabel)
                                     }
                                     CalendarEntries(group, "今日留白", open, { plan = it; kind = "planned"; editor = true }, { record = it }, requestDelete, { countdown = it }, viewModel)
                                 }
@@ -161,7 +159,6 @@ fun PlanCalendarScreen(viewModel: MojiViewModel, initialDate: LocalDate, onDismi
                 }
             }
         }
-    }
     }
     if (editor) PlanEditorScreenDialog(plan, selected, viewModel, kind) { editor = false; plan = null }
     record?.let { RecordEditorScreenDialog(it, viewModel) { record = null } }
@@ -204,11 +201,13 @@ private fun CalendarArrow(next: Boolean, action: () -> Unit) {
 private fun CalendarModeControl(mode: String, onSelect: (String) -> Unit) {
     // The navigation picker has no extra grouped-form insets.
     val dark = MaterialTheme.colorScheme.background.luminance() < 0.5f
-    Surface(color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.055f), shape = androidx.compose.foundation.shape.RoundedCornerShape(8.dp)) {
-        Row(Modifier.fillMaxWidth().height(32.dp).padding(2.dp)) {
-            listOf("month" to "月", "week" to "周", "day" to "日").forEach { (raw, title) ->
+    Surface(color = iosFill, shape = androidx.compose.foundation.shape.RoundedCornerShape(8.dp)) {
+        Row(Modifier.fillMaxWidth().height(32.dp).padding(2.dp), verticalAlignment = Alignment.CenterVertically) {
+            val segments = listOf("month" to "月", "week" to "周", "day" to "日")
+            segments.forEachIndexed { index, (raw, title) ->
+                if (index > 0) Box(Modifier.width(1.dp).height(17.dp).background(if (raw != mode && segments[index - 1].first != mode) (if (dark) Color(0x33EBEBF5) else Color(0x293C3C43)) else Color.Transparent))
                 Surface(Modifier.weight(1f).fillMaxHeight().clickable { onSelect(raw) }, color = if (raw == mode) if (dark) Color(0xFF727278) else Color.White else Color.Transparent, shape = androidx.compose.foundation.shape.RoundedCornerShape(6.dp), shadowElevation = if (raw == mode) 1.dp else 0.dp) {
-                    Box(contentAlignment = Alignment.Center) { Text(title, fontSize = 13.sp) }
+                    Box(contentAlignment = Alignment.Center) { Text(title, fontSize = 13.sp, fontWeight = if (raw == mode) FontWeight.SemiBold else FontWeight.Normal) }
                 }
             }
         }
@@ -220,7 +219,7 @@ private fun MonthCalendar(selected: LocalDate, data: LocalCalendar, onSelect: (L
     val first = workflowWeek(selected.withDayOfMonth(1))
     Column(verticalArrangement = Arrangement.spacedBy(7.dp)) {
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(2.dp)) {
-            "一二三四五六日".forEach { Text(it.toString(), Modifier.weight(1f), fontSize = 11.sp, lineHeight = 13.sp, textAlign = TextAlign.Center, color = MaterialTheme.colorScheme.secondary) }
+            "一二三四五六日".forEach { Text(it.toString(), Modifier.weight(1f), fontSize = 11.sp, lineHeight = 13.sp, textAlign = TextAlign.Center, color = iosSecondaryLabel) }
         }
         Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
             repeat(6) { week ->
@@ -230,13 +229,14 @@ private fun MonthCalendar(selected: LocalDate, data: LocalCalendar, onSelect: (L
                         val entries = data.entriesOn(date)
                         Column(Modifier.weight(1f).height(49.dp).clickable { onSelect(date) }, horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(5.dp, Alignment.CenterVertically)) {
                             val selectedInk = MaterialTheme.colorScheme.onSurface
+                            val outsideMonthInk = iosSecondaryLabel.let { it.copy(alpha = it.alpha * 0.48f) }
                             Box(Modifier.size(27.dp), contentAlignment = Alignment.Center) {
                                 if (date == selected) Canvas(Modifier.fillMaxSize()) { drawCircle(selectedInk.copy(alpha = 0.10f)); drawCircle(selectedInk.copy(alpha = 0.42f), style = Stroke(0.8.dp.toPx())) }
-                                Text(date.dayOfMonth.toString(), fontSize = 15.sp, fontWeight = if (date == selected || date == LocalDate.now()) FontWeight.SemiBold else FontWeight.Normal, color = if (date == LocalDate.now()) mojiVermilion else MaterialTheme.colorScheme.onSurface.copy(alpha = if (date.month == selected.month) 1f else 0.30f))
+                                Text(date.dayOfMonth.toString(), fontSize = 15.sp, fontWeight = if (date == selected || date == LocalDate.now()) FontWeight.SemiBold else FontWeight.Normal, color = if (date == LocalDate.now()) mojiVermilion else if (date.month == selected.month) MaterialTheme.colorScheme.onSurface else outsideMonthInk)
                             }
                             Row(Modifier.height(7.dp), horizontalArrangement = Arrangement.spacedBy(2.5.dp), verticalAlignment = Alignment.CenterVertically) {
                                 entries.take(2).forEach { CalendarStatusMark(it.status, it.countdown != null, calendarEntryColor(it)) }
-                                if (entries.size > 2) Text("+${entries.size - 2}", fontSize = 7.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.secondary)
+                                if (entries.size > 2) Text("+${entries.size - 2}", fontSize = 7.sp, fontWeight = FontWeight.Bold, color = iosSecondaryLabel)
                             }
                         }
                     }
@@ -247,12 +247,12 @@ private fun MonthCalendar(selected: LocalDate, data: LocalCalendar, onSelect: (L
             Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 listOf("planned" to "待完成", "inProgress" to "进行中", "completed" to "已完成", "skipped" to "已跳过").forEach { (status, title) ->
                     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                        CalendarStatusMark(status, false, if (status == "planned") mojiVermilion else if (status == "completed") MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.secondary)
-                        Text(title, fontSize = 11.sp, lineHeight = 13.sp, color = MaterialTheme.colorScheme.secondary)
+                        CalendarStatusMark(status, false, when (status) { "planned" -> mojiVermilion; "inProgress" -> MaterialTheme.colorScheme.secondary; "completed" -> MaterialTheme.colorScheme.onSurface; else -> iosSecondaryLabel })
+                        Text(title, fontSize = 11.sp, lineHeight = 13.sp, fontWeight = FontWeight.Medium, color = iosSecondaryLabel)
                     }
                 }
             }
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) { CalendarStatusMark("planned", true, MaterialTheme.colorScheme.secondary); Text("倒数日", fontSize = 11.sp, lineHeight = 13.sp, color = MaterialTheme.colorScheme.secondary) }
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) { CalendarStatusMark("planned", true, MaterialTheme.colorScheme.secondary); Text("倒数日", fontSize = 11.sp, lineHeight = 13.sp, fontWeight = FontWeight.Medium, color = iosSecondaryLabel) }
         }
     }
 }
@@ -273,9 +273,10 @@ private fun CalendarStatusMark(status: String, countdown: Boolean, tint: Color, 
 
 @Composable
 private fun calendarEntryColor(entry: LocalCalendarEntry): Color = when {
-    entry.countdown != null || entry.status in listOf("planned", "inProgress") -> mojiVermilion
+    entry.countdown != null || entry.status == "planned" -> mojiVermilion
+    entry.status == "inProgress" -> MaterialTheme.colorScheme.secondary
     entry.status == "completed" -> MaterialTheme.colorScheme.onSurface
-    else -> MaterialTheme.colorScheme.secondary
+    else -> iosSecondaryLabel
 }
 
 @Composable
@@ -285,7 +286,7 @@ private fun CalendarEntries(entries: List<LocalCalendarEntry>, empty: String, op
         Column {
         entries.forEachIndexed { index, entry ->
             CalendarEntryRow(entry, open, editPlan, editRecord, delete, editCountdown, viewModel)
-            if (index != entries.lastIndex) InkDivider(opacity = 0.13f, seed = inkSeed(entry.id))
+            if (index != entries.lastIndex) InkDivider(opacity = 0.42f, seed = inkSeed(entry.id))
         }
         }
     }
@@ -295,7 +296,7 @@ private fun CalendarEntries(entries: List<LocalCalendarEntry>, empty: String, op
 private fun CalendarEmpty(title: String) {
     Column(Modifier.fillMaxWidth().padding(vertical = 28.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(8.dp)) {
         InkBrushMedallion(MojiIcon.Calendar, MaterialTheme.colorScheme.onSurface, 38.dp)
-        Text(title, fontSize = 15.sp, color = MaterialTheme.colorScheme.secondary)
+        Text(title, fontSize = 15.sp, color = iosSecondaryLabel)
     }
 }
 
@@ -303,7 +304,7 @@ private fun CalendarEmpty(title: String) {
 private fun CalendarEntryRow(entry: LocalCalendarEntry, open: (LocalCalendarEntry) -> Unit, editPlan: (CheckInItem) -> Unit, editRecord: (TimeRecord) -> Unit, delete: (LocalCalendarEntry, Boolean) -> Unit, editCountdown: (CountdownEvent) -> Unit, viewModel: MojiViewModel) {
     var menu by remember(entry.id) { mutableStateOf(false) }
     val tint = calendarEntryColor(entry)
-    Row(Modifier.fillMaxWidth().padding(vertical = 8.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(2.dp)) {
+    Row(Modifier.fillMaxWidth().padding(vertical = 10.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(2.dp)) {
         Row(Modifier.weight(1f).clickable { open(entry) }, verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(11.dp)) {
             Box(Modifier.width(22.dp), contentAlignment = Alignment.Center) {
                 if (entry.countdown != null) MojiLineIcon(MojiIcon.Timer, 17.dp, tint)
@@ -311,13 +312,13 @@ private fun CalendarEntryRow(entry: LocalCalendarEntry, open: (LocalCalendarEntr
                 else CalendarStatusMark(entry.status, false, tint, 15)
             }
             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
-                Text(entry.title, fontSize = 17.sp, lineHeight = 20.sp, fontWeight = FontWeight.Medium, maxLines = 2, color = if (entry.status == "completed") MaterialTheme.colorScheme.secondary else MaterialTheme.colorScheme.onSurface, textDecoration = if (entry.status == "skipped") TextDecoration.LineThrough else null)
-                Text("${calendarTiming(entry)} · ${if (entry.countdown != null) "倒数日" else categoryName(entry.category)}", fontSize = 12.sp, lineHeight = 14.sp, maxLines = 1, color = MaterialTheme.colorScheme.secondary)
+                Text(entry.title, fontSize = 17.sp, lineHeight = 20.sp, fontWeight = FontWeight.Medium, maxLines = 2, color = if (entry.status == "completed") iosSecondaryLabel else MaterialTheme.colorScheme.onSurface, textDecoration = if (entry.status == "skipped") TextDecoration.LineThrough else null)
+                Text("${calendarTiming(entry)} · ${if (entry.countdown != null) "倒数日" else categoryName(entry.category)}", fontSize = 12.sp, lineHeight = 14.sp, maxLines = 1, color = iosSecondaryLabel)
             }
             Text(if (entry.countdown != null) "倒数日" else planStatusName(entry.status), fontSize = 11.sp, fontWeight = FontWeight.SemiBold, color = tint)
         }
         Box {
-            Box(Modifier.size(44.dp).clickable { menu = true }, contentAlignment = Alignment.Center) { MojiLineIcon(MojiIcon.Ellipsis, 17.dp, MaterialTheme.colorScheme.secondary) }
+            Box(Modifier.size(44.dp).clickable { menu = true }, contentAlignment = Alignment.Center) { MojiLineIcon(MojiIcon.Ellipsis, 17.dp, iosSecondaryLabel) }
             DropdownMenu(menu, { menu = false }) {
                 if (entry.plan != null) {
                     DropdownMenuItem({ Text("修改计划") }, { menu = false; editPlan(entry.plan) })
@@ -342,10 +343,21 @@ private fun CalendarEntryRow(entry: LocalCalendarEntry, open: (LocalCalendarEntr
 private fun calendarTiming(entry: LocalCalendarEntry): String {
     val zone = ZoneId.systemDefault()
     if (entry.countdown != null) return entry.date.atZone(zone).format(DateTimeFormatter.ofPattern("yyyy年M月d日"))
-    if (entry.schedule != "exactTime") return scheduleOptions.firstOrNull { it.first == entry.schedule }?.second ?: "全天"
-    val time = entry.date.atZone(zone).format(DateTimeFormatter.ofPattern("HH:mm"))
-    entry.record?.let { return "$time – ${Instant.parse(it.endDate).atZone(zone).format(DateTimeFormatter.ofPattern("HH:mm"))}" }
-    return time + if (entry.plan?.plannedDurationEnabled == true) " · 预计 ${entry.plan.plannedMinutes} 分钟" else ""
+    // iOS: record/plan timingSummaryText — times are "9:00", and a plan's planned duration follows any schedule kind.
+    val clock = DateTimeFormatter.ofPattern("H:mm")
+    val base = if (entry.schedule == "exactTime") entry.date.atZone(zone).format(clock)
+        else (scheduleOptions.firstOrNull { it.first == entry.schedule }?.second ?: "全天")
+    entry.record?.let { return if (entry.schedule != "exactTime") base else "$base – ${Instant.parse(it.endDate).atZone(zone).format(clock)}" }
+    return base + if (entry.plan?.plannedDurationEnabled == true) " · 预计 ${calendarDuration(entry.plan.plannedMinutes)}" else ""
+}
+
+private fun calendarDuration(minutes: Int): String {
+    val safe = maxOf(0, minutes)
+    return when {
+        safe < 60 -> "$safe 分钟"
+        safe % 60 == 0 -> "${safe / 60} 小时"
+        else -> "${safe / 60} 小时 ${safe % 60} 分钟"
+    }
 }
 
 @Composable
@@ -356,14 +368,17 @@ private fun CalendarJumpDialog(initial: LocalDate, onPick: (LocalDate) -> Unit, 
     Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false)) {
         // SwiftUI's 320pt detent excludes the 34pt bottom safe area.
         MojiScreen(sheetHeight = 354.dp) {
-            Column(Modifier.fillMaxSize()) {
-                Box(Modifier.fillMaxWidth().height(14.dp), contentAlignment = Alignment.Center) { Box(Modifier.width(36.dp).height(5.dp).background(MaterialTheme.colorScheme.onSurface.copy(alpha = 0.23f), CircleShape)) }
-                MojiSheetBar("跳转到", "取消", "跳转", onDismiss, { onPick(LocalDate.of(year, month, minOf(initial.dayOfMonth, YearMonth.of(year, month).lengthOfMonth()))) })
-                Row(Modifier.fillMaxWidth().weight(1f).padding(horizontal = 18.dp)) {
-                    CalendarWheel(minOf(now.year - 8, initial.year), maxOf(now.year + 8, initial.year), year, "年", Modifier.weight(1f)) { year = it }
-                    CalendarWheel(1, 12, month, "月", Modifier.weight(1f)) { month = it }
+            // iOS draws the grabber over the sheet's navigation bar: bar text centre sits 28pt below the sheet top (Android was 42).
+            Box(Modifier.fillMaxSize()) {
+                Column(Modifier.fillMaxSize()) {
+                    MojiSheetBar("跳转到", "取消", "跳转", onDismiss, { onPick(LocalDate.of(year, month, minOf(initial.dayOfMonth, YearMonth.of(year, month).lengthOfMonth()))) })
+                    Row(Modifier.fillMaxWidth().weight(1f).padding(horizontal = 18.dp)) {
+                        CalendarWheel(minOf(now.year - 8, initial.year), maxOf(now.year + 8, initial.year), year, "年", Modifier.weight(1f)) { year = it }
+                        CalendarWheel(1, 12, month, "月", Modifier.weight(1f)) { month = it }
+                    }
+                    Text("回到本月", fontSize = 15.sp, fontWeight = FontWeight.SemiBold, color = mojiVermilion, modifier = Modifier.align(Alignment.CenterHorizontally).clickable { year = now.year; month = now.monthValue }.padding(vertical = 10.dp))
                 }
-                Text("回到本月", fontSize = 15.sp, fontWeight = FontWeight.SemiBold, color = mojiVermilion, modifier = Modifier.align(Alignment.CenterHorizontally).clickable { year = now.year; month = now.monthValue }.padding(vertical = 10.dp))
+                Box(Modifier.align(Alignment.TopCenter).padding(top = 4.5.dp).width(36.dp).height(5.dp).background(MaterialTheme.colorScheme.onSurface.copy(alpha = 0.23f), CircleShape))
             }
         }
     }
