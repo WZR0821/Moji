@@ -43,7 +43,7 @@ Moji 提供倒数日、纪念日和计划三个桌面小组件。倒数日与纪
 
 ## 双端版本
 
-当前源码版本：`1.6.0 (build 42)`。本版简化计划、备忘、时刻和回顾的编辑流程，增加字段直接编辑与未保存保护，收拢低频设置，并重新对照双端深层界面。见 [1.6.0 更新说明](docs/RELEASE_NOTES_1.6.0.md)及 [验证与交付记录](docs/VERIFICATION_1.6.0.md)。历史版本见 [1.5.1 更新说明](docs/RELEASE_NOTES_1.5.1.md)和 [1.5.0 更新说明](docs/RELEASE_NOTES_1.5.0.md)。以下功能于 1.4.0 双端基线引入。
+当前源码版本：`1.6.2 (build 44)`。1.6.2 只改 iOS 安装包与 App Group 的衔接，让 SideStore 直接安装时桌面小组件能读到 App 的数据；1.6.1 修正 Android 计划勾选的两处逻辑。见 [1.6.2 更新说明](docs/RELEASE_NOTES_1.6.2.md)和 [1.6.1 更新说明](docs/RELEASE_NOTES_1.6.1.md)。1.6.0 简化计划、备忘、时刻和回顾的编辑流程，增加字段直接编辑与未保存保护，收拢低频设置，并重新对照双端深层界面，见 [1.6.0 更新说明](docs/RELEASE_NOTES_1.6.0.md)及 [验证与交付记录](docs/VERIFICATION_1.6.0.md)。历史版本见 [1.5.1 更新说明](docs/RELEASE_NOTES_1.5.1.md)和 [1.5.0 更新说明](docs/RELEASE_NOTES_1.5.0.md)。以下功能于 1.4.0 双端基线引入。
 
 - 新增完整 Android 客户端：计划、月周日历、备忘、倒数与纪念、番茄钟、回顾和设置。
 - Android 支持 Room 本地存储、系统日历、计划提醒、锁屏番茄通知、自动备份和三类桌面组件。
@@ -78,4 +78,4 @@ export DEVELOPER_DIR=/path/to/Xcode.app/Contents/Developer
 
 ## 技术与授权
 
-项目使用 Kotlin Multiplatform、Jetpack Compose、Room、WorkManager、SwiftUI、WidgetKit、ActivityKit、EventKit 和 UserNotifications。印章字形采用 [敬峰中山王篆](https://github.com/jeffi369/JFZSKSealScript)，依照 SIL Open Font License 1.1 使用，完整授权文件已随工程提供。产品与架构参考包括 Jerreader 的双端维护方法、[Kadō](https://github.com/scastiel/kado)、[Teymia Habit](https://github.com/amangeldybaiserkeev/TeymiaHabit) 和平台官方文档；本工程不包含参考项目的源代码。
+项目使用 Kotlin Multiplatform、Jetpack Compose、Room、WorkManager、SwiftUI、WidgetKit、ActivityKit、EventKit 和 UserNotifications。印章字形采用 [敬峰中山王篆](https://github.com/jeffi369/JFZSKSealScript)，依照 SIL Open Font License 1.1 使用，完整授权文件已随工程提供。Moji 自身的代码以 [MIT 许可证](LICENSE) 开源，字体文件不在 MIT 范围内，仍按 OFL 1.1 授权。产品与架构参考包括 Jerreader 的双端维护方法、[Kadō](https://github.com/scastiel/kado)、[Teymia Habit](https://github.com/amangeldybaiserkeev/TeymiaHabit) 和平台官方文档；本工程不包含参考项目的源代码。
