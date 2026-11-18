@@ -1,11 +1,13 @@
-# Moji
+# 墨记 Moji
 
 > [!IMPORTANT]
 > **本 APP 由 Claude Fable 5.2 及 Opus 5.5 开发完成。**
 
-Moji 是一款黑白朱红水墨风的 iOS / Android 效率 App，把计划、日历、备忘、番茄钟、倒数日和纪念日收进同一套轻量工作流。iOS 使用原生 SwiftUI，Android 使用 Jetpack Compose；Android 使用 Kotlin Multiplatform 核心中的日期、统计、番茄钟与备份规则；iOS 当前仍使用 Swift 实现，通过格式契约和双端测试维护兼容。应用不依赖账号体系或业务服务器。
+Moji 是一款黑白朱红水墨风的 iOS / Android 效率 App，把计划、日历、备忘、番茄钟、倒数日和纪念日收进同一套轻量工作流。iOS 使用原生 SwiftUI，Android 使用 Jetpack Compose。应用不依赖账号体系或业务服务器。
 
-作者：**Jerry Wong**。
+| 平台 | 当前版本 | 开发者 | 许可 |
+|---|---|---|---|
+| iOS 17+ · Android 8.0+ | 1.7.0（build 45） | Jerry Wong | [MIT](LICENSE) |
 
 ## 主要功能
 
@@ -35,28 +37,34 @@ Moji 是一款黑白朱红水墨风的 iOS / Android 效率 App，把计划、�
 
 周总结可设置完成数量／实际专注分钟目标，支持全部类型或指定类型；周复盘记录本周反馈和下周关注，可选待办移至下周。未计时完成项明确显示“未记录”，不会虚构专注时长。
 
-## 小组件与数据
+### 小组件
 
-Moji 提供倒数日、纪念日和计划三个桌面小组件。倒数日与纪念日组件最多显示三个可选条目；计划组件显示三条事项，可直接完成、恢复或使用预设快速添加。App 与 Widget 通过兼容旧版本的 App Group 共享本地 JSON 快照。
+Moji 提供倒数日、纪念日和计划三个桌面小组件。倒数日与纪念日组件最多显示三个可选条目；计划组件显示三条事项，可直接完成、恢复或使用预设快速添加。
 
-业务数据默认保存在设备本地，没有 Moji 账号、第三方业务 SDK 或业务服务器。用户可以手动导出 JSON 备份，也可以在「文件」App 中指定文件夹自动保存最新快照和每日历史备份。重新签名或换机后，可从原文件夹选取备份恢复，并重新授权该文件夹继续自动备份。
+## 下载与安装
 
-## 双端版本
+安装包在 [GitHub Releases](https://github.com/WZR0821/Moji/releases/latest)。
 
-当前源码版本：`1.7.0 (build 45)`。1.7.0 以 iOS 为准重新对照双端截图，把 Android 的图标、颜色、字号和间距改得与 iOS 一致，见 [1.7.0 更新说明](docs/RELEASE_NOTES_1.7.0.md)。1.6.2 只改 iOS 安装包与 App Group 的衔接，让 SideStore 直接安装时桌面小组件能读到 App 的数据；1.6.1 修正 Android 计划勾选的两处逻辑。见 [1.6.2 更新说明](docs/RELEASE_NOTES_1.6.2.md)和 [1.6.1 更新说明](docs/RELEASE_NOTES_1.6.1.md)。1.6.0 简化计划、备忘、时刻和回顾的编辑流程，增加字段直接编辑与未保存保护，收拢低频设置，并重新对照双端深层界面，见 [1.6.0 更新说明](docs/RELEASE_NOTES_1.6.0.md)及 [验证与交付记录](docs/VERIFICATION_1.6.0.md)。历史版本见 [1.5.1 更新说明](docs/RELEASE_NOTES_1.5.1.md)和 [1.5.0 更新说明](docs/RELEASE_NOTES_1.5.0.md)。以下功能于 1.4.0 双端基线引入。
+- **Android**：下载 APK 安装，需要 Android 8.0 及以上。Release 使用首次发布时生成并固定保存的 Moji 专用密钥签名，可以直接覆盖安装旧版。
+- **iOS**：提供未签名 IPA，需要使用个人或开发者证书（SideStore、AltStore 等工具）重新签名后安装，最低 iOS 17。安装包里带桌面小组件。
 
-- 新增完整 Android 客户端：计划、月周日历、备忘、倒数与纪念、番茄钟、回顾和设置。
-- Android 支持 Room 本地存储、系统日历、计划提醒、锁屏番茄通知、自动备份和三类桌面组件。
-- iOS 与 Android 使用同一个版本真源和 Moji 备份格式；1.5.0 使用 schema 13，兼容读取旧 schema 12 备份，新增模板、周目标及复盘内容随快照保存。
-- 新增一条命令生成签名 APK、签名 AAB、未签名 IPA、源码包与 SHA-256 校验文件。
+### 重签与数据兼容
 
-> iOS IPA 仍为未签名包，需要使用个人或开发者证书重新签名。Android Release 使用首次发布时生成并固定保存的 Moji 专用密钥。
+覆盖安装能否被 iOS 识别为同一个 App，取决于签名身份而不是 IPA 文件名。若要保留旧数据和小组件，请固定以下兼容标识，并为 App 与 Widget 配置同一个可用的 App Group：
 
-## 开发维护进展
+1. App Bundle ID：`com.raydon.minuteplan`
+2. Widget Bundle ID：`com.raydon.minuteplan.widget`
+3. App Group：`group.com.raydon.minuteplan`
 
-2026-10-05 完成一轮数据安全、备份体验与主线程性能维护。具体修改、验证边界、阶段总结及后续优先级见 [开发总结与维护方案](docs/DEVELOPMENT_REVIEW_2026-10-05.md)。这些是当前源码的维护成果，本轮已生成 1.4.1（39）未签名 IPA；旧的 1.4.0 发布包不包含这些修改。
+## 数据与隐私
 
-## 工程与构建
+业务数据默认保存在设备本地，没有 Moji 账号、第三方业务 SDK 或业务服务器。App 与 Widget 通过兼容旧版本的 App Group 共享本地 JSON 快照。
+
+用户可以手动导出 JSON 备份，也可以在「文件」App 中指定文件夹自动保存最新快照和每日历史备份。重新签名或换机后，可从原文件夹选取备份恢复，并重新授权该文件夹继续自动备份。
+
+iOS 与 Android 使用同一种 Moji 备份格式；1.5.0 起使用 schema 13，兼容读取旧 schema 12 备份，模板、周目标及复盘内容随快照保存。
+
+## 开发与构建
 
 使用 Xcode 打开 `Moji.xcodeproj` 可运行 iOS；Android 工程位于 `androidApp/`。完整双端发布：
 
@@ -66,16 +74,50 @@ export DEVELOPER_DIR=/path/to/Xcode.app/Contents/Developer
 ./Scripts/release.sh
 ```
 
-单独构建 Android Debug：`./gradlew :androidApp:assembleDebug`。单独构建 iOS 未签名 IPA：`./Scripts/build_unsigned_ipa.sh`。构建结果位于 `dist/`。
+`./Scripts/release.sh` 一条命令生成签名 APK、签名 AAB、未签名 IPA、源码包与 SHA-256 校验文件。单独构建 Android Debug：`./gradlew :androidApp:assembleDebug`。单独构建 iOS 未签名 IPA：`./Scripts/build_unsigned_ipa.sh`。构建结果位于 `dist/`。
 
-## 重签与数据兼容
+项目使用 Kotlin Multiplatform、Jetpack Compose、Room、WorkManager、SwiftUI、WidgetKit、ActivityKit、EventKit 和 UserNotifications。Android 使用 Kotlin Multiplatform 核心中的日期、统计、番茄钟与备份规则；iOS 当前仍使用 Swift 实现，通过格式契约和双端测试维护兼容。
 
-覆盖安装能否被 iOS 识别为同一个 App，取决于签名身份而不是 IPA 文件名。若要保留旧数据和小组件，请固定以下兼容标识，并为 App 与 Widget 配置同一个可用的 App Group：
+更多说明：[构建与发布](docs/BUILD.md) · [双端架构](docs/ARCHITECTURE.md) · [开发规则](AGENTS.md)
 
-1. App Bundle ID：`com.raydon.minuteplan`
-2. Widget Bundle ID：`com.raydon.minuteplan.widget`
-3. App Group：`group.com.raydon.minuteplan`
+## 项目结构
 
-## 技术与授权
+| 目录 | 用途 |
+|---|---|
+| `Moji/`、`MojiWidget/` | iOS App，以及桌面小组件和实时活动 |
+| `Shared/` | iOS App 与 Widget 共用的数据模型、App Group 数据层和字体 |
+| `MojiTests/` | iOS 单元测试 |
+| `androidApp/` | Android App：Room、系统日历、通知、后台备份和桌面组件 |
+| `core/` | 无 UI 的 Kotlin Multiplatform 模块：数据结构、备份格式、日期归属、倒数计算、统计和番茄周期规则 |
+| `ui/` | Android Compose 的主题与水墨组件 |
+| `Scripts/`、`Tools/` | 构建、发布和截图对照脚本，图标生成工具 |
+| `docs/` | 架构、构建说明、各版本更新说明与验证记录 |
 
-项目使用 Kotlin Multiplatform、Jetpack Compose、Room、WorkManager、SwiftUI、WidgetKit、ActivityKit、EventKit 和 UserNotifications。印章字形采用 [敬峰中山王篆](https://github.com/jeffi369/JFZSKSealScript)，依照 SIL Open Font License 1.1 使用，完整授权文件已随工程提供。Moji 自身的代码以 [MIT 许可证](LICENSE) 开源，字体文件不在 MIT 范围内，仍按 OFL 1.1 授权。产品与架构参考包括 Jerreader 的双端维护方法、[Kadō](https://github.com/scastiel/kado)、[Teymia Habit](https://github.com/amangeldybaiserkeev/TeymiaHabit) 和平台官方文档；本工程不包含参考项目的源代码。
+两端版本号保持一致，以 `version.properties` 为准；变更版本时同步更新 Xcode 工程的构建设置。
+
+## 版本记录
+
+- **1.7.0（45）**：以 iOS 为准重新对照双端截图，把 Android 的图标、颜色、字号和间距改得与 iOS 一致；iOS 只升版本号。[更新说明](docs/RELEASE_NOTES_1.7.0.md) · [验证记录](docs/VERIFICATION_1.7.0.md)
+- **1.6.2（44）**：只改 iOS 安装包与 App Group 的衔接，让 SideStore 直接安装时桌面小组件能读到 App 的数据。[更新说明](docs/RELEASE_NOTES_1.6.2.md)
+- **1.6.1（43）**：修正 Android 计划勾选的两处逻辑。[更新说明](docs/RELEASE_NOTES_1.6.1.md)
+- **1.6.0（42）**：简化计划、备忘、时刻和回顾的编辑流程，增加字段直接编辑与未保存保护，收拢低频设置，并重新对照双端深层界面。[更新说明](docs/RELEASE_NOTES_1.6.0.md) · [验证与交付记录](docs/VERIFICATION_1.6.0.md)
+- **1.5.1（41）**：双端深层界面修正。[更新说明](docs/RELEASE_NOTES_1.5.1.md)
+- **1.5.0（40）**：计划库、模板、批量整理、备忘转计划、周目标与复盘。[更新说明](docs/RELEASE_NOTES_1.5.0.md)
+- **1.4.1（39）**：2026-10-05 的一轮数据安全、备份体验与主线程性能维护，只生成了未签名 IPA。[更新说明](docs/RELEASE_NOTES_1.4.1.md) · [开发总结与维护方案](docs/DEVELOPMENT_REVIEW_2026-10-05.md)
+- **1.4.0（38）**：首个 iOS / Android 双端版本。新增完整 Android 客户端（计划、月周日历、备忘、倒数与纪念、番茄钟、回顾和设置），支持 Room 本地存储、系统日历、计划提醒、锁屏番茄通知、自动备份和三类桌面组件。[更新说明](docs/RELEASE_NOTES_1.4.0.md)
+
+安装包见 [Releases](https://github.com/WZR0821/Moji/releases)。
+
+## 已知限制
+
+- iOS 只提供未签名 IPA，需要自行重新签名后安装。
+- 1.7.0 没有在 iPhone 或 Android 真机上安装，也没有从 1.6.x 覆盖升级的实测。
+- 锁屏实时活动、灵动岛和 Apple Watch 智能叠放需要 iOS 18。
+- 两端系统字体不同（iOS 苹方，Android 思源黑体），长段文字偶尔会在不同的字处换行。
+- iOS 的业务规则仍是 Swift 实现，还没有接入 Kotlin Multiplatform 核心。
+
+## 许可与致谢
+
+Moji 自身的代码以 [MIT 许可证](LICENSE) 开源。印章字形采用 [敬峰中山王篆](https://github.com/jeffi369/JFZSKSealScript)，依照 SIL Open Font License 1.1 使用，完整授权文件已随工程提供；字体文件不在 MIT 范围内，仍按 OFL 1.1 授权。
+
+产品与架构参考包括 Jerreader 的双端维护方法、[Kadō](https://github.com/scastiel/kado)、[Teymia Habit](https://github.com/amangeldybaiserkeev/TeymiaHabit) 和平台官方文档；本工程不包含参考项目的源代码。
