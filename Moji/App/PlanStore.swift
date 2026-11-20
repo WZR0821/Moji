@@ -307,6 +307,9 @@ final class PlanStore: ObservableObject {
     @Published private(set) var snapshot: PlanSnapshot
     @Published private(set) var workflowUndo: PlanWorkflowUndo?
     @Published var workflowNotice: String?
+    /// The last accepted draft, kept until its notice goes away.
+    @Published private(set) var draftUndo: PlanDraftUndo?
+    @Published private(set) var draftNotice: String?
     private var planNotificationSyncTask: Task<Void, Never>?
 
     init(snapshot: PlanSnapshot? = nil) {
@@ -403,6 +406,46 @@ final class PlanStore: ObservableObject {
         mutateWorkflow { count = undo.apply(to: &$0, blockedID: blocked) }
         workflowUndo = nil
         workflowNotice = "已撤销 \(count) 个计划的整理；后续已修改的计划保持不变"
+    }
+
+    /// Writes accepted drafts in one step and remembers how to take them back.
+    /// `changing` replaces plans that already exist; `adding` appends new ones.
+    func commitDrafts(adding added: [CheckInItem] = [], changing changed: [CheckInItem] = [], notice: String) {
+        var before: [CheckInItem] = []
+        var after: [CheckInItem] = []
+        var inserted: [CheckInItem] = []
+        mutateWorkflow { state in
+            for item in changed {
+                guard let index = state.checkInItems.firstIndex(where: { $0.id == item.id }),
+                      state.checkInItems[index] != item,
+                      state.activeSession?.checkInItemID != item.id else { continue }
+                before.append(state.checkInItems[index]); after.append(item)
+                state.checkInItems[index] = item
+            }
+            for item in added where !state.checkInItems.contains(where: { $0.id == item.id }) {
+                state.checkInItems.append(item); inserted.append(item)
+            }
+        }
+        guard !inserted.isEmpty || !before.isEmpty else { return }
+        draftUndo = PlanDraftUndo(added: inserted, changed: PlanWorkflowUndo(before: before, after: after))
+        draftNotice = notice
+    }
+
+    func undoDrafts() {
+        guard let undo = draftUndo else { return }
+        var count = 0
+        let blocked = isPomodoroFocusActive ? UUID(uuidString: SharedPersistence.sharedDefaults.string(forKey: PomodoroStorageKeys.linkedPlanID) ?? "") : nil
+        mutateWorkflow { count = undo.apply(to: &$0, blockedID: blocked) }
+        draftUndo = nil
+        let total = undo.added.count + undo.changed.before.count
+        if count == total { draftNotice = "已撤销" }
+        else if count > 0 { draftNotice = "已撤销 \(count) 条；之后改过的保持不变" }
+        else { draftNotice = "这些计划之后都改过，保持不变" }
+    }
+
+    func clearDraftNotice() {
+        draftNotice = nil
+        draftUndo = nil
     }
 
     func saveWeeklyGoal(_ goal: WeeklyGoal) {

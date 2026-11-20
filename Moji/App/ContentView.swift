@@ -84,6 +84,9 @@ struct ContentView: View {
             selectedTab = .checklist
             store.reload()
         }
+        .overlay(alignment: .bottom) {
+            DraftUndoToast(store: store)
+        }
         .task {
 #if DEBUG
             runCompletionRevertScenarioIfNeeded()

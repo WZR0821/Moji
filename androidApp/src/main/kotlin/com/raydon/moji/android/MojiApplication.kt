@@ -21,6 +21,7 @@ class MojiApplication : Application() {
         super.onCreate()
         repository = MojiRepository(MojiDatabase.get(this))
         settings = AndroidSettings(this)
+        com.raydon.moji.android.ai.AISettingsStore.install(this)
         NotificationChannels.create(this)
         BackupScheduler.schedule(this)
         CoroutineScope(SupervisorJob() + Dispatchers.IO).launch { repository.ensureInitialized() }

@@ -95,6 +95,10 @@ struct CountdownsView: View {
     @State private var editorContext: CountdownEditorContext = .countdown
     @State private var isReordering = false
     @Namespace private var modeIndicator
+    @ObservedObject private var ai = AISettingsStore.shared
+    /// A day that was just added and is far enough off to prepare for.
+    @State private var preparationOffer: CountdownEvent?
+    @State private var preparing: CountdownEvent?
 
     @AppStorage(PlanSettingsKeys.countdownSortMode, store: SharedPersistence.sharedDefaults)
     private var countdownSortModeRaw = CountdownSortMode.manual.rawValue
@@ -108,6 +112,21 @@ struct CountdownsView: View {
 
                 VStack(spacing: 0) {
                     modeCards
+
+                    if mode == .countdown, let offer = preparationOffer {
+                        PreparationOfferStrip(
+                            title: offer.title,
+                            daysLeft: daysUntil(offer),
+                            accept: {
+                                preparing = offer
+                                preparationOffer = nil
+                            },
+                            dismiss: { withAnimation(.easeOut(duration: 0.2)) { preparationOffer = nil } }
+                        )
+                        .padding(.horizontal, PlanLayout.pageHorizontalPadding)
+                        .padding(.bottom, 8)
+                        .transition(.opacity)
+                    }
 
                     Group {
                         if let scope = mode.scope {
@@ -155,10 +174,15 @@ struct CountdownsView: View {
                 }
             }
             .sheet(isPresented: $isPresentingEditor) {
-                CountdownEditorView(store: store, context: editorContext)
+                CountdownEditorView(store: store, context: editorContext, onCreated: { offerPreparation(for: $0) })
             }
             .sheet(item: $editingEvent) { event in
                 CountdownEditorView(store: store, event: event)
+            }
+            .sheet(item: $preparing) { event in
+                PlanDraftSheet(store: store, title: "准备计划", subject: "为“\(event.title)”做准备，还有 \(daysUntil(event)) 天",
+                               waitingText: "正在拟准备计划", planNote: "为“\(event.title)”做准备",
+                               load: { try await AIAssistant.shared.draftPreparation(for: event) })
             }
             .onChange(of: mode) { _, _ in
                 isReordering = false
@@ -167,6 +191,13 @@ struct CountdownsView: View {
             .onAppear {
                 if ["workflow-moment-editor", "workflow-moment-advanced"].contains(ProcessInfo.processInfo.environment["MOJI_QA_SCENARIO"] ?? "") {
                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { editingEvent = store.countdowns.first }
+                }
+                let aiScenario = ProcessInfo.processInfo.environment["MOJI_QA_SCENARIO"] ?? ""
+                if aiScenario.hasPrefix("ai-preparation"), preparationOffer == nil, preparing == nil,
+                   let upcoming = store.countdowns.filter({ daysUntil($0) >= 2 }).min(by: { daysUntil($0) < daysUntil($1) }) {
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+                        if aiScenario == "ai-preparation-drafts" { preparing = upcoming } else { preparationOffer = upcoming }
+                    }
                 }
             }
 #endif
@@ -198,6 +229,23 @@ struct CountdownsView: View {
         // order nothing ever reads, so reordering closes with the switch.
         if newMode == .date {
             isReordering = false
+        }
+    }
+
+    private func daysUntil(_ event: CountdownEvent) -> Int {
+        let calendar = Calendar.current
+        let today = calendar.startOfDay(for: Date())
+        let target = calendar.startOfDay(for: event.occurrenceDate())
+        return calendar.dateComponents([.day], from: today, to: target).day ?? 0
+    }
+
+    /// Offered once, right after the day is added, and only when there is time
+    /// to prepare. Nothing is drafted until the strip is tapped.
+    private func offerPreparation(for event: CountdownEvent) {
+        guard ai.isReady, daysUntil(event) >= 2 else { return }
+        // The editor sheet is still on its way out.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.45) {
+            withAnimation(.easeOut(duration: 0.24)) { preparationOffer = event }
         }
     }
 

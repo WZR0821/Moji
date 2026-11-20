@@ -318,6 +318,17 @@ struct MemosView: View {
 
 #if DEBUG
     private func runQAScenarioIfNeeded() {
+        if !didRunQAScenario, let route = ProcessInfo.processInfo.environment["MOJI_QA_SCENARIO"], route.hasPrefix("ai-memo-") {
+            didRunQAScenario = true
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+                if route == "ai-memo-convert" {
+                    convertingMemo = store.memos.first(where: { $0.mode == .checklist })
+                } else {
+                    editorRoute = MemoEditorRoute(memo: store.memos.first(where: { $0.mode == .note && !$0.content.isEmpty }))
+                }
+            }
+            return
+        }
         if !didRunQAScenario, let route = ProcessInfo.processInfo.environment["MOJI_QA_SCENARIO"], route.hasPrefix("workflow-") {
             didRunQAScenario = true
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
@@ -399,6 +410,11 @@ private struct MemoEditorView: View {
     @State private var confirmsDiscard = false
     @State private var focusedChecklistItemID: UUID?
     @State private var checklistCaretRequest: ChecklistCaretRequest?
+    @ObservedObject private var ai = AISettingsStore.shared
+    @State private var showsChecklistDraft = false
+    /// The text a drafted checklist replaced, kept until the memo is saved or
+    /// the mode is switched by hand.
+    @State private var textBeforeChecklistDraft: String?
 
     init(store: PlanStore, memo: MemoItem? = nil) {
         self.store = store
@@ -464,6 +480,28 @@ private struct MemoEditorView: View {
                     .padding(.horizontal, 14)
                     .frame(height: 58)
 
+                    if mode == .checklist, textBeforeChecklistDraft != nil {
+                        HStack(spacing: 7) {
+                            DraftSeal(size: 18, seed: 5)
+                            Text("这份清单是从正文整理的，保存前可以还原。")
+                                .font(.footnote)
+                                .foregroundStyle(Color.planSecondary)
+                                .lineLimit(2)
+                            Spacer(minLength: 4)
+                            Button("还原正文") { restoreTextBeforeChecklistDraft() }
+                                .font(.footnote.weight(.semibold))
+                                .foregroundStyle(Color.planPrimary)
+                                .buttonStyle(.plain)
+                                .frame(minHeight: 32)
+                                .accessibilityIdentifier("memo.editor.restoreText")
+                        }
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 4)
+                        .inkDraftSurface(cornerRadius: 12)
+                        .padding(.horizontal, 12)
+                        .padding(.bottom, 6)
+                    }
+
                     Group {
                         if mode == .checklist {
                             checklistEditor
@@ -494,6 +532,13 @@ private struct MemoEditorView: View {
                                 isPinned ? "取消置顶" : "置顶",
                                 systemImage: isPinned ? "pin.slash" : "pin"
                             )
+                        }
+                        if ai.isReady, mode == .note, !cleanContent.isEmpty {
+                            Button {
+                                IMETextInput.commit { showsChecklistDraft = true }
+                            } label: {
+                                Label("整理成清单", systemImage: "list.bullet.indent")
+                            }
                         }
                         if memo != nil {
                             Button(role: .destructive) {
@@ -551,7 +596,28 @@ private struct MemoEditorView: View {
                 }
             }
             .confirmDiscardEdits(isDirty: hasEdits, isPresented: $confirmsDiscard)
+            .sheet(isPresented: $showsChecklistDraft) {
+                let memoTitle = cleanTitle
+                let text = content
+                ChecklistDraftSheet(
+                    subject: memoTitle.isEmpty ? "从正文里整理出要做的事" : "从“\(memoTitle)”的正文里整理出要做的事",
+                    load: { try await AIAssistant.shared.checklist(title: memoTitle, content: text) },
+                    accept: { items in useChecklistDraft(items) }
+                )
+            }
             .onAppear {
+#if DEBUG
+                let qaScenario = ProcessInfo.processInfo.environment["MOJI_QA_SCENARIO"] ?? ""
+                if qaScenario.hasPrefix("ai-memo-checklist"), mode == .note, textBeforeChecklistDraft == nil {
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
+                        if qaScenario == "ai-memo-checklist-applied" {
+                            useChecklistDraft(["打印准考证", "确认考场路线和到达时间", "准备黑色签字笔两支", "复习损害保险的三个判例"])
+                        } else {
+                            showsChecklistDraft = true
+                        }
+                    }
+                }
+#endif
                 if mode == .checklist, checklistItems.isEmpty {
                     checklistItems = [MemoChecklistItem()]
                 }
@@ -654,7 +720,26 @@ private struct MemoEditorView: View {
         .accessibilityIdentifier("memo.editor.checklist")
     }
 
+    private func useChecklistDraft(_ items: [String]) {
+        guard !items.isEmpty else { return }
+        textBeforeChecklistDraft = content
+        checklistItems = items.map { MemoChecklistItem(text: $0) }
+        content = ""
+        mode = .checklist
+        isTitleFocused = false
+    }
+
+    private func restoreTextBeforeChecklistDraft() {
+        guard let text = textBeforeChecklistDraft else { return }
+        focusedChecklistItemID = nil
+        checklistItems = []
+        content = text
+        mode = .note
+        textBeforeChecklistDraft = nil
+    }
+
     private func switchMemoMode() {
+        textBeforeChecklistDraft = nil
         if mode == .note {
             let parsedItems = content.components(separatedBy: .newlines)
                 .compactMap(parsedChecklistItem(from:))

@@ -306,7 +306,10 @@ enum SharedPersistence {
         "before-restore.mojibackup"
     ]
     private static var didCheckAppGroupMigration = false
-    private static let lock = NSLock()
+    private static let lock = NSRecursiveLock()
+    /// How deep the thread holding `lock` is in `withPersistenceLock`.
+    /// Only touched while holding `lock`.
+    private static var lockDepth = 0
     private static let fileManager = FileManager.default
 
     private static let sharedPreferenceKeys = [
@@ -548,28 +551,34 @@ enum SharedPersistence {
         var current = snapshot
         current.schemaVersion = PlanSnapshot.currentSchemaVersion
         guard let data = try? encoder.encode(current) else { return }
+
+        if let primaryURL = primarySnapshotURL {
+            do {
+                try fileManager.createDirectory(
+                    at: primaryURL.deletingLastPathComponent(),
+                    withIntermediateDirectories: true
+                )
+                if
+                    fileManager.fileExists(atPath: primaryURL.path),
+                    let existingData = try? Data(contentsOf: primaryURL),
+                    (try? decoder.decode(PlanSnapshot.self, from: existingData)) != nil,
+                    let backupURL = fallbackSnapshotURL
+                {
+                    try? fileManager.removeItem(at: backupURL)
+                    try? fileManager.copyItem(at: primaryURL, to: backupURL)
+                }
+                try data.write(to: primaryURL, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
+            } catch {
+                // UserDefaults remains the authoritative copy if file protection is unavailable.
+            }
+        }
+
+        // Written last: setting the value posts UserDefaults.didChangeNotification
+        // on this thread, and whatever runs inside it (see `withPersistenceLock`)
+        // should find the save already complete, not a new file about to be
+        // overwritten by this one.
         sharedDefaults.set(data, forKey: snapshotKey)
         sharedDefaults.synchronize()
-
-        guard let primaryURL = primarySnapshotURL else { return }
-        do {
-            try fileManager.createDirectory(
-                at: primaryURL.deletingLastPathComponent(),
-                withIntermediateDirectories: true
-            )
-            if
-                fileManager.fileExists(atPath: primaryURL.path),
-                let existingData = try? Data(contentsOf: primaryURL),
-                (try? decoder.decode(PlanSnapshot.self, from: existingData)) != nil,
-                let backupURL = fallbackSnapshotURL
-            {
-                try? fileManager.removeItem(at: backupURL)
-                try? fileManager.copyItem(at: primaryURL, to: backupURL)
-            }
-            try data.write(to: primaryURL, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
-        } catch {
-            // UserDefaults remains the authoritative copy if file protection is unavailable.
-        }
     }
 
     private static func migrateLegacyPreferencesUnlocked() {
@@ -681,13 +690,31 @@ enum SharedPersistence {
         key == snapshotKey || key.hasPrefix(snapshotKey + ".")
     }
 
-    /// `NSLock` only protects threads inside one process. Widget App Intents run
+    /// `lock` only protects threads inside one process. Widget App Intents run
     /// in another process, so every read-modify-write also takes an advisory
     /// lock in the shared App Group container.
+    ///
+    /// A call made on a thread that is already inside runs as part of the outer
+    /// one. That happens on the main thread: a save posts
+    /// UserDefaults.didChangeNotification synchronously, SwiftUI's `@AppStorage`
+    /// observer then runs view actions that were still pending, such as the
+    /// scene-phase change that calls `PlanStore.reload()`, and those read the
+    /// snapshot again. Waiting for the locks there would wait for this very
+    /// thread, and the app would stop on its first frame (seen in 1.7.0 when a
+    /// plan was saved during launch).
     private static func withPersistenceLock<T>(
         _ operation: () throws -> T
     ) rethrows -> T {
         lock.lock()
+        lockDepth += 1
+        defer {
+            lockDepth -= 1
+            lock.unlock()
+        }
+        guard lockDepth == 1 else { return try operation() }
+
+        // A second descriptor in the same process would block on its own flock,
+        // so only the outermost call takes the file lock.
         let descriptor = crossProcessLockDescriptor()
         if descriptor >= 0 {
             flock(descriptor, LOCK_EX)
@@ -697,7 +724,6 @@ enum SharedPersistence {
                 flock(descriptor, LOCK_UN)
                 Darwin.close(descriptor)
             }
-            lock.unlock()
         }
         return try operation()
     }

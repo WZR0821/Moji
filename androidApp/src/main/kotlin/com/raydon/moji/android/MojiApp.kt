@@ -133,6 +133,8 @@ fun MojiApp(
                 else -> ReviewScreen(viewModel, onExportBackup, onImportBackup, onChooseBackupFolder, onRestoreBackupFolder, onRequestPermissions)
             }
             if (backupBusy) LinearProgressIndicator(Modifier.fillMaxWidth().align(Alignment.TopCenter))
+            // iOS sits the toast 58pt above the safe-area bottom, which is 9pt above its tab bar.
+            DraftUndoToast(viewModel, bottomPadding = 9.dp)
         }
     }
     }

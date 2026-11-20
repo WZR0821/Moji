@@ -87,6 +87,8 @@ enum class MojiIcon {
     // SF Symbol look-alikes, drawn on a 28-unit box (1 unit = 1pt at 28.dp).
     TabChecklist, TabNote, TabTimer, TabChart, CalendarFill, GridSF, ChevronLeft, Disclosure,
     Pencil, RepeatLoop, BellPlain, TimerSF, Folder, FolderPlus, ShareUp, FolderGear, ShareDown, CalendarPlus, ArrowUpRight,
+    Cpu, CheckCircleFill, Circle, Xmark, Photo, Clipboard,
+    BookSF, ArrowSquare, DocMagnify, FilterLines, TextViewfinder,
 }
 
 @Composable
@@ -567,6 +569,53 @@ private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawSfGlyph(kind: M
             line(3.5f, 9.8f, 23.5f, 9.8f, 1.5f); line(21.5f, 16.5f, 21.5f, 25f, 1.6f); line(17.25f, 20.75f, 25.75f, 20.75f, 1.6f)
         }
         MojiIcon.ArrowUpRight -> { line(9.5f, 18.5f, 18.3f, 9.7f, 1.8f); poly(1.8f, 11.2f, 9.7f, 18.3f, 9.7f, 18.3f, 16.8f) }
+        // "cpu": a chip outline with three pins on every side and a square die inside.
+        MojiIcon.Cpu -> {
+            outline(7.4f, 7.4f, 20.6f, 20.6f, 1.6f, 1.55f)
+            outline(10.9f, 10.9f, 17.1f, 17.1f, 0.9f, 1.45f)
+            listOf(11.2f, 14f, 16.8f).forEach { p ->
+                line(p, 5.2f, p, 7.4f, 1.45f); line(p, 20.6f, p, 22.8f, 1.45f)
+                line(5.2f, p, 7.4f, p, 1.45f); line(20.6f, p, 22.8f, p, 1.45f)
+            }
+        }
+        // "checkmark.circle.fill" / "circle" for draft rows.
+        MojiIcon.CheckCircleFill -> { drawCircle(color, 11.5f * u, o(14f, 14f)); poly(2.2f, 9f, 14.3f, 12.6f, 17.8f, 19.2f, 10.4f, c = cutout) }
+        MojiIcon.Circle -> drawCircle(color, 10.9f * u, o(14f, 14f), style = stroke(1.6f))
+        MojiIcon.Xmark -> { line(8.5f, 8.5f, 19.5f, 19.5f, 2.2f); line(19.5f, 8.5f, 8.5f, 19.5f, 2.2f) }
+        // "photo": a framed picture with a sun and two hills.
+        MojiIcon.Photo -> {
+            outline(3.5f, 5.5f, 24.5f, 22.5f, 2.6f, 1.6f)
+            drawCircle(color, 1.9f * u, o(10f, 11f))
+            poly(1.6f, 4.2f, 20.5f, 11f, 14.4f, 15.5f, 18.4f, 18.6f, 15.6f, 23.8f, 20.2f)
+        }
+        // "doc.on.clipboard": a clipboard with a clip.
+        MojiIcon.Clipboard -> {
+            outline(6f, 5f, 22f, 24.5f, 2.4f, 1.6f)
+            drawRoundRect(color, o(10.5f, 3.2f), androidx.compose.ui.geometry.Size(7f * u, 3.8f * u), androidx.compose.ui.geometry.CornerRadius(1.2f * u))
+            line(10f, 12f, 18f, 12f, 1.4f); line(10f, 15.5f, 18f, 15.5f, 1.4f); line(10f, 19f, 15f, 19f, 1.4f)
+        }
+        // "book": an open book, two pages bowed toward the spine.
+        MojiIcon.BookSF -> {
+            val p = Path()
+            p.moveTo(14f * u, 8f * u); p.quadraticTo(9.5f * u, 5.4f * u, 3.6f * u, 6.2f * u); p.lineTo(3.6f * u, 21.4f * u); p.quadraticTo(9.5f * u, 20.6f * u, 14f * u, 23f * u)
+            p.quadraticTo(18.5f * u, 20.6f * u, 24.4f * u, 21.4f * u); p.lineTo(24.4f * u, 6.2f * u); p.quadraticTo(18.5f * u, 5.4f * u, 14f * u, 8f * u)
+            drawPath(p, color, style = stroke(1.5f)); line(14f, 8f, 14f, 23f, 1.5f)
+        }
+        // "arrow.up.right.square".
+        MojiIcon.ArrowSquare -> { outline(4f, 4f, 24f, 24f, 4.6f, 1.6f); line(10.6f, 17.4f, 17.4f, 10.6f, 1.6f); poly(1.6f, 11.8f, 10.6f, 17.4f, 10.6f, 17.4f, 16.2f) }
+        // "doc.text.magnifyingglass": a page with two lines and a lens over its corner.
+        MojiIcon.DocMagnify -> {
+            outline(5f, 3.5f, 19.5f, 24.5f, 2.6f, 1.5f); line(8.6f, 8.8f, 15.8f, 8.8f, 1.4f); line(8.6f, 12.4f, 12.8f, 12.4f, 1.4f)
+            drawCircle(cutout, 6.2f * u, o(18.6f, 18.4f)); drawCircle(color, 4.1f * u, o(18.6f, 18.4f), style = stroke(1.6f)); line(21.6f, 21.4f, 24.6f, 24.4f, 1.8f)
+        }
+        // "line.3.horizontal.decrease".
+        MojiIcon.FilterLines -> { line(4f, 8.5f, 24f, 8.5f, 1.7f); line(7.6f, 14f, 20.4f, 14f, 1.7f); line(11.2f, 19.5f, 16.8f, 19.5f, 1.7f) }
+        // "text.viewfinder": four corner marks around three lines of text.
+        MojiIcon.TextViewfinder -> {
+            poly(1.6f, 4f, 9.5f, 4f, 6.5f, 4.5f, 4.5f, 6.5f, 4f, 9.5f, 4f); poly(1.6f, 18.5f, 4f, 21.5f, 4f, 23.5f, 4.5f, 24f, 6.5f, 24f, 9.5f)
+            poly(1.6f, 4f, 18.5f, 4f, 21.5f, 4.5f, 23.5f, 6.5f, 24f, 9.5f, 24f); poly(1.6f, 18.5f, 24f, 21.5f, 24f, 23.5f, 23.5f, 24f, 21.5f, 24f, 18.5f)
+            line(9f, 10.5f, 19f, 10.5f, 1.5f); line(9f, 14f, 19f, 14f, 1.5f); line(9f, 17.5f, 15f, 17.5f, 1.5f)
+        }
         else -> Unit
     }
 }

@@ -33,6 +33,8 @@ struct CountdownEditorView: View {
     @ObservedObject var store: PlanStore
     let event: CountdownEvent?
     let context: CountdownEditorContext
+    /// Called once a day that did not exist before has been saved.
+    let onCreated: ((CountdownEvent) -> Void)?
 
     @Environment(\.dismiss) private var dismiss
     @State private var isTitleFocused = false
@@ -53,11 +55,13 @@ struct CountdownEditorView: View {
     init(
         store: PlanStore,
         event: CountdownEvent? = nil,
-        context: CountdownEditorContext = .countdown
+        context: CountdownEditorContext = .countdown,
+        onCreated: ((CountdownEvent) -> Void)? = nil
     ) {
         self.store = store
         self.event = event
         self.context = context
+        self.onCreated = onCreated
 
         _title = State(initialValue: event?.title ?? "")
         _targetDate = State(initialValue: event?.targetDate ?? context.defaultDate)
@@ -204,6 +208,7 @@ struct CountdownEditorView: View {
         }
 
         store.saveCountdown(updated)
+        if event == nil { onCreated?(updated) }
         dismiss()
     }
 }

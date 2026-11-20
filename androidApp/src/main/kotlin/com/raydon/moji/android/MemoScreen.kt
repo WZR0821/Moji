@@ -54,7 +54,8 @@ fun MemoScreen(viewModel: MojiViewModel) {
         when (qaRoute) {
             "memo-note" -> { editing = snapshot.memos.firstOrNull { it.mode == "note" }; showEditor = true }
             "memo-checklist" -> { editing = snapshot.memos.firstOrNull { it.mode == "checklist" }; showEditor = true }
-            "memo-convert" -> converting = snapshot.memos.firstOrNull { it.mode == "checklist" }
+            "memo-convert", "ai-memo-convert" -> converting = snapshot.memos.firstOrNull { it.mode == "checklist" }
+            "ai-memo-checklist", "ai-memo-checklist-applied" -> { editing = snapshot.memos.firstOrNull { it.mode == "note" && it.content.isNotEmpty() }; showEditor = true }
         }
     } }
     val memos = snapshot.memos.filter { memo ->
@@ -164,6 +165,33 @@ fun MemoEditorDialog(existing: MemoItem?, viewModel: MojiViewModel, onDismiss: (
     var checklistMenu by remember { mutableStateOf(false) }
     var focusedId by remember { mutableStateOf<String?>(null) }
     var requestedId by remember { mutableStateOf<String?>(null) }
+    val aiReady = rememberAIReady()
+    var showsChecklistDraft by remember { mutableStateOf(false) }
+    // The text a drafted checklist replaced, kept until the memo is saved or the mode is switched by hand.
+    var textBeforeChecklistDraft by remember(existing?.id) { mutableStateOf<String?>(null) }
+    fun useChecklistDraft(items: List<String>) {
+        if (items.isEmpty()) return
+        textBeforeChecklistDraft = content
+        entries = items.map { MemoChecklistItem(UUID.randomUUID().toString(), it) }
+        content = ""
+        checklist = true
+    }
+    fun restoreTextBeforeChecklistDraft() {
+        val text = textBeforeChecklistDraft ?: return
+        focusedId = null
+        entries = listOf(MemoChecklistItem(UUID.randomUUID().toString()))
+        content = text
+        checklist = false
+        textBeforeChecklistDraft = null
+    }
+    LaunchedEffect(Unit) {
+        val route = viewModel.visualQaRoute.value
+        if (BuildConfig.DEBUG && route.startsWith("ai-memo-checklist") && !checklist && textBeforeChecklistDraft == null) {
+            kotlinx.coroutines.delay(400)
+            if (route == "ai-memo-checklist-applied") useChecklistDraft(listOf("打印准考证", "确认考场路线和到达时间", "准备黑色签字笔两支", "复习损害保险的三个判例"))
+            else showsChecklistDraft = true
+        }
+    }
     val canSave = title.isNotBlank() || if (checklist) entries.any { it.text.isNotBlank() } else content.isNotBlank()
     val editState = listOf(title, content, checklist, pinned, entries.filter { it.text.isNotBlank() })
     val initialEditState = remember(existing?.id) { editState }
@@ -183,6 +211,7 @@ fun MemoEditorDialog(existing: MemoItem?, viewModel: MojiViewModel, onDismiss: (
                             }
                             DropdownMenu(menu, { menu = false }) {
                                 DropdownMenuItem({ Text(if (pinned) "取消置顶" else "置顶") }, { pinned = !pinned; menu = false })
+                                if (aiReady && !checklist && content.trim().isNotEmpty()) DropdownMenuItem({ Text("整理成清单") }, { menu = false; showsChecklistDraft = true })
                                 if (existing != null) DropdownMenuItem({ Text("删除备忘") }, { menu = false; deleteConfirm = true })
                             }
                         }
@@ -203,6 +232,13 @@ fun MemoEditorDialog(existing: MemoItem?, viewModel: MojiViewModel, onDismiss: (
                                 textStyle = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Normal, color = labelInk),
                                 decorationBox = { inner -> if (title.isEmpty()) Text("标题", fontSize = 22.sp, color = iosTertiaryLabel); inner() })
                             if (pinned) InkSeal("藏", 23)
+                        }
+                        if (checklist && textBeforeChecklistDraft != null) Row(Modifier.padding(start = 12.dp, end = 12.dp, bottom = 6.dp).fillMaxWidth()
+                            .inkDraftSurface(12.dp).padding(horizontal = 10.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(7.dp)) {
+                            DraftSeal(18)
+                            Text("这份清单是从正文整理的，保存前可以还原。", fontSize = 13.sp, lineHeight = 18.sp, color = MaterialTheme.colorScheme.secondary, maxLines = 2, modifier = Modifier.weight(1f))
+                            Text("还原正文", fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.heightIn(min = 32.dp).wrapContentHeight().clickable { restoreTextBeforeChecklistDraft() })
                         }
                         if (checklist) LazyColumn(Modifier.fillMaxSize().padding(horizontal = 8.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                             items(entries, key = { it.id }) { entry ->
@@ -233,8 +269,15 @@ fun MemoEditorDialog(existing: MemoItem?, viewModel: MojiViewModel, onDismiss: (
                     }
                     }
                 }
-                Row(Modifier.fillMaxWidth().height(49.dp).padding(horizontal = 18.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp, if (checklist) Alignment.Start else Alignment.CenterHorizontally)) {
+                // The iOS bottom bar: two items sit at the two edges; with the ⋯ menu as a third they line up from the left.
+                val toolbarArrangement = when {
+                    !checklist -> Arrangement.spacedBy(16.dp, Alignment.CenterHorizontally)
+                    entries.none { it.isCompleted } -> Arrangement.SpaceBetween
+                    else -> Arrangement.spacedBy(16.dp, Alignment.Start)
+                }
+                Row(Modifier.fillMaxWidth().height(49.dp).padding(horizontal = 18.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = toolbarArrangement) {
                     Row(Modifier.heightIn(min = 44.dp).semantics { contentDescription = if (checklist) "转为正文" else "转为清单" }.clickable {
+                        textBeforeChecklistDraft = null
                         if (checklist) content = entries.filter { it.text.isNotBlank() }.joinToString("\n") { "${if (it.isCompleted) "✓" else "•"} ${it.text.trim()}" }
                         else {
                             entries = content.lines().map { it.trim() }.filter { it.isNotBlank() }.map { line ->
@@ -264,6 +307,13 @@ fun MemoEditorDialog(existing: MemoItem?, viewModel: MojiViewModel, onDismiss: (
                     }
                 }
             }
+        }
+        if (showsChecklistDraft) {
+            val memoTitle = title.trim()
+            val text = content
+            ChecklistDraftSheet(if (memoTitle.isEmpty()) "从正文里整理出要做的事" else "从“$memoTitle”的正文里整理出要做的事",
+                load = { com.raydon.moji.android.ai.AIAssistant.shared.checklist(memoTitle, text) },
+                accept = { useChecklistDraft(it) }, onDismiss = { showsChecklistDraft = false })
         }
         if (deleteConfirm) AlertDialog(onDismissRequest = { deleteConfirm = false }, title = { Text("删除备忘？") },
             confirmButton = { TextButton(onClick = { existing?.let { viewModel.deleteMemo(it.id) }; onDismiss() }) { Text("删除") } },

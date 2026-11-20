@@ -79,8 +79,8 @@ fun Modifier.overlayHairline(): Modifier = layout { measurable, constraints ->
 
 /** The trailing chevron of an iOS NavigationLink row (tertiary label, semibold). */
 @Composable
-fun FormChevron(modifier: Modifier = Modifier) {
-    val color = iosTertiaryLabel
+fun FormChevron(modifier: Modifier = Modifier, tint: androidx.compose.ui.graphics.Color? = null) {
+    val color = tint ?: iosTertiaryLabel
     androidx.compose.foundation.Canvas(modifier.size(8.dp, 13.dp)) {
         val d = density
         val path = androidx.compose.ui.graphics.Path().apply { moveTo(1.2f * d, 1.2f * d); lineTo(6.6f * d, 6.5f * d); lineTo(1.2f * d, 11.8f * d) }
@@ -198,12 +198,18 @@ fun FormToggle(
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Text(title, modifier = Modifier.weight(1f), fontSize = 17.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = if (enabled) 1f else 0.38f))
-        Box(Modifier.size(51.dp, 31.dp).background(if (checked) MaterialTheme.colorScheme.primary else if (MaterialTheme.colorScheme.background.luminance() < 0.5f) Color(0xFF39393D) else Color(0xFFE9E9EB), CircleShape)
-            .alpha(if (enabled) 1f else 0.4f)
-            .toggleable(checked, enabled = enabled, role = androidx.compose.ui.semantics.Role.Switch, onValueChange = onCheckedChange)
-            .padding(2.dp), contentAlignment = if (checked) Alignment.CenterEnd else Alignment.CenterStart) {
-            Box(Modifier.size(27.dp).background(Color.White, CircleShape))
-        }
+        FormSwitch(checked, onCheckedChange, enabled)
+    }
+}
+
+/** The iOS switch on its own, for rows that are not a plain FormToggle. */
+@Composable
+fun FormSwitch(checked: Boolean, onCheckedChange: (Boolean) -> Unit, enabled: Boolean = true) {
+    Box(Modifier.size(51.dp, 31.dp).background(if (checked) MaterialTheme.colorScheme.primary else if (MaterialTheme.colorScheme.background.luminance() < 0.5f) Color(0xFF39393D) else Color(0xFFE9E9EB), CircleShape)
+        .alpha(if (enabled) 1f else 0.4f)
+        .toggleable(checked, enabled = enabled, role = androidx.compose.ui.semantics.Role.Switch, onValueChange = onCheckedChange)
+        .padding(2.dp), contentAlignment = if (checked) Alignment.CenterEnd else Alignment.CenterStart) {
+        Box(Modifier.size(27.dp).background(Color.White, CircleShape))
     }
 }
 

@@ -21,6 +21,9 @@ import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
+import kotlinx.coroutines.launch
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -49,6 +52,13 @@ fun PlanScreen(viewModel: MojiViewModel) {
     var expandedId by remember { mutableStateOf<String?>(null) }
     var showsCompleted by remember { mutableStateOf(false) }
     var addMenu by remember { mutableStateOf(false) }
+    val aiReady = rememberAIReady()
+    // What was read out of plans typed a moment ago, by plan id. Never saved.
+    val entrySuggestions = remember { mutableStateMapOf<String, com.raydon.moji.android.ai.EntrySuggestion>() }
+    val readingEntryIds = remember { mutableStateListOf<String>() }
+    var breakdown by remember { mutableStateOf<Pair<CheckInItem, Boolean>?>(null) }
+    var showsImport by remember { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
     val listState = androidx.compose.foundation.lazy.rememberLazyListState()
     val qaRoute by viewModel.visualQaRoute.collectAsStateWithLifecycle()
     var didQA by remember { mutableStateOf(false) }
@@ -96,16 +106,77 @@ fun PlanScreen(viewModel: MojiViewModel) {
             if (target >= 0) listState.animateScrollToItem(target, -toolbarPixels)
         }
     }
+    /**
+     * The plan is already saved as typed. If the sentence carries a time, a length or several
+     * things, ask what it says and offer it under the row.
+     */
+    fun readQuickEntry(id: String, title: String) {
+        if (!aiReady || !com.raydon.moji.android.ai.AISettingsStore.shared.settings.value.readsQuickEntry || !com.raydon.moji.android.ai.AIDrafting.isWorthReading(title)) return
+        readingEntryIds += id
+        scope.launch {
+            // A failed reading is not worth a message: the plan is there either way.
+            val suggestion = try { com.raydon.moji.android.ai.AIAssistant.shared.readEntry(title, aiCategories(viewModel)) }
+                catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled } catch (error: Throwable) { null }
+            readingEntryIds.remove(id)
+            if (suggestion == null || suggestion.isEmpty) return@launch
+            if (viewModel.snapshot.value.checkInItems.none { it.id == id && it.title == title && it.status == "planned" }) return@launch
+            entrySuggestions[id] = suggestion
+        }
+    }
+    fun applySuggestion(suggestion: com.raydon.moji.android.ai.EntrySuggestion, id: String) {
+        entrySuggestions.remove(id)
+        val plan = viewModel.snapshot.value.checkInItems.firstOrNull { it.id == id } ?: return
+        val updated = suggestion.applied(plan) ?: return
+        val notice = suggestion.day?.let { "已移到${com.raydon.moji.android.ai.AIDrafting.dayText(it, LocalDate.now())}，可在日历查看" } ?: "已按建议调整"
+        viewModel.commitDrafts(changed = listOf(updated), notice = notice)
+    }
+    fun splitEntry(suggestion: com.raydon.moji.android.ai.EntrySuggestion, id: String) {
+        entrySuggestions.remove(id)
+        if (suggestion.parts.size < 2) return
+        val plan = viewModel.snapshot.value.checkInItems.firstOrNull { it.id == id && it.kind == "planned" } ?: return
+        val now = Instant.now().toString()
+        val rest = suggestion.parts.drop(1).map { part ->
+            CheckInItem(id = java.util.UUID.randomUUID().toString(), title = part, category = plan.category, scheduledStart = plan.scheduledStart,
+                plannedMinutes = plan.plannedMinutes, createdAt = now, scheduleKind = plan.scheduleKind, detailsConfigured = plan.detailsConfigured,
+                plannedDurationEnabled = plan.plannedDurationEnabled)
+        }
+        viewModel.commitDrafts(added = rest, changed = listOf(plan.copy(title = suggestion.parts[0])), notice = "已拆成 ${suggestion.parts.size} 条")
+    }
     fun addQuickPlan() {
         val submitted = quickTitle.trim()
         if (submitted.isEmpty()) return
-        viewModel.savePlan(existingId = quickDraftId, title = submitted, note = "", date = today, time = LocalTime.MIDNIGHT,
+        val id = quickDraftId
+        viewModel.savePlan(existingId = id, title = submitted, note = "", date = today, time = LocalTime.MIDNIGHT,
             scheduleKind = "allDay", category = viewModel.defaultCategory, plannedMinutes = 25,
             repeatRule = "never", weekdays = emptyList(), reminderMinutes = null, calendarSync = false, plannedDurationEnabled = false,
-            onSaved = { if (quickTitle.trim() == submitted) quickTitle = ""; quickDraftId = java.util.UUID.randomUUID().toString() })
+            onSaved = {
+                if (quickTitle.trim() == submitted) quickTitle = ""; quickDraftId = java.util.UUID.randomUUID().toString()
+                readQuickEntry(id, submitted)
+            })
+    }
+    var didAIQA by remember { mutableStateOf(false) }
+    LaunchedEffect(qaRoute, snapshot.checkInItems.size) {
+        if (!BuildConfig.DEBUG || didAIQA || !qaRoute.startsWith("ai-") || snapshot.checkInItems.isEmpty()) return@LaunchedEffect
+        didAIQA = true
+        kotlinx.coroutines.delay(500)
+        when (qaRoute) {
+            "ai-entry-suggestion", "ai-entry-split", "ai-entry-applied" -> {
+                quickTitle = if (qaRoute == "ai-entry-split") "买菜、取快递、交电费" else "明天下午三点交保险计划书 45分钟"
+                addQuickPlan()
+            }
+            "ai-breakdown", "ai-breakdown-carry" -> pending.firstOrNull()?.let { breakdown = it to (qaRoute == "ai-breakdown-carry") }
+            "ai-import", "ai-import-drafts", "ai-import-ocr" -> showsImport = true
+            "ai-library-filter", "ai-library-filter-applied" -> showLibrary = true
+        }
+    }
+    LaunchedEffect(qaRoute, entrySuggestions.size) {
+        if (BuildConfig.DEBUG && qaRoute == "ai-entry-applied") entrySuggestions.entries.firstOrNull()?.let { (id, suggestion) ->
+            kotlinx.coroutines.delay(1_200); applySuggestion(suggestion, id)
+        }
     }
     val openRecord = { addMenu = false; editing = null; editorKind = "completed"; showEditor = true }
     val openPlan = { addMenu = false; editing = null; editorKind = "planned"; showEditor = true }
+    val openImport = { addMenu = false; showsImport = true }
     MojiScreen(opaqueTopInset = true) {
         Box(Modifier.fillMaxSize()) {
         LazyColumn(Modifier.fillMaxSize(), state = listState) {
@@ -116,7 +187,7 @@ fun PlanScreen(viewModel: MojiViewModel) {
                         NavigationBarHairline()
                     }
                     Box(Modifier.align(Alignment.TopEnd).padding(end = 18.dp, top = 40.dp)) {
-                        PlanAddMenu(addMenu && listState.firstVisibleItemIndex == 0, { addMenu = false }, openRecord, openPlan)
+                        PlanAddMenu(addMenu && listState.firstVisibleItemIndex == 0, { addMenu = false }, openRecord, openPlan, if (aiReady) openImport else null)
                     }
                 }
             }
@@ -177,7 +248,13 @@ fun PlanScreen(viewModel: MojiViewModel) {
             items(pending, key = { "pending-" + it.id }) { item ->
                 PlanRow(item, today, expandedId == item.id, false, viewModel,
                     { expandedId = if (expandedId == item.id) null else item.id },
-                    { editing = item; showEditor = true }, { copying = item })
+                    { editing = item; showEditor = true }, { copying = item },
+                    breakDown = if (aiReady) { replaces -> breakdown = item to replaces } else null) {
+                    val suggestion = entrySuggestions[item.id]
+                    if (suggestion != null) EntrySuggestionStrip(suggestion, { applySuggestion(suggestion, item.id) }, { splitEntry(suggestion, item.id) },
+                        { entrySuggestions.remove(item.id) }, Modifier.padding(start = 46.dp, end = 4.dp, bottom = 8.dp))
+                    else if (item.id in readingEntryIds) InkDraftWaiting("在看这句话", Modifier.padding(start = 58.dp, bottom = 8.dp))
+                }
             }
             if (completed.isNotEmpty()) {
                 item {
@@ -200,7 +277,7 @@ fun PlanScreen(viewModel: MojiViewModel) {
                 Box(Modifier.size(44.dp).clickable { showLibrary = true }, contentAlignment = Alignment.Center) { MojiLineIcon(MojiIcon.GridSF, 28.dp) }
                 Box {
                     Box(Modifier.size(44.dp).clickable { addMenu = true }, contentAlignment = Alignment.Center) { MojiLineIcon(MojiIcon.Plus, 23.dp) }
-                    PlanAddMenu(addMenu, { addMenu = false }, openRecord, openPlan)
+                    PlanAddMenu(addMenu, { addMenu = false }, openRecord, openPlan, if (aiReady) openImport else null)
                 }
             }
             NavigationBarHairline()
@@ -209,14 +286,21 @@ fun PlanScreen(viewModel: MojiViewModel) {
     }
     if (showEditor) PlanEditorScreenDialog(editing, today, viewModel, initialKind = editorKind) { showEditor = false; editing = null }
     if (showLibrary) PlanLibraryDialog(viewModel) { showLibrary = false }
+    if (showsImport) PlanImportDialog(viewModel) { showsImport = false }
+    breakdown?.let { (item, replaces) ->
+        PlanDraftSheet(viewModel, "拆成步骤", item.title, waitingText = "正在拆步骤", planNote = "拆自：${item.title}", showsDates = false,
+            source = item, archivesSourceByDefault = replaces,
+            load = { com.raydon.moji.android.ai.AIAssistant.shared.breakDown(item, aiCategories(viewModel)) }) { breakdown = null }
+    }
     copying?.let { PlanCopyDialog(it, viewModel) { copying = null } }
 }
 
 @Composable
-private fun PlanAddMenu(expanded: Boolean, onDismiss: () -> Unit, onRecord: () -> Unit, onPlan: () -> Unit) {
+private fun PlanAddMenu(expanded: Boolean, onDismiss: () -> Unit, onRecord: () -> Unit, onPlan: () -> Unit, onImport: (() -> Unit)? = null) {
     DropdownMenu(expanded, onDismiss) {
         DropdownMenuItem({ Text("记录已做") }, onRecord)
         DropdownMenuItem({ Text("详细添加计划") }, onPlan)
+        if (onImport != null) DropdownMenuItem({ Text("从文字或截图添加") }, onImport)
     }
 }
 
@@ -304,8 +388,12 @@ fun NavigationBarHairline() {
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun PlanRow(plan: CheckInItem, today: LocalDate, expanded: Boolean, archived: Boolean, viewModel: MojiViewModel,
-                    toggleExpansion: () -> Unit, onEdit: () -> Unit, onCopy: () -> Unit) {
+                    toggleExpansion: () -> Unit, onEdit: () -> Unit, onCopy: () -> Unit,
+                    /** Present only while a model is set up; the argument says whether the steps replace this plan. */
+                    breakDown: ((Boolean) -> Unit)? = null,
+                    below: @Composable () -> Unit = {}) {
     var menu by remember { mutableStateOf(false) }
+    var sealMenu by remember { mutableStateOf(false) }
     var confirmDelete by remember { mutableStateOf(false) }
     var quickField by remember { mutableStateOf<PlanQuickField?>(null) }
     val qaRoute by viewModel.visualQaRoute.collectAsStateWithLifecycle()
@@ -361,7 +449,19 @@ private fun PlanRow(plan: CheckInItem, today: LocalDate, expanded: Boolean, arch
                         if (plan.note.isNotEmpty()) Text(plan.note, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, color = LocalContentColor.current.copy(alpha = 0.5f))
                     }
                 }
-                if (daysLate > 0 && !finished) InkSeal(if (daysLate > 99) "99+" else daysLate.toString(), 22)
+                if (daysLate > 0 && !finished) {
+                    val seal = if (daysLate > 99) "99+" else daysLate.toString()
+                    // A plan that keeps being carried over is usually too big, on the wrong day,
+                    // or no longer wanted: the seal offers all three.
+                    if (breakDown != null && plan.status == "planned") Box {
+                        Box(Modifier.size(22.dp, 44.dp).clickable { sealMenu = true }.semantics { contentDescription = "已顺延 $daysLate 天，处理这个计划" }, contentAlignment = Alignment.Center) { InkSeal(seal, 22) }
+                        DropdownMenu(sealMenu, { sealMenu = false }) {
+                            DropdownMenuItem({ Text("拆小一点") }, { sealMenu = false; breakDown(true) })
+                            DropdownMenuItem({ Text("改期") }, { sealMenu = false; quickField = PlanQuickField.DATE })
+                            DropdownMenuItem({ Text("放下") }, { sealMenu = false; viewModel.skipPlan(plan.id) })
+                        }
+                    } else InkSeal(seal, 22)
+                }
                 Box(Modifier.size(44.dp).clickable(onClick = toggleExpansion), contentAlignment = Alignment.Center) { MojiChevronDown(expanded) }
             }
             if (expanded) {
@@ -390,7 +490,7 @@ private fun PlanRow(plan: CheckInItem, today: LocalDate, expanded: Boolean, arch
                                 MojiLineIcon(MojiIcon.Ellipsis, 22.dp, MaterialTheme.colorScheme.primary)
                                 Text("更多操作", fontSize = 13.sp, fontWeight = FontWeight.Medium, color = MaterialTheme.colorScheme.primary)
                             }
-                            PlanRowMenu(menu, { menu = false }, plan, today, viewModel, onEdit, onCopy, { confirmDelete = true })
+                            PlanRowMenu(menu, { menu = false }, plan, today, viewModel, onEdit, onCopy, { confirmDelete = true }, breakDown)
                         }
                         if (plan.status in listOf("planned", "inProgress")) Row(Modifier.weight(1f).heightIn(min = 44.dp).background(MaterialTheme.colorScheme.onSurface, RoundedCornerShape(12.dp)).clickable {
                             if (!timer.hasActiveFocus()) { viewModel.selectPomodoroPhase("focus"); viewModel.linkPomodoro(plan) }
@@ -404,11 +504,12 @@ private fun PlanRow(plan: CheckInItem, today: LocalDate, expanded: Boolean, arch
                         }
                     }
                 }
-            } else PlanRowMenu(menu, { menu = false }, plan, today, viewModel, onEdit, onCopy, { confirmDelete = true })
+            } else PlanRowMenu(menu, { menu = false }, plan, today, viewModel, onEdit, onCopy, { confirmDelete = true }, breakDown)
         }
     }
     Column(Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 2.dp)) {
         if (expanded) InkCard(padding = PaddingValues(horizontal = 14.dp)) { content() } else Column(Modifier.padding(horizontal = 4.dp)) { content() }
+        if (!archived) below()
         if (!archived && !expanded) InkDivider(Modifier.padding(start = 58.dp), 0.34f, inkSeed(plan.id.uppercase()))
     }
     quickField?.let { PlanQuickEditorDialog(plan, it, viewModel) { quickField = null } }
@@ -446,9 +547,11 @@ private fun PlanDetailPill(value: String, icon: MojiIcon, modifier: Modifier, on
 
 @Composable
 private fun PlanRowMenu(expanded: Boolean, onDismiss: () -> Unit, plan: CheckInItem, today: LocalDate,
-                        viewModel: MojiViewModel, onEdit: () -> Unit, onCopy: () -> Unit, onDelete: () -> Unit) {
+                        viewModel: MojiViewModel, onEdit: () -> Unit, onCopy: () -> Unit, onDelete: () -> Unit,
+                        breakDown: ((Boolean) -> Unit)? = null) {
     DropdownMenu(expanded, onDismiss) {
         DropdownMenuItem({ Text("完整编辑") }, { onDismiss(); onEdit() })
+        if (breakDown != null && plan.status in listOf("planned", "inProgress")) DropdownMenuItem({ Text("拆成步骤") }, { onDismiss(); breakDown(false) })
         DropdownMenuItem({ Text("复制到今天") }, { onDismiss(); viewModel.copyPlan(plan.id, today) })
         DropdownMenuItem({ Text("复制到指定日期") }, { onDismiss(); onCopy() })
         DropdownMenuItem({ Text("保存为模板") }, { onDismiss(); viewModel.saveTemplate(plan.id) })

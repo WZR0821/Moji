@@ -22,7 +22,16 @@ import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.raydon.moji.core.*
+import com.raydon.moji.android.ai.AIAssistant
+import com.raydon.moji.android.ai.AIDrafting
+import com.raydon.moji.android.ai.AIRequestError
+import com.raydon.moji.android.ai.ConversionHint
+import com.raydon.moji.android.ai.LibraryFilter
+import com.raydon.moji.android.ai.ReflectionDraft
+import com.raydon.moji.android.ai.draftMessage
 import com.raydon.moji.ui.InkCard
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import java.time.*
 import java.time.format.DateTimeFormatter
 import java.time.temporal.TemporalAdjusters
@@ -85,6 +94,38 @@ fun PlanLibraryDialog(viewModel: MojiViewModel, onDismiss: () -> Unit) {
     val pickFrom = rememberDatePicker { from = it; if (to < it) to = it }
     val pickTo = rememberDatePicker { to = maxOf(from, it) }
     val pickTemplate = rememberDatePicker { templateDay = it }
+    val aiReady = rememberAIReady()
+    val scope = rememberCoroutineScope()
+    var isReadingFilter by remember { mutableStateOf(false) }
+    var filterFailure by remember { mutableStateOf<String?>(null) }
+    // The sentence the filters were last set from, and what they were before.
+    var appliedFilterSentence by remember { mutableStateOf<String?>(null) }
+    var filterBeforeSentence by remember { mutableStateOf<LibraryFilter?>(null) }
+    fun setFilter(filter: LibraryFilter) {
+        query = filter.keyword; category = filter.category; status = filter.status; period = filter.period
+        if (filter.from != null && filter.to != null) { from = filter.from; to = filter.to }
+    }
+    fun applySentenceFilter() {
+        val sentence = query.trim()
+        val before = LibraryFilter(query, category, status, period, from, to)
+        isReadingFilter = true; filterFailure = null
+        scope.launch {
+            try {
+                val filter = AIAssistant.shared.libraryFilter(sentence, aiCategories(viewModel))
+                filterBeforeSentence = before
+                setFilter(filter)
+                appliedFilterSentence = sentence
+                filtersExpanded = true
+            } catch (error: Exception) {
+                if (error is kotlinx.coroutines.CancellationException) throw error
+                filterFailure = error.draftMessage
+            } finally { isReadingFilter = false }
+        }
+    }
+    fun restoreFilterBeforeSentence() {
+        filterBeforeSentence?.let { setFilter(it) }
+        appliedFilterSentence = null; filterBeforeSentence = null
+    }
     val today = LocalDate.now()
     val plans = snapshot.checkInItems.filter { item ->
         val day = Instant.parse(item.scheduledStart).atZone(ZoneId.systemDefault()).toLocalDate()
@@ -102,6 +143,10 @@ fun PlanLibraryDialog(viewModel: MojiViewModel, onDismiss: () -> Unit) {
         if (BuildConfig.DEBUG && viewModel.visualQaRoute.value == "library-batch") {
             selected = plans.take(2).map { it.id }.toSet(); selecting = true; batch = true
         }
+        if (BuildConfig.DEBUG && viewModel.visualQaRoute.value.startsWith("ai-library-filter")) {
+            query = "上周没做完的学习计划"
+            if (viewModel.visualQaRoute.value == "ai-library-filter-applied") { delay(400); applySentenceFilter() }
+        }
     }
     WorkflowDialog("计划库", onDismiss, leading = "", onSave = onDismiss) {
         LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(top = 34.7.dp, bottom = 20.dp), verticalArrangement = Arrangement.spacedBy(24.dp)) {
@@ -109,6 +154,27 @@ fun PlanLibraryDialog(viewModel: MojiViewModel, onDismiss: () -> Unit) {
                 FormSection {
                     FormSegmentedControl(listOf("plans" to "全部计划", "templates" to "计划模板"), mode) { mode = it; selected = emptySet(); selecting = false }
                     FormSeparator(); FormTextField(query, { query = it }, "搜索标题或说明")
+                    // A whole sentence in the search field can set the three filters at once.
+                    // The row only exists while a model is set up and the text reads like one.
+                    if (mode == "plans") {
+                        val sentence = appliedFilterSentence
+                        if (isReadingFilter) { FormSeparator(); Box(Modifier.fillMaxWidth().heightIn(min = 44.dp).padding(horizontal = 20.dp), contentAlignment = Alignment.CenterStart) { InkDraftWaiting("正在读这句话") } }
+                        else if (sentence != null) {
+                            FormSeparator()
+                            Row(Modifier.fillMaxWidth().heightIn(min = 44.dp).padding(horizontal = 20.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                                Text("已按“$sentence”设好筛选", fontSize = 13.sp, lineHeight = 18.sp, color = iosSecondaryLabel, maxLines = 2, modifier = Modifier.weight(1f))
+                                Spacer(Modifier.width(4.dp))
+                                Text("还原", fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.primary, modifier = Modifier.clickable { restoreFilterBeforeSentence() }.padding(vertical = 4.dp))
+                            }
+                        } else if (aiReady && AIDrafting.looksLikeFilterSentence(query)) {
+                            FormSeparator()
+                            // iOS: a borderless button in .subheadline, medium weight.
+                            Box(Modifier.fillMaxWidth().heightIn(min = 44.dp).clickable { applySentenceFilter() }.padding(horizontal = 20.dp), contentAlignment = Alignment.CenterStart) {
+                                Text("按这句话筛选", fontSize = 15.sp, fontWeight = FontWeight.Medium, color = MaterialTheme.colorScheme.primary)
+                            }
+                            filterFailure?.let { FormSeparator(); Text(it, fontSize = 13.sp, color = iosSecondaryLabel, modifier = Modifier.padding(horizontal = 20.dp, vertical = 11.dp)) }
+                        }
+                    }
                 }
             }
             if (mode == "plans") {
@@ -254,16 +320,69 @@ fun MemoConversionDialog(memo: MemoItem, viewModel: MojiViewModel, onDismiss: ()
     var category by remember { mutableStateOf("study") }
     var editing by remember { mutableStateOf<CheckInItem?>(null) }
     val pick = rememberDatePicker { day = it }
+    val aiReady = rememberAIReady()
+    val scope = rememberCoroutineScope()
+    // A date and a type read out of each row, keyed by checklist item (null for the whole memo).
+    var hints by remember { mutableStateOf<Map<String?, ConversionHint>>(emptyMap()) }
+    var isReadingHints by remember { mutableStateOf(false) }
+    var hintFailure by remember { mutableStateOf<String?>(null) }
+    val checklistRows = if (memo.mode == "checklist") memo.checklistItems.filter { it.text.isNotBlank() } else emptyList()
+    fun readHints() {
+        val rows = checklistRows
+        val texts = listOf(listOf(memo.title, if (memo.mode == "note") memo.content else "").filter { it.isNotEmpty() }.joinToString("：")) + rows.map { it.text }
+        isReadingHints = true; hintFailure = null
+        scope.launch {
+            try {
+                val found = AIAssistant.shared.conversionHints(memo.title, texts, aiCategories(viewModel))
+                val result = found.entries.mapNotNull { (index, hint) ->
+                    if (index == 0) (null as String?) to hint else rows.getOrNull(index - 1)?.let { it.id to hint }
+                }.toMap()
+                if (result.isEmpty()) hintFailure = "这几行里没有读到日期或类型，沿用上面选的。"
+                hints = result
+            } catch (error: Exception) {
+                if (error is kotlinx.coroutines.CancellationException) throw error
+                hintFailure = error.draftMessage
+            } finally { isReadingHints = false }
+        }
+    }
+    LaunchedEffect(Unit) {
+        if (BuildConfig.DEBUG && viewModel.visualQaRoute.value == "ai-memo-convert" && hints.isEmpty() && !isReadingHints) readHints()
+    }
     WorkflowDialog("备忘转计划", onDismiss, leading = "", onSave = onDismiss) {
         LazyColumn(contentPadding = PaddingValues(top = 34.dp, bottom = 20.dp), verticalArrangement = Arrangement.spacedBy(24.dp)) {
-            item { FormSection { FormDateRow("计划日期", day) { pick(day) }; FormSeparator(); FormChoiceRow("计划类型", category, categoryChoices(viewModel, category)) { category = it } } }
+            item { FormSection {
+                FormDateRow("计划日期", day) { pick(day) }; FormSeparator(); FormChoiceRow("计划类型", category, categoryChoices(viewModel, category)) { category = it }
+                if (aiReady) {
+                    FormSeparator()
+                    if (isReadingHints) Box(Modifier.fillMaxWidth().heightIn(min = 44.dp).padding(horizontal = 20.dp), contentAlignment = Alignment.CenterStart) { InkDraftWaiting("正在看每一行") }
+                    else if (hints.isEmpty()) {
+                        FormRow("按内容预填每一行", onClick = { readHints() }, titleColor = MaterialTheme.colorScheme.primary)
+                        hintFailure?.let { FormSeparator(); Text(it, fontSize = 13.sp, color = iosSecondaryLabel, modifier = Modifier.padding(horizontal = 20.dp, vertical = 11.dp)) }
+                    } else Row(Modifier.fillMaxWidth().heightIn(min = 44.dp).padding(horizontal = 20.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Text("带浅色标注的行会用它自己的日期和类型", fontSize = 13.sp, color = iosSecondaryLabel, modifier = Modifier.weight(1f))
+                        Spacer(Modifier.width(4.dp))
+                        Text("不用", fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.primary, modifier = Modifier.clickable { hints = emptyMap() }.padding(vertical = 4.dp))
+                    }
+                }
+            } }
             item { FormSection("转为计划", topPadding = 9) {
-                val rows = listOf(null to "整则备忘") + if (memo.mode == "checklist") memo.checklistItems.filter { it.text.isNotBlank() }.map { it.id to it.text } else emptyList()
+                val rows = listOf(null to "整则备忘") + checklistRows.map { it.id to it.text }
                 rows.forEach { (itemId, title) ->
                     val plan = snapshot.checkInItems.firstOrNull { it.sourceMemoID == memo.id && it.sourceMemoChecklistItemID == itemId }
-                    FormRow(title, if (plan == null) "转换" else "查看计划", onClick = {
-                        if (plan != null) editing = plan else viewModel.convertMemo(memo.id, itemId, day, category)
-                    }); FormSeparator()
+                    val hint = if (plan == null) hints[itemId] else null
+                    Row(Modifier.fillMaxWidth().heightIn(min = 44.dp).clickable {
+                        if (plan != null) editing = plan else viewModel.convertMemo(memo.id, itemId, hint?.day ?: day, hint?.category ?: category)
+                    }.padding(horizontal = 20.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Column(Modifier.weight(1f).padding(vertical = if (hint != null) 10.dp else 6.dp), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                            Text(title, fontSize = 17.sp)
+                            if (hint != null) Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(5.dp)) {
+                                DraftSeal(15)
+                                Text(hint.text(), fontSize = 12.sp, color = MaterialTheme.colorScheme.secondary)
+                            }
+                        }
+                        Text(if (plan == null) "转换" else "查看计划", fontSize = 15.sp, color = iosSecondaryLabel, modifier = Modifier.padding(start = 12.dp))
+                    }
+                    FormSeparator()
                 }
             } }
             item { WorkflowInfoSection("保留原备忘，标题和内容带入新计划。同一备忘或清单项不会重复转换；已转换的条目可直接查看计划。") }
@@ -282,6 +401,8 @@ fun WorkflowWeekSection(viewModel: MojiViewModel, week: LocalDate) {
     var editingGoal by remember { mutableStateOf<WeeklyGoal?>(null) }
     var reflectionEditor by remember { mutableStateOf(false) }
     var carryEditor by remember { mutableStateOf(false) }
+    val aiReady = rememberAIReady()
+    var nextWeekDrafts by remember { mutableStateOf(false) }
     Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
         InkCard {
             Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
@@ -324,12 +445,15 @@ fun WorkflowWeekSection(viewModel: MojiViewModel, week: LocalDate) {
                 Text("下周关注", fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
                 Text(reflection?.nextFocus?.takeIf { it.isNotEmpty() } ?: "给下周留下一句提醒。", fontSize = 15.sp, color = iosSecondaryLabel)
                 Text("选择待办移至下周", fontSize = 15.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.clickable { carryEditor = true }.padding(vertical = 5.dp))
+                if (aiReady) Text("拟下周草稿", fontSize = 15.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.clickable { nextWeekDrafts = true }.padding(vertical = 5.dp))
             }
         }
     }
     if (goalEditor) WeeklyGoalDialog(viewModel, week, editingGoal) { goalEditor = false }
     if (reflectionEditor) WeeklyReflectionDialog(viewModel, week, reflection) { reflectionEditor = false }
     if (carryEditor) NextWeekPlansDialog(viewModel, week) { carryEditor = false }
+    if (nextWeekDrafts) PlanDraftSheet(viewModel, "下周草稿", "按这一周的记录和“下周关注”拟的", waitingText = "正在拟下周",
+        load = { AIAssistant.shared.draftNextWeek(viewModel.snapshot.value, workflowWeek(week), aiCategories(viewModel)) }) { nextWeekDrafts = false }
 }
 
 @Composable
@@ -382,8 +506,70 @@ fun WeeklyReflectionDialog(viewModel: MojiViewModel, week: LocalDate, reflection
     var nextFocus by remember { mutableStateOf(reflection?.nextFocus ?: "") }
     val draftId = remember { reflection?.id ?: UUID.randomUUID().toString() }
     val requestDismiss = rememberEditorDismiss(note != (reflection?.note ?: "") || nextFocus != (reflection?.nextFocus ?: ""), onDismiss)
+    val aiReady = rememberAIReady()
+    val scope = rememberCoroutineScope()
+    var draft by remember { mutableStateOf<ReflectionDraft?>(null) }
+    var isDrafting by remember { mutableStateOf(false) }
+    var draftFailure by remember { mutableStateOf<String?>(null) }
+    // What the two fields held before a draft was put into them.
+    var beforeDraft by remember { mutableStateOf<Pair<String, String>?>(null) }
+    fun applyDraft(result: ReflectionDraft) {
+        beforeDraft = note to nextFocus
+        note = result.note
+        if (result.nextFocus.isNotEmpty()) nextFocus = result.nextFocus
+    }
+    fun runDraft(thenApply: Boolean = false) {
+        isDrafting = true; draftFailure = null
+        scope.launch {
+            try {
+                val result = AIAssistant.shared.draftReflection(viewModel.snapshot.value, workflowWeek(week))
+                draft = result
+                if (thenApply) applyDraft(result)
+            } catch (error: Exception) {
+                if (error is kotlinx.coroutines.CancellationException) throw error
+                draftFailure = if (error === AIRequestError.emptyText) "这一周还没有计划记录，没有可以起草的内容。" else error.draftMessage
+            } finally { isDrafting = false }
+        }
+    }
+    LaunchedEffect(Unit) {
+        val route = viewModel.visualQaRoute.value
+        if (BuildConfig.DEBUG && route.startsWith("ai-reflection") && draft == null && !isDrafting) runDraft(thenApply = route == "ai-reflection-applied")
+    }
     WorkflowDialog("周复盘", requestDismiss, trailing = "保存", onSave = { viewModel.saveWeeklyReflection(WeeklyReflection(draftId, workflowWeek(week).toString(), note, nextFocus, Instant.now().toString()), onSaved = onDismiss) }) {
         LazyColumn(contentPadding = PaddingValues(top = 15.dp, bottom = 20.dp), verticalArrangement = Arrangement.spacedBy(30.6.dp)) {
+            // The draft sits above the two fields, dashed and stamped, until it is put in. Saving is still 保存.
+            if (aiReady) item {
+                val current = draft
+                if (current != null && !isDrafting) Spacer(Modifier.height(20.dp))
+                if (isDrafting) FormSection { Box(Modifier.fillMaxWidth().heightIn(min = 44.dp).padding(horizontal = 20.dp), contentAlignment = Alignment.CenterStart) { InkDraftWaiting("正在起草") } }
+                else if (current != null) Column(Modifier.padding(horizontal = 20.dp).fillMaxWidth().inkDraftSurface().padding(12.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(7.dp)) {
+                        DraftSeal(20)
+                        Text(if (beforeDraft == null) "草稿，还没有放进两栏" else "已放进下面两栏，保存前可以改", fontSize = 13.sp, color = MaterialTheme.colorScheme.secondary)
+                    }
+                    if (beforeDraft == null) {
+                        Text(current.note, fontSize = 15.sp, lineHeight = 20.sp)
+                        if (current.nextFocus.isNotEmpty()) Text("下周关注：${current.nextFocus}", fontSize = 15.sp, lineHeight = 20.sp)
+                    }
+                    if (current.evidence.isNotEmpty()) {
+                        InkDivider(opacity = 0.4f * 0.30f, seed = 17)
+                        ReflectionEvidenceList(current.evidence)
+                    }
+                    Row(horizontalArrangement = Arrangement.spacedBy(18.dp)) {
+                        if (beforeDraft == null) {
+                            Text("放进两栏", fontSize = 15.sp, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.primary, modifier = Modifier.clickable { applyDraft(current) })
+                            Text("不用", fontSize = 15.sp, color = MaterialTheme.colorScheme.secondary, modifier = Modifier.clickable { draft = null })
+                        } else Text("还原", fontSize = 15.sp, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.primary, modifier = Modifier.clickable {
+                            beforeDraft?.let { note = it.first; nextFocus = it.second }
+                            beforeDraft = null; draft = null
+                        })
+                    }
+                }
+                else FormSection(footer = "按这一周的计划记录起草，并注明依据的是哪几条计划。") {
+                    FormRow("起草复盘", onClick = { runDraft() }, titleColor = MaterialTheme.colorScheme.primary)
+                    draftFailure?.let { FormSeparator(); Text(it, fontSize = 13.sp, color = iosSecondaryLabel, modifier = Modifier.padding(horizontal = 20.dp, vertical = 11.dp)) }
+                }
+            }
             item { FormSection("本周复盘") { FormTextField(note, { note = it }, "做得好的事、遇到的问题", singleLine = false, minHeight = 131) } }
             item { FormSection("下周关注") { FormTextField(nextFocus, { nextFocus = it }, "给下周留下一句提醒", singleLine = false, minHeight = 87) } }
         }

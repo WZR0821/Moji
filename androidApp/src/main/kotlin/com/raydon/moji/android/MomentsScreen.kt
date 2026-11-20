@@ -58,6 +58,7 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.raydon.moji.core.CountdownEvent
 import com.raydon.moji.core.CountdownPolicy
+import kotlinx.coroutines.launch
 import com.raydon.moji.ui.InkCard
 import com.raydon.moji.ui.MojiPalette
 import java.time.Instant
@@ -80,12 +81,34 @@ fun MomentsScreen(viewModel: MojiViewModel) {
     var showEditor by remember { mutableStateOf(false) }
     val qaRoute by viewModel.visualQaRoute.collectAsStateWithLifecycle()
     var didQA by remember { mutableStateOf(false) }
+    val today = LocalDate.now()
+    val zone = ZoneId.systemDefault()
+    fun daysUntil(event: CountdownEvent): Long {
+        val origin = Instant.parse(event.targetDate).atZone(zone).toLocalDate()
+        val next = LocalDate.parse(CountdownPolicy.nextOccurrenceDate(origin.toKotlinDate(), event.repeatRule ?: "never", LocalDate.now().toKotlinDate()).toString())
+        return java.time.temporal.ChronoUnit.DAYS.between(LocalDate.now(), next)
+    }
+    val aiReady = rememberAIReady()
+    val offerScope = androidx.compose.runtime.rememberCoroutineScope()
+    // A day that was just added and is far enough off to prepare for.
+    var preparationOffer by remember { mutableStateOf<CountdownEvent?>(null) }
+    var preparing by remember { mutableStateOf<CountdownEvent?>(null) }
+    // Offered once, right after the day is added, and only when there is time to prepare.
+    // Nothing is drafted until the strip is tapped.
+    fun offerPreparation(event: CountdownEvent) {
+        if (!com.raydon.moji.android.ai.AISettingsStore.shared.isReady || daysUntil(event) < 2) return
+        offerScope.launch { kotlinx.coroutines.delay(450); preparationOffer = event }
+    }
     androidx.compose.runtime.LaunchedEffect(qaRoute, snapshot.countdowns.size) { if (!didQA && qaRoute.isNotEmpty() && snapshot.countdowns.isNotEmpty()) {
         didQA = true
         when (qaRoute) { "moment-editor", "moment-advanced" -> { editing = snapshot.countdowns.first(); showEditor = true }; "moment-past" -> scope = "past" }
+        if (BuildConfig.DEBUG && qaRoute.startsWith("ai-preparation")) {
+            snapshot.countdowns.filter { daysUntil(it) >= 2 }.minByOrNull { daysUntil(it) }?.let { upcoming ->
+                kotlinx.coroutines.delay(350)
+                if (qaRoute == "ai-preparation-drafts") preparing = upcoming else preparationOffer = upcoming
+            }
+        }
     } }
-    val today = LocalDate.now()
-    val zone = ZoneId.systemDefault()
     val events = snapshot.countdowns.filter { event ->
         val origin = Instant.parse(event.targetDate).atZone(zone).toLocalDate()
         val occurrence = CountdownPolicy.nextOccurrenceDate(origin.toKotlinDate(), event.repeatRule ?: "never", today.toKotlinDate())
@@ -108,6 +131,11 @@ fun MomentsScreen(viewModel: MojiViewModel) {
         androidx.compose.foundation.lazy.LazyColumn(Modifier.fillMaxSize()) {
             item { MomentsTitle(scope, { more = true }, { editing = null; showEditor = true }) }
             item { MomentsModeRow(scope) { scope = it } }
+            val offer = preparationOffer
+            if (scope == "upcoming" && offer != null && aiReady) item(key = "preparation-offer") {
+                PreparationOfferStrip(offer.title, daysUntil(offer), accept = { preparing = offer; preparationOffer = null }, dismiss = { preparationOffer = null },
+                    modifier = Modifier.padding(start = 18.dp, end = 18.dp, bottom = 8.dp).animateItem())
+            }
             if (sort == "date" && events.isNotEmpty()) item { Text("已按时间排序 · 离今天最近的在前", fontSize = 12.sp, modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp), textAlign = TextAlign.Center) }
             if (reordering) item { Text("调整顺序", fontSize = 12.sp, modifier = Modifier.fillMaxWidth().clickable { reordering = false }.padding(vertical = 6.dp), textAlign = TextAlign.Center) }
             if (events.isEmpty()) item {
@@ -148,7 +176,12 @@ fun MomentsScreen(viewModel: MojiViewModel) {
             if (sort == "manual") FormRow("调整顺序", onClick = { reorderIds = events.map { it.id }; reordering = true; more = false })
         } },
         confirmButton = { TextButton(onClick = { more = false }) { Text("完成") } })
-    if (showEditor) CountdownEditorScreenDialog(editing, viewModel, context = scope) { showEditor = false; editing = null }
+    if (showEditor) CountdownEditorScreenDialog(editing, viewModel, context = scope, onCreated = { offerPreparation(it) }) { showEditor = false; editing = null }
+    preparing?.let { event ->
+        PlanDraftSheet(viewModel, "准备计划", "为“${event.title}”做准备，还有 ${daysUntil(event)} 天", waitingText = "正在拟准备计划",
+            planNote = "为“${event.title}”做准备",
+            load = { com.raydon.moji.android.ai.AIAssistant.shared.draftPreparation(event, aiCategories(viewModel)) }) { preparing = null }
+    }
 }
 
 @Composable

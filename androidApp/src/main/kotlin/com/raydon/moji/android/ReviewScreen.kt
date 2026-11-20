@@ -72,11 +72,14 @@ fun ReviewScreen(
     androidx.compose.runtime.LaunchedEffect(qaRoute, snapshot.records.size) { if (!didQA && qaRoute.isNotEmpty() && snapshot.records.isNotEmpty()) {
         didQA = true
         if (qaRoute.startsWith("settings")) showSettings = true
-        else when (qaRoute) { "review-week" -> secondaryRoute = "weekly"; "review-month" -> secondaryRoute = "monthly"; "review-records" -> secondaryRoute = "records"; "goal", "reflection", "next-week", "record-editor", "record-untimed" -> qaEditor = qaRoute }
+        else when (qaRoute) { "review-week" -> secondaryRoute = "weekly"; "review-month" -> secondaryRoute = "monthly"; "review-records" -> secondaryRoute = "records"; "goal", "reflection", "next-week", "record-editor", "record-untimed", "ai-reflection", "ai-reflection-applied", "ai-next-week" -> qaEditor = qaRoute }
     } }
     if (qaEditor == "goal") WeeklyGoalDialog(viewModel, workflowWeek(LocalDate.now()), snapshot.weeklyGoals.firstOrNull()) { qaEditor = "" }
     if (qaEditor == "reflection") WeeklyReflectionDialog(viewModel, workflowWeek(LocalDate.now()), snapshot.weeklyReflections.firstOrNull()) { qaEditor = "" }
     if (qaEditor == "next-week") NextWeekPlansDialog(viewModel, workflowWeek(LocalDate.now())) { qaEditor = "" }
+    if (qaEditor.startsWith("ai-reflection")) WeeklyReflectionDialog(viewModel, workflowWeek(LocalDate.now()), null) { qaEditor = "" }
+    if (qaEditor == "ai-next-week") PlanDraftSheet(viewModel, "下周草稿", "按这一周的记录和“下周关注”拟的", waitingText = "正在拟下周",
+        load = { com.raydon.moji.android.ai.AIAssistant.shared.draftNextWeek(viewModel.snapshot.value, workflowWeek(LocalDate.now()), aiCategories(viewModel)) }) { qaEditor = "" }
     if (qaEditor == "record-editor") RecordEditorScreenDialog(snapshot.records.firstOrNull { it.scheduleKind == "exactTime" }, viewModel) { qaEditor = "" }
     if (qaEditor == "record-untimed") RecordEditorScreenDialog(snapshot.records.firstOrNull { it.scheduleKind == "allDay" }, viewModel) { qaEditor = "" }
     val zone = ZoneId.systemDefault()
@@ -227,15 +230,21 @@ private fun SettingsDialog(
     onRequestPermissions: () -> Unit,
     onDismiss: () -> Unit,
 ) {
-    var page by remember { mutableStateOf(if (BuildConfig.DEBUG) viewModel.visualQaRoute.value.removePrefix("settings-").takeIf { viewModel.visualQaRoute.value.startsWith("settings-") } else null) }
+    var page by remember { mutableStateOf(if (BuildConfig.DEBUG) viewModel.visualQaRoute.value.removePrefix("settings-").takeIf { viewModel.visualQaRoute.value.startsWith("settings-") }
+        ?.let { if (it == "ai") com.raydon.moji.android.ai.aiQaInitialPage() ?: "ai" else it } else null) }
+    // Sub-pages are named "<page>:<sub>"; going back drops the last part.
+    // The AI pages carry IDs in their routes, so they ask for their own parent.
     val goBack: () -> Unit = {
-        if (page == null) onDismiss()
-        else page = if (page?.startsWith("widgets:") == true) "widgets" else null
+        val current = page
+        if (current == null) onDismiss()
+        else page = if (current == "ai" || current.startsWith("ai:")) com.raydon.moji.android.ai.aiSettingsParent(current)
+            else current.takeIf { it.contains(':') }?.substringBeforeLast(':')
     }
     Dialog(onDismissRequest = goBack, properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false)) {
         MojiScreen {
             Column(Modifier.fillMaxSize()) {
-                if (page?.startsWith("widgets:") != true) MojiSheetBar(
+                // The AI pages draw their own bars, like the widget preset editor.
+                if (page?.startsWith("widgets:") != true && page?.let { it == "ai" || it.startsWith("ai:") } != true) MojiSheetBar(
                     title = page?.let(::settingsPageTitle) ?: "设置",
                     leading = if (page == null) "" else "设置",
                     trailing = if (page == null) "完成" else "",
@@ -244,6 +253,7 @@ private fun SettingsDialog(
                     leadingIsBack = page != null,
                 )
                 if (page == null) SettingsIndex(viewModel) { page = it }
+                else if (page == "ai" || page!!.startsWith("ai:")) com.raydon.moji.android.ai.AISettingsScreen(page!!) { page = it }
                 else SettingsPageContent(page!!, viewModel, { page = it }, onExportBackup, onImportBackup, onChooseBackupFolder, onRestoreBackupFolder, onRequestPermissions)
             }
         }
@@ -275,6 +285,10 @@ private fun SettingsIndex(viewModel: MojiViewModel, onOpen: (String) -> Unit) {
                 SettingsRow(MojiIcon.Bell, "提醒与反馈", "全天 ${viewModel.allDayReminderHour.toString().padStart(2, '0')}:00 · $reminder · $sound") { onOpen("notifications") }
                 SettingsSeparator()
                 SettingsRow(MojiIcon.Brush, "外观", "$appearance · $texture · 运笔$motion") { onOpen("appearance") }
+                SettingsSeparator()
+                val aiSettings by com.raydon.moji.android.ai.AISettingsStore.shared.settings.collectAsStateWithLifecycle()
+                val aiKeyed by com.raydon.moji.android.ai.AISettingsStore.shared.keyedIDs.collectAsStateWithLifecycle()
+                SettingsRow(MojiIcon.Cpu, "AI 模型", com.raydon.moji.android.ai.aiSettingsSummary(aiSettings, aiKeyed)) { onOpen("ai") }
             }
             Spacer(Modifier.height(34.4.dp))
         }

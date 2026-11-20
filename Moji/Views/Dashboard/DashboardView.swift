@@ -7,6 +7,13 @@ private struct PlanEditorRoute: Identifiable {
     let defaultDate: Date
 }
 
+private struct PlanBreakdownRoute: Identifiable {
+    let id = UUID()
+    let item: CheckInItem
+    /// True when the steps are meant to take the plan's place.
+    let replacesOriginal: Bool
+}
+
 struct DashboardView: View {
     @ObservedObject var store: PlanStore
     @ObservedObject var pomodoro: PomodoroEngine
@@ -20,6 +27,12 @@ struct DashboardView: View {
     @State private var showsLibrary = false
     @State private var copyingItem: CheckInItem?
     @State private var deletingItem: CheckInItem?
+    @ObservedObject private var ai = AISettingsStore.shared
+    /// What was read out of plans typed a moment ago, by plan. Never saved.
+    @State private var entrySuggestions: [UUID: EntrySuggestion] = [:]
+    @State private var readingEntryIDs: Set<UUID> = []
+    @State private var breakdownRoute: PlanBreakdownRoute?
+    @State private var showsImport = false
 #if DEBUG
     @State private var showsCalendar = [
         "calendar-month",
@@ -241,6 +254,14 @@ struct DashboardView: View {
                         } label: {
                             Label("详细添加计划", systemImage: "slider.horizontal.3")
                         }
+
+                        if ai.isReady {
+                            Button {
+                                showsImport = true
+                            } label: {
+                                Label("从文字或截图添加", systemImage: "text.viewfinder")
+                            }
+                        }
                     } label: {
                         Image(systemName: "plus")
                     }
@@ -278,6 +299,20 @@ struct DashboardView: View {
             }
             .sheet(isPresented: $showsLibrary) { PlanLibraryView(store: store) }
             .sheet(item: $copyingItem) { PlanCopySheet(store: store, item: $0) }
+            .sheet(isPresented: $showsImport) { PlanImportView(store: store) }
+            .sheet(item: $breakdownRoute) { route in
+                PlanDraftSheet(
+                    store: store,
+                    title: "拆成步骤",
+                    subject: route.item.title,
+                    waitingText: "正在拆步骤",
+                    planNote: "拆自：\(route.item.title)",
+                    showsDates: false,
+                    source: route.item,
+                    archivesSourceByDefault: route.replacesOriginal,
+                    load: { try await AIAssistant.shared.breakDown(route.item) }
+                )
+            }
             .alert("删除这个计划？", isPresented: Binding(get: { deletingItem != nil }, set: { if !$0 { deletingItem = nil } })) {
                 Button("取消", role: .cancel) { deletingItem = nil }
                 Button("删除", role: .destructive) {
@@ -558,7 +593,10 @@ struct DashboardView: View {
                 }
             },
             openEditor: { openEditor(for: item) },
-            openCopy: { copyingItem = item }
+            openCopy: { copyingItem = item },
+            breakDown: ai.isReady && !archived
+                ? { replaces in breakdownRoute = PlanBreakdownRoute(item: item, replacesOriginal: replaces) }
+                : nil
         )
         VStack(spacing: 0) {
             Group {
@@ -569,6 +607,27 @@ struct DashboardView: View {
                 } else {
                     row
                         .padding(.horizontal, 4)
+                }
+            }
+
+            if !archived {
+                if let suggestion = entrySuggestions[item.id] {
+                    EntrySuggestionStrip(
+                        suggestion: suggestion,
+                        apply: { applySuggestion(suggestion, to: item.id) },
+                        split: { splitEntry(suggestion, id: item.id) },
+                        dismiss: { withAnimation(.easeOut(duration: 0.2)) { entrySuggestions[item.id] = nil } }
+                    )
+                    .padding(.leading, 46)
+                    .padding(.trailing, 4)
+                    .padding(.bottom, 8)
+                    .transition(.opacity.combined(with: .move(edge: .top)))
+                } else if readingEntryIDs.contains(item.id) {
+                    InkDraftWaiting(text: "在看这句话")
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.leading, 58)
+                        .padding(.bottom, 8)
+                        .transition(.opacity)
                 }
             }
 
@@ -728,6 +787,32 @@ struct DashboardView: View {
             }
         case "calendar-month", "calendar-week", "calendar-day", "calendar-record-delete":
             didRunQAScenario = true
+        case "ai-entry-suggestion", "ai-entry-split", "ai-entry-applied":
+            didRunQAScenario = true
+            let scenario = ProcessInfo.processInfo.environment["MOJI_QA_SCENARIO"] ?? ""
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                quickTitle = scenario == "ai-entry-split" ? "买菜、取快递、交电费" : "明天下午三点交保险计划书 45分钟"
+                addQuickPlan()
+                isQuickEntryFocused = false
+                guard scenario == "ai-entry-applied" else { return }
+                DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
+                    if let entry = entrySuggestions.first { applySuggestion(entry.value, to: entry.key) }
+                }
+            }
+        case "ai-breakdown", "ai-breakdown-carry":
+            didRunQAScenario = true
+            let carried = ProcessInfo.processInfo.environment["MOJI_QA_SCENARIO"] == "ai-breakdown-carry"
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                if let item = pendingItems.first {
+                    breakdownRoute = PlanBreakdownRoute(item: item, replacesOriginal: carried)
+                }
+            }
+        case "ai-import", "ai-import-drafts":
+            didRunQAScenario = true
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { showsImport = true }
+        case "ai-library-filter", "ai-library-filter-applied":
+            didRunQAScenario = true
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { showsLibrary = true }
         default:
             break
         }
@@ -834,20 +919,71 @@ struct DashboardView: View {
     private func addQuickPlan() {
         guard !cleanQuickTitle.isEmpty else { return }
         let today = Calendar.current.startOfDay(for: Date())
+        let plan = CheckInItem(
+            title: cleanQuickTitle,
+            category: quickEntryCategory,
+            scheduledStart: today,
+            plannedMinutes: 25,
+            scheduleKind: .allDay,
+            detailsConfigured: false
+        )
         withAnimation(.spring(response: 0.42, dampingFraction: 0.82)) {
-            store.saveCheckIn(
-                CheckInItem(
-                    title: cleanQuickTitle,
-                    category: quickEntryCategory,
-                    scheduledStart: today,
-                    plannedMinutes: 25,
-                    scheduleKind: .allDay,
-                    detailsConfigured: false
-                )
-            )
+            store.saveCheckIn(plan)
         }
         quickTitle = ""
         isQuickEntryFocused = true
+        readQuickEntry(plan)
+    }
+
+    /// The plan is already saved as typed. If the sentence carries a time, a
+    /// length or several things, ask what it says and offer it under the row.
+    private func readQuickEntry(_ plan: CheckInItem) {
+        guard ai.isReady, ai.settings.readsQuickEntry, AIDrafting.isWorthReading(plan.title) else { return }
+        readingEntryIDs.insert(plan.id)
+        Task { @MainActor in
+            // A failed reading is not worth a message: the plan is there either way.
+            let suggestion = try? await AIAssistant.shared.readEntry(plan.title)
+            withAnimation(.easeOut(duration: 0.25)) {
+                readingEntryIDs.remove(plan.id)
+                guard let suggestion, !suggestion.isEmpty,
+                      store.checkInItems.contains(where: {
+                          $0.id == plan.id && $0.title == plan.title && $0.status == .planned
+                      }) else { return }
+                entrySuggestions[plan.id] = suggestion
+            }
+        }
+    }
+
+    private func applySuggestion(_ suggestion: EntrySuggestion, to id: UUID) {
+        withAnimation(.easeOut(duration: 0.2)) { entrySuggestions[id] = nil }
+        guard let plan = store.checkInItems.first(where: { $0.id == id }),
+              let updated = suggestion.applied(to: plan) else { return }
+        let notice = suggestion.day.map { "已移到\(AIDrafting.dayText($0))，可在日历查看" } ?? "已按建议调整"
+        withAnimation(.spring(response: 0.42, dampingFraction: 0.84)) {
+            store.commitDrafts(changing: [updated], notice: notice)
+        }
+    }
+
+    private func splitEntry(_ suggestion: EntrySuggestion, id: UUID) {
+        withAnimation(.easeOut(duration: 0.2)) { entrySuggestions[id] = nil }
+        guard suggestion.parts.count >= 2,
+              let plan = store.checkInItems.first(where: { $0.id == id }), plan.kind == .planned else { return }
+        var first = plan
+        first.title = suggestion.parts[0]
+        let rest = suggestion.parts.dropFirst().map { part in
+            CheckInItem(
+                title: part,
+                category: plan.category,
+                scheduledStart: plan.scheduledStart,
+                plannedMinutes: plan.plannedMinutes,
+                scheduleKind: plan.effectiveScheduleKind,
+                detailsConfigured: plan.hasConfiguredDetails,
+                plannedDurationEnabled: plan.plannedDurationEnabled
+            )
+        }
+        withAnimation(.spring(response: 0.42, dampingFraction: 0.84)) {
+            store.commitDrafts(adding: Array(rest), changing: [first], notice: "已拆成 \(suggestion.parts.count) 条")
+        }
     }
 
     private var quickEntryCategory: RecordCategory {
@@ -870,6 +1006,9 @@ private struct MinimalPlanRow: View {
     let toggleExpansion: () -> Void
     let openEditor: () -> Void
     let openCopy: () -> Void
+    /// Present only while a model is set up; the argument says whether the
+    /// steps are meant to replace this plan.
+    var breakDown: ((Bool) -> Void)? = nil
 
     @State private var completionInkProgress = 0.0
     @State private var isCommittingCompletion = false
@@ -1026,6 +1165,9 @@ private struct MinimalPlanRow: View {
             HStack(spacing: 8) {
                 Menu {
                     Button("完整编辑", action: openEditor)
+                    if let breakDown, item.status == .planned || item.status == .inProgress {
+                        Button("拆成步骤") { breakDown(false) }
+                    }
                     Button("复制到今天") { store.copyPlan(item.id, to: Date()) }
                     Button("复制到指定日期", action: openCopy)
                     Button("保存为模板") { store.saveTemplate(from: item.id) }
@@ -1092,10 +1234,26 @@ private struct MinimalPlanRow: View {
     @ViewBuilder
     private var carryOverSeal: some View {
         if let days = carryOverDaysLate {
-            CarryOverDaySeal(daysLate: days, size: 22)
+            let seal = CarryOverDaySeal(daysLate: days, size: 22)
                 .accessibilityElement(children: .ignore)
                 .accessibilityLabel(CarryOverSeal.accessibilityLabel(daysLate: days))
                 .accessibilityHidden(false)
+            if let breakDown, item.status == .planned {
+                // A plan that keeps being carried over is usually too big, on
+                // the wrong day, or no longer wanted: the seal offers all three.
+                Menu {
+                    Button("拆小一点") { breakDown(true) }
+                    Button("改期") { quickField = .date }
+                    Button("放下") { store.skipCheckIn(id: item.id) }
+                } label: {
+                    seal
+                        .frame(width: 22, height: 44)
+                        .contentShape(Rectangle())
+                }
+                .accessibilityLabel("\(CarryOverSeal.accessibilityLabel(daysLate: days))，处理这个计划")
+            } else {
+                seal
+            }
         }
     }
 

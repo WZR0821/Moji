@@ -11,6 +11,16 @@
 		F15000000000000000000001 /* PlanWorkflow.swift in Sources */ = {isa = PBXBuildFile; fileRef = F15000000000000000000002; };
 		F15000000000000000000003 /* PlanWorkflow.swift in Sources */ = {isa = PBXBuildFile; fileRef = F15000000000000000000002; };
 		F15000000000000000000004 /* WorkflowViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = F15000000000000000000005; };
+		F1A100000000000000000002 /* AIProviderModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1A100000000000000000001 /* AIProviderModels.swift */; };
+		F1A100000000000000000004 /* AIKeychainStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1A100000000000000000003 /* AIKeychainStore.swift */; };
+		F1A100000000000000000006 /* AISettingsStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1A100000000000000000005 /* AISettingsStore.swift */; };
+		F1A100000000000000000008 /* AIClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1A100000000000000000007 /* AIClient.swift */; };
+		F1A100000000000000000010 /* AIDrafting.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1A100000000000000000009 /* AIDrafting.swift */; };
+		F1A100000000000000000012 /* AIAssistant.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1A100000000000000000011 /* AIAssistant.swift */; };
+		F1A100000000000000000014 /* AIQAFixture.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1A100000000000000000013 /* AIQAFixture.swift */; };
+		F1A100000000000000000016 /* AIDraftViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1A100000000000000000015 /* AIDraftViews.swift */; };
+		F1A100000000000000000018 /* AISettingsViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1A100000000000000000017 /* AISettingsViews.swift */; };
+		F1A100000000000000000020 /* AIFeatureViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1A100000000000000000019 /* AIFeatureViews.swift */; };
 		F0A100000000000000000001 /* JFZSKSealScript_V3.ttf in Resources */ = {isa = PBXBuildFile; fileRef = F0A200000000000000000001 /* JFZSKSealScript_V3.ttf */; };
 		F0A100000000000000000002 /* JFZSKSealScript-OFL.txt in Resources */ = {isa = PBXBuildFile; fileRef = F0A200000000000000000002 /* JFZSKSealScript-OFL.txt */; };
 		F0A100000000000000000003 /* JFZSKSealScript_V3.ttf in Resources */ = {isa = PBXBuildFile; fileRef = F0A200000000000000000001 /* JFZSKSealScript_V3.ttf */; };
@@ -82,6 +92,16 @@
 		F16000000000000000000002 /* PlanQuickEditor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlanQuickEditor.swift; sourceTree = "<group>"; };
 		F15000000000000000000002 /* PlanWorkflow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlanWorkflow.swift; sourceTree = "<group>"; };
 		F15000000000000000000005 /* WorkflowViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkflowViews.swift; sourceTree = "<group>"; };
+		F1A100000000000000000001 /* AIProviderModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIProviderModels.swift; sourceTree = "<group>"; };
+		F1A100000000000000000003 /* AIKeychainStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIKeychainStore.swift; sourceTree = "<group>"; };
+		F1A100000000000000000005 /* AISettingsStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AISettingsStore.swift; sourceTree = "<group>"; };
+		F1A100000000000000000007 /* AIClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIClient.swift; sourceTree = "<group>"; };
+		F1A100000000000000000009 /* AIDrafting.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIDrafting.swift; sourceTree = "<group>"; };
+		F1A100000000000000000011 /* AIAssistant.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIAssistant.swift; sourceTree = "<group>"; };
+		F1A100000000000000000013 /* AIQAFixture.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIQAFixture.swift; sourceTree = "<group>"; };
+		F1A100000000000000000015 /* AIDraftViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIDraftViews.swift; sourceTree = "<group>"; };
+		F1A100000000000000000017 /* AISettingsViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AISettingsViews.swift; sourceTree = "<group>"; };
+		F1A100000000000000000019 /* AIFeatureViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIFeatureViews.swift; sourceTree = "<group>"; };
 		F0A200000000000000000001 /* JFZSKSealScript_V3.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = JFZSKSealScript_V3.ttf; sourceTree = "<group>"; };
 		F0A200000000000000000002 /* JFZSKSealScript-OFL.txt */ = {isa = PBXFileReference; lastKnownFileType = text; path = "JFZSKSealScript-OFL.txt"; sourceTree = "<group>"; };
 		0B701438954AE234DF88C25B /* Moji.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = Moji.app; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -143,10 +163,28 @@
 			path = Dashboard;
 			sourceTree = "<group>";
 		};
+		F1A1000000000000000000FF /* AI */ = {
+			isa = PBXGroup;
+			children = (
+				F1A100000000000000000001 /* AIProviderModels.swift */,
+				F1A100000000000000000003 /* AIKeychainStore.swift */,
+				F1A100000000000000000005 /* AISettingsStore.swift */,
+				F1A100000000000000000007 /* AIClient.swift */,
+				F1A100000000000000000009 /* AIDrafting.swift */,
+				F1A100000000000000000011 /* AIAssistant.swift */,
+				F1A100000000000000000013 /* AIQAFixture.swift */,
+				F1A100000000000000000015 /* AIDraftViews.swift */,
+				F1A100000000000000000017 /* AISettingsViews.swift */,
+				F1A100000000000000000019 /* AIFeatureViews.swift */,
+			);
+			path = AI;
+			sourceTree = "<group>";
+		};
 		408D14888BBA8A2339A167DF /* Moji */ = {
 			isa = PBXGroup;
 			children = (
 				965651B8580B977C7F0B37E0 /* App */,
+				F1A1000000000000000000FF /* AI */,
 				A9BD1395A97AD8B702286C52 /* Views */,
 				A23B3EFF893E2C4DE2B049C7 /* Assets.xcassets */,
 			);
@@ -409,6 +447,16 @@
 				235FE8487A4D3BFE3360804F /* PlanModels.swift in Sources */,
 				F15000000000000000000001 /* PlanWorkflow.swift in Sources */,
 				F15000000000000000000004 /* WorkflowViews.swift in Sources */,
+				F1A100000000000000000002 /* AIProviderModels.swift in Sources */,
+				F1A100000000000000000004 /* AIKeychainStore.swift in Sources */,
+				F1A100000000000000000006 /* AISettingsStore.swift in Sources */,
+				F1A100000000000000000008 /* AIClient.swift in Sources */,
+				F1A100000000000000000010 /* AIDrafting.swift in Sources */,
+				F1A100000000000000000012 /* AIAssistant.swift in Sources */,
+				F1A100000000000000000014 /* AIQAFixture.swift in Sources */,
+				F1A100000000000000000016 /* AIDraftViews.swift in Sources */,
+				F1A100000000000000000018 /* AISettingsViews.swift in Sources */,
+				F1A100000000000000000020 /* AIFeatureViews.swift in Sources */,
 				CBB93044BEBF2B1F8ABB3D49 /* PlanStore.swift in Sources */,
 				5C49DE2AA0B407FCC52DD0AB /* RecordEditorView.swift in Sources */,
 				D45AA6445ED9780CF4DF6154 /* RecordsView.swift in Sources */,
@@ -562,7 +610,7 @@
 				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
 				CODE_SIGN_STYLE = Automatic;
 				COPY_PHASE_STRIP = NO;
-			CURRENT_PROJECT_VERSION = 45;
+			CURRENT_PROJECT_VERSION = 46;
 				DEBUG_INFORMATION_FORMAT = dwarf;
 				DEVELOPMENT_TEAM = "";
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
@@ -582,7 +630,7 @@
 				GCC_WARN_UNUSED_FUNCTION = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
-			MARKETING_VERSION = 1.7.0;
+			MARKETING_VERSION = 1.8.0;
 				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
 				MTL_FAST_MATH = YES;
 				ONLY_ACTIVE_ARCH = YES;
@@ -665,7 +713,7 @@
 				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
 				CODE_SIGN_STYLE = Automatic;
 				COPY_PHASE_STRIP = NO;
-			CURRENT_PROJECT_VERSION = 45;
+			CURRENT_PROJECT_VERSION = 46;
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
 				DEVELOPMENT_TEAM = "";
 				ENABLE_NS_ASSERTIONS = NO;
@@ -679,7 +727,7 @@
 				GCC_WARN_UNUSED_FUNCTION = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
-			MARKETING_VERSION = 1.7.0;
+			MARKETING_VERSION = 1.8.0;
 				MTL_ENABLE_DEBUG_INFO = NO;
 				MTL_FAST_MATH = YES;
 				PRODUCT_NAME = "$(TARGET_NAME)";

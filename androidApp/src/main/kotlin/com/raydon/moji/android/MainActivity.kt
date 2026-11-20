@@ -39,6 +39,8 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         handleNavigationIntent(intent)
+        if (BuildConfig.DEBUG) com.raydon.moji.android.ai.AIQAFixture.activate(
+            intent.getStringExtra("moji_qa_ai"), intent.getStringExtra("moji_qa_ai_delay")?.toDoubleOrNull(), intent.getStringExtra("moji_qa_ai_page"))
         if (BuildConfig.DEBUG && intent.getBooleanExtra("moji_qa_seed", false)) viewModel.seedVisualQa(intent.getStringExtra("moji_qa_route").orEmpty())
         enableEdgeToEdge(
             statusBarStyle = SystemBarStyle.auto(0xFFF7F4ED.toInt(), 0xFF11100E.toInt()),

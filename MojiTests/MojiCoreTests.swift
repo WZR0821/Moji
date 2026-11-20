@@ -2944,6 +2944,63 @@ final class MojiCoreTests: XCTestCase {
 
 }
 
+/// A save posts UserDefaults.didChangeNotification while the persistence lock is
+/// held, and SwiftUI may run pending view actions inside it that read the
+/// snapshot again. Before 1.8.0 that read waited on the same thread's lock and
+/// the app froze. The save runs on a worker thread here, so a regression fails
+/// after the timeout instead of hanging the whole run.
+final class MojiPersistenceReentryTests: XCTestCase {
+    func testReadingDuringSaveNotificationDoesNotWaitOnItself() throws {
+        let original = SharedPersistence.load()
+        defer { SharedPersistence.replace(with: original) }
+
+        final class Box: @unchecked Sendable {
+            let lock = NSLock()
+            var worker: Thread?
+            var entered = false
+            var nested: PlanSnapshot?
+        }
+        let box = Box()
+        let observer = NotificationCenter.default.addObserver(
+            forName: UserDefaults.didChangeNotification,
+            object: SharedPersistence.sharedDefaults,
+            queue: nil
+        ) { _ in
+            box.lock.lock()
+            let first = box.worker === Thread.current && !box.entered
+            if first { box.entered = true }
+            box.lock.unlock()
+            guard first else { return }
+            let snapshot = SharedPersistence.load()
+            // A nested write must also go through, and must not be overwritten
+            // by the outer save that is still on the stack.
+            SharedPersistence.mutate { $0.memos.removeAll { $0.content == "re-entry probe" } }
+            box.lock.lock()
+            box.nested = snapshot
+            box.lock.unlock()
+        }
+        defer { NotificationCenter.default.removeObserver(observer) }
+
+        let memo = MemoItem(content: "re-entry probe")
+        let finished = expectation(description: "save returns")
+        Thread.detachNewThread {
+            box.lock.lock()
+            box.worker = Thread.current
+            box.lock.unlock()
+            SharedPersistence.mutate { $0.memos.append(memo) }
+            finished.fulfill()
+        }
+        wait(for: [finished], timeout: 10)
+
+        box.lock.lock()
+        let nested = box.nested
+        box.lock.unlock()
+        let nestedSnapshot = try XCTUnwrap(nested)
+        XCTAssertTrue(nestedSnapshot.memos.contains { $0.id == memo.id }, "the nested read sees the save in progress")
+        XCTAssertFalse(SharedPersistence.load().memos.contains { $0.id == memo.id }, "the nested write is kept")
+    }
+}
+
 final class MojiAppGroupTests: XCTestCase {
     private let declared = AppGroupResolver.declaredIdentifier
 
@@ -3244,5 +3301,397 @@ private extension Data {
 
     mutating func appendLittleEndian(_ value: UInt32) {
         Swift.withUnsafeBytes(of: value.littleEndian) { append(contentsOf: $0) }
+    }
+}
+
+/// What the model answers is read here, never trusted: dates are worked out
+/// locally, unknown values are dropped, and nothing changes until accepted.
+final class MojiAIDraftingTests: XCTestCase {
+    private var calendar: Calendar { var c = Calendar(identifier: .gregorian); c.timeZone = TimeZone(identifier: "Asia/Tokyo")!; return c }
+    private func date(_ text: String) -> Date { ISO8601DateFormatter().date(from: text)! }
+    /// Thursday 2026-11-19, noon in Tokyo.
+    private var now: Date { date("2026-11-19T03:00:00Z") }
+    private let categories: [RecordCategory] = [.study, .work]
+
+    func testDayIsComputedLocallyFromTheThreeForms() {
+        func day(_ object: [String: Any]) -> Date? { AIDrafting.day(in: object, now: now, calendar: calendar) }
+        XCTAssertEqual(day(["date": "2026-12-05"]), date("2026-12-04T15:00:00Z"))
+        XCTAssertEqual(day(["offset_days": 1]), date("2026-11-19T15:00:00Z"))
+        XCTAssertEqual(day(["weekday": 6, "week_offset": 0]), date("2026-11-20T15:00:00Z"))
+        // “周三” said on a Thursday is the coming Wednesday, not yesterday.
+        XCTAssertEqual(day(["weekday": 3, "week_offset": 0]), date("2026-11-24T15:00:00Z"))
+        XCTAssertEqual(day(["weekday": 1, "week_offset": 1]), date("2026-11-22T15:00:00Z"))
+        XCTAssertNil(day(["date": "2026-02-30"]))
+        XCTAssertNil(day(["date": NSNull(), "offset_days": NSNull(), "weekday": 9]))
+        XCTAssertNil(day(["offset_days": -3]))
+        // 0 and 1 parsed from JSON are numbers, true and false are not.
+        XCTAssertEqual(try AIDrafting.object(in: #"{"a":0,"b":1,"c":1.0,"d":" 2 ","e":true,"f":false,"g":null,"h":1e9}"#)
+            .mapValues { AIDrafting.integer($0) }, ["a": 0, "b": 1, "c": 1, "d": 2, "e": nil, "f": nil, "g": nil, "h": nil])
+        XCTAssertEqual(try day(AIDrafting.object(in: #"{"offset_days":1}"#)), date("2026-11-19T15:00:00Z"))
+        XCTAssertNil(try day(AIDrafting.object(in: #"{"offset_days":true}"#)))
+    }
+
+    func testEntrySuggestionReadsAFencedAnswerAndDropsWhatIsNotOffered() throws {
+        let answer = "好的：\n```json\n{\"title\":\"交保险计划书\",\"offset_days\":1,\"part\":\"exact\",\"time\":\"15:00\",\"minutes\":45,\"category\":\"学习\",\"repeat\":\"weekly\",\"items\":[]}\n```"
+        let suggestion = try AIDrafting.entrySuggestion(from: answer, original: "明天下午三点交保险计划书 45分钟", now: now, categories: categories, calendar: calendar)
+        XCTAssertEqual(suggestion.title, "交保险计划书")
+        XCTAssertEqual(suggestion.day, date("2026-11-19T15:00:00Z"))
+        XCTAssertEqual(suggestion.scheduleKind, .exactTime)
+        XCTAssertEqual(suggestion.hour, 15); XCTAssertEqual(suggestion.minute, 0)
+        XCTAssertEqual(suggestion.minutes, 45)
+        XCTAssertEqual(suggestion.category, .study)
+        XCTAssertEqual(suggestion.repeatRule, .weekly)
+        XCTAssertTrue(suggestion.parts.isEmpty)
+        XCTAssertEqual(suggestion.chips(now: now, calendar: calendar), ["明天", "15:00", DurationText.full(minutes: 45), "学习", PlanRepeatRule.weekly.displayName])
+
+        let loose = try AIDrafting.entrySuggestion(
+            from: #"{"title":"读书","offset_days":0,"part":"exact","time":"25:00","minutes":99999,"category":"钓鱼","repeat":"yearly","items":["读书"]}"#,
+            original: "读书", now: now, categories: categories, calendar: calendar)
+        XCTAssertTrue(loose.isEmpty, "today, an impossible time, an unknown type and a single item leave nothing to suggest")
+        XCTAssertNil(loose.title)
+        XCTAssertThrowsError(try AIDrafting.entrySuggestion(from: "没有 JSON", original: "读书", now: now, categories: categories))
+    }
+
+    func testEntrySuggestionSplitsSeveralThings() throws {
+        let suggestion = try AIDrafting.entrySuggestion(
+            from: #"{"title":null,"items":["买菜","取快递","买菜","给妈妈打电话"]}"#,
+            original: "买菜、取快递、给妈妈打电话", now: now, categories: categories, calendar: calendar)
+        XCTAssertEqual(suggestion.parts, ["买菜", "取快递", "给妈妈打电话"])
+        XCTAssertFalse(suggestion.hasDetails); XCTAssertFalse(suggestion.isEmpty)
+    }
+
+    func testAppliedSuggestionChangesOnlyRecognisedFields() throws {
+        var original = CheckInItem(title: "明天下午三点交保险计划书 45分钟", category: .work, scheduledStart: date("2026-11-18T15:00:00Z"),
+                                   plannedMinutes: 25, scheduleKind: .allDay, detailsConfigured: false, plannedDurationEnabled: false)
+        original.reminderMinutesBefore = 10
+        var suggestion = EntrySuggestion(title: "交保险计划书", day: date("2026-11-19T15:00:00Z"), scheduleKind: .exactTime, hour: 15, minute: 0, minutes: 45)
+        let updated = try XCTUnwrap(suggestion.applied(to: original, calendar: calendar))
+        XCTAssertEqual(updated.id, original.id)
+        XCTAssertEqual(updated.title, "交保险计划书")
+        XCTAssertEqual(updated.scheduledStart, date("2026-11-20T06:00:00Z"))
+        XCTAssertEqual(updated.effectiveScheduleKind, .exactTime)
+        XCTAssertEqual(updated.plannedDurationMinutes, 45)
+        XCTAssertEqual(updated.category, .work, "a type the sentence did not name stays")
+        XCTAssertEqual(updated.reminderMinutesBefore, 10)
+        XCTAssertEqual(updated.status, .planned)
+
+        suggestion = EntrySuggestion(category: .study)
+        let typed = try XCTUnwrap(suggestion.applied(to: original, calendar: calendar))
+        XCTAssertEqual(typed.category, .study)
+        XCTAssertEqual(typed.scheduledStart, original.scheduledStart)
+        XCTAssertFalse(typed.hasPlannedDuration)
+        XCTAssertNil(EntrySuggestion().applied(to: original, calendar: calendar))
+
+        // A length on its own must not move a plan that already has a time.
+        let timed = CheckInItem(title: "开会", category: .work, scheduledStart: date("2026-11-19T00:30:00Z"), plannedMinutes: 25, plannedDurationEnabled: false)
+        let longer = try XCTUnwrap(EntrySuggestion(minutes: 60).applied(to: timed, calendar: calendar))
+        XCTAssertEqual(longer.scheduledStart, timed.scheduledStart)
+        XCTAssertEqual(longer.effectiveScheduleKind, .exactTime)
+        XCTAssertEqual(longer.plannedDurationMinutes, 60)
+    }
+
+    func testStepsOfACarriedOverPlanStartToday() throws {
+        let plan = CheckInItem(title: "写完研究计划书第三节", category: .study, scheduledStart: date("2026-11-16T01:00:00Z"), plannedMinutes: 90)
+        let drafts = try AIDrafting.steps(from: #"{"steps":[{"title":"列提纲","minutes":10},"查两篇文献",{"title":"  "},{"minutes":5}]}"#,
+                                          plan: plan, now: now, calendar: calendar)
+        XCTAssertEqual(drafts.map(\.title), ["列提纲", "查两篇文献"])
+        XCTAssertEqual(drafts.map(\.minutes), [10, nil])
+        XCTAssertTrue(drafts.allSatisfy { $0.day == date("2026-11-18T15:00:00Z") && $0.category == .study && $0.scheduleKind == .allDay })
+        let saved = drafts[0].plan(note: "拆自：写完研究计划书第三节", calendar: calendar)
+        XCTAssertEqual(saved.note, "拆自：写完研究计划书第三节")
+        XCTAssertEqual(saved.effectiveScheduleKind, .allDay)
+        XCTAssertEqual(saved.plannedDurationMinutes, 10)
+        XCTAssertNil(drafts[1].plan(calendar: calendar).plannedDurationMinutes)
+        XCTAssertThrowsError(try AIDrafting.steps(from: #"{"steps":[]}"#, plan: plan, now: now, calendar: calendar))
+
+        let future = CheckInItem(title: "订机票", category: .work, scheduledStart: date("2026-11-25T01:00:00Z"), plannedMinutes: 25)
+        XCTAssertEqual(try AIDrafting.steps(from: #"{"steps":["比价"]}"#, plan: future, now: now, calendar: calendar).first?.day,
+                       date("2026-11-24T15:00:00Z"))
+    }
+
+    func testReflectionShowsOnlyEvidenceFoundInTheRecord() throws {
+        let plans = [CheckInItem(title: "背单词", category: .study, scheduledStart: now, plannedMinutes: 25),
+                     CheckInItem(title: "写周报", category: .work, scheduledStart: now, plannedMinutes: 25)]
+        let draft = try AIDrafting.reflection(
+            from: #"{"note":"前半周很稳。","next_focus":"先拆第一步","evidence":[{"point":"按时完成","plans":[1,5]},{"point":"凭空的结论","plans":[9]},{"point":"没有依据"}]}"#,
+            plans: plans)
+        XCTAssertEqual(draft.note, "前半周很稳。"); XCTAssertEqual(draft.nextFocus, "先拆第一步")
+        XCTAssertEqual(draft.evidence, [ReflectionDraft.Evidence(point: "按时完成", planTitles: ["背单词"])])
+        XCTAssertThrowsError(try AIDrafting.reflection(from: #"{"note":"","evidence":[]}"#, plans: plans))
+        XCTAssertTrue(try AIDrafting.reflection(from: #"{"note":"空的一周","evidence":[{"point":"x","plans":[1]}]}"#, plans: []).evidence.isEmpty)
+    }
+
+    func testWeekRecordNumbersPlansAndSendsNoNotes() {
+        var done = CheckInItem(title: "背单词", category: .study, scheduledStart: date("2026-11-17T01:00:00Z"), plannedMinutes: 25, note: "私人备注")
+        done.status = .completed; done.completedAt = date("2026-11-17T02:00:00Z")
+        let open = CheckInItem(title: "写周报", category: .work, scheduledStart: date("2026-11-18T01:00:00Z"), plannedMinutes: 30)
+        let other = CheckInItem(title: "上上周的事", category: .work, scheduledStart: date("2026-11-03T01:00:00Z"), plannedMinutes: 30)
+        var snapshot = PlanSnapshot()
+        snapshot.checkInItems = [done, open, other]
+        let record = AIDrafting.weekRecord(snapshot: snapshot, week: now, now: now, calendar: calendar)
+        // Done first, then what is still open, oldest first; the numbers are what a point may cite.
+        XCTAssertEqual(record.plans.map(\.title), ["背单词", "上上周的事", "写周报"])
+        XCTAssertTrue(record.text.contains("[1] 背单词")); XCTAssertTrue(record.text.contains("[2] 上上周的事")); XCTAssertTrue(record.text.contains("[3] 写周报"))
+        XCTAssertTrue(record.text.contains("完成 1 项，没做完 2 项，跳过 0 项"))
+        XCTAssertTrue(record.text.contains("11月16日–11月22日"))
+        XCTAssertFalse(record.text.contains("私人备注"))
+    }
+
+    func testNextWeekAndPreparationDraftsStayInsideTheirDays() throws {
+        let next = try AIDrafting.nextWeekDrafts(
+            from: #"{"plans":[{"title":"补第三节","weekday":2,"part":"afternoon","minutes":60,"category":"学习","reason":"本周没做完"},{"title":"没有星期","weekday":null},{"title":"复盘","weekday":7,"category":"钓鱼"}]}"#,
+            week: now, fallbackCategory: .work, categories: categories, calendar: calendar)
+        XCTAssertEqual(next.map(\.title), ["补第三节", "复盘"])
+        XCTAssertEqual(next.map(\.day), [date("2026-11-23T15:00:00Z"), date("2026-11-28T15:00:00Z")])
+        XCTAssertEqual(next[0].scheduleKind, .afternoon); XCTAssertEqual(next[0].reason, "本周没做完")
+        XCTAssertEqual(next[1].category, .work, "an unknown type falls back, it is never invented")
+
+        let target = date("2026-11-28T15:00:00Z")
+        let prep = try AIDrafting.preparationDrafts(
+            from: #"{"plans":[{"title":"当天核对","days_before":0},{"title":"太早","days_before":30},{"title":"前三天","days_before":3},{"title":"负数","days_before":-2}]}"#,
+            target: target, now: now, fallbackCategory: .study, categories: categories, calendar: calendar)
+        XCTAssertEqual(prep.map(\.title), ["太早", "前三天", "当天核对"])
+        XCTAssertEqual(prep.map(\.day), [date("2026-11-18T15:00:00Z"), date("2026-11-25T15:00:00Z"), target])
+    }
+
+    func testImportedPlansNeverLandInThePast() throws {
+        let drafts = try AIDrafting.importDrafts(
+            from: #"{"plans":[{"title":"交终稿","date":"2026-11-01","part":"exact","time":"17:00"},{"title":"预约体检","weekday":5,"week_offset":0,"part":"morning","minutes":20},{"title":"回邮件"}]}"#,
+            now: now, fallbackCategory: .study, categories: categories, calendar: calendar)
+        XCTAssertEqual(drafts.map(\.day), [date("2026-11-18T15:00:00Z"), date("2026-11-19T15:00:00Z"), date("2026-11-18T15:00:00Z")])
+        XCTAssertEqual(drafts[0].scheduleKind, .exactTime); XCTAssertEqual(drafts[0].hour, 17)
+        XCTAssertEqual(drafts[0].plan(calendar: calendar).scheduledStart, date("2026-11-19T08:00:00Z"))
+        XCTAssertEqual(drafts[1].scheduleKind, .morning); XCTAssertEqual(drafts[1].minutes, 20)
+        XCTAssertEqual(drafts[2].scheduleKind, .allDay)
+    }
+
+    func testChecklistAndConversionHints() throws {
+        XCTAssertEqual(try AIDrafting.checklist(from: #"{"items":["打印准考证"," 打印准考证 ","",null,"带两支笔"]}"#), ["打印准考证", "带两支笔"])
+        XCTAssertThrowsError(try AIDrafting.checklist(from: #"{"items":[]}"#))
+        let hints = try AIDrafting.conversionHints(
+            from: #"{"rows":[{"index":0,"offset_days":1,"category":"学习"},{"index":1,"category":null},{"index":7,"offset_days":2},{"index":2,"weekday":5,"week_offset":0}]}"#,
+            rowCount: 3, now: now, categories: categories, calendar: calendar)
+        XCTAssertEqual(hints, [0: ConversionHint(day: date("2026-11-19T15:00:00Z"), category: .study),
+                               2: ConversionHint(day: date("2026-11-19T15:00:00Z"), category: nil)])
+        XCTAssertEqual(hints[0]?.text(now: now, calendar: calendar), "明天 · 学习")
+    }
+
+    func testLibraryFilterTurnsNamedPeriodsIntoRanges() throws {
+        let filter = try AIDrafting.libraryFilter(from: #"{"keyword":null,"category":"学习","status":"planned","period":"last_week"}"#,
+                                                  now: now, categories: categories, calendar: calendar)
+        XCTAssertEqual(filter, LibraryFilter(keyword: "", category: "study", status: "planned", period: "range",
+                                             from: date("2026-11-08T15:00:00Z"), to: date("2026-11-14T15:00:00Z")))
+        let month = try AIDrafting.libraryFilter(from: #"{"keyword":"保险","period":"last_month","status":"weird"}"#,
+                                                 now: now, categories: categories, calendar: calendar)
+        XCTAssertEqual(month.keyword, "保险"); XCTAssertEqual(month.status, "all")
+        XCTAssertEqual(month.from, date("2026-09-30T15:00:00Z")); XCTAssertEqual(month.to, date("2026-10-30T15:00:00Z"))
+        let range = try AIDrafting.libraryFilter(from: #"{"period":"range","from":"2026-11-01","to":"2026-11-10"}"#,
+                                                 now: now, categories: categories, calendar: calendar)
+        XCTAssertEqual(range.from, date("2026-10-31T15:00:00Z")); XCTAssertEqual(range.to, date("2026-11-09T15:00:00Z"))
+        XCTAssertThrowsError(try AIDrafting.libraryFilter(from: #"{"status":"all","period":"all"}"#, now: now, categories: categories, calendar: calendar))
+        XCTAssertThrowsError(try AIDrafting.libraryFilter(from: #"{"period":"range","from":"2026-11-10","to":"2026-11-01"}"#,
+                                                          now: now, categories: categories, calendar: calendar))
+    }
+
+    func testOnlyTextWorthReadingIsSent() {
+        XCTAssertFalse(AIDrafting.isWorthReading("买菜"))
+        XCTAssertFalse(AIDrafting.isWorthReading("跑步"))
+        XCTAssertTrue(AIDrafting.isWorthReading("明天下午三点交保险计划书"))
+        XCTAssertTrue(AIDrafting.isWorthReading("买菜、取快递"))
+        XCTAssertFalse(AIDrafting.isWorthReading(String(repeating: "明天", count: 150)))
+        XCTAssertFalse(AIDrafting.looksLikeFilterSentence("保险"))
+        XCTAssertTrue(AIDrafting.looksLikeFilterSentence("上周没做完的学习计划"))
+        let plan = CheckInItem(title: "写第三节", category: .study, scheduledStart: now, plannedMinutes: 90, note: "参考中出 2019", plannedDurationEnabled: true)
+        XCTAssertEqual(AIDrafting.breakdownInput(plan), "计划：写第三节\n备注：参考中出 2019\n预计投入：90 分钟")
+    }
+
+    func testDraftUndoTakesBackOnlyWhatWasNotTouchedSince() {
+        let original = CheckInItem(title: "大计划", category: .study, scheduledStart: now, plannedMinutes: 25)
+        var archived = original; archived.isArchived = true
+        let first = CheckInItem(title: "第一步", category: .study, scheduledStart: now, plannedMinutes: 25)
+        let second = CheckInItem(title: "第二步", category: .study, scheduledStart: now, plannedMinutes: 25)
+        let undo = PlanDraftUndo(added: [first, second], changed: PlanWorkflowUndo(before: [original], after: [archived]))
+
+        var state = PlanSnapshot()
+        state.checkInItems = [archived, first, second]
+        var untouched = state
+        XCTAssertEqual(undo.apply(to: &untouched), 3)
+        XCTAssertEqual(untouched.checkInItems, [original])
+
+        var edited = second; edited.title = "第二步（改过）"
+        state.checkInItems = [archived, first, edited]
+        XCTAssertEqual(undo.apply(to: &state), 2)
+        XCTAssertEqual(state.checkInItems, [original, edited], "a step edited after it was accepted stays")
+
+        state.checkInItems = [archived, first, second]
+        XCTAssertEqual(undo.apply(to: &state, blockedID: first.id), 2)
+        XCTAssertEqual(state.checkInItems.map(\.id), [original.id, first.id])
+    }
+
+    func testFixtureAnswersUsedForScreenshotsAreReadable() throws {
+        let today = Date()
+        let entry = AIQAFixture.answer(instructions: AIDrafting.entryInstructions(now: today, categories: categories), input: "明天下午三点交保险计划书 45分钟")
+        XCTAssertTrue(try AIDrafting.entrySuggestion(from: entry, original: "明天下午三点交保险计划书 45分钟", now: today, categories: categories).hasDetails)
+        let split = AIQAFixture.answer(instructions: AIDrafting.entryInstructions(now: today, categories: categories), input: "买菜、取快递、给妈妈打电话")
+        XCTAssertEqual(try AIDrafting.entrySuggestion(from: split, original: "买菜、取快递、给妈妈打电话", now: today, categories: categories).parts.count, 3)
+        let plan = CheckInItem(title: "写完研究计划书第三节", category: .study, scheduledStart: today, plannedMinutes: 90)
+        XCTAssertEqual(try AIDrafting.steps(from: AIQAFixture.answer(instructions: AIDrafting.breakdownInstructions, input: ""), plan: plan).count, 4)
+        XCTAssertEqual(try AIDrafting.checklist(from: AIQAFixture.answer(instructions: AIDrafting.checklistInstructions, input: "")).count, 4)
+        XCTAssertEqual(try AIDrafting.conversionHints(from: AIQAFixture.answer(instructions: AIDrafting.conversionInstructions(now: today, categories: categories), input: ""),
+                                                      rowCount: 4, now: today, categories: categories).count, 2)
+        XCTAssertEqual(try AIDrafting.reflection(from: AIQAFixture.answer(instructions: AIDrafting.reflectionInstructions, input: ""),
+                                                 plans: [plan, plan, plan]).evidence.count, 2)
+        XCTAssertEqual(try AIDrafting.nextWeekDrafts(from: AIQAFixture.answer(instructions: AIDrafting.nextWeekInstructions(categories: categories), input: ""),
+                                                     week: today, fallbackCategory: .study, categories: categories).count, 4)
+        XCTAssertEqual(try AIDrafting.preparationDrafts(from: AIQAFixture.answer(instructions: AIDrafting.preparationInstructions(daysLeft: 20, categories: categories), input: ""),
+                                                        target: today.addingTimeInterval(20 * 86_400), now: today, fallbackCategory: .study, categories: categories).count, 4)
+        XCTAssertEqual(try AIDrafting.libraryFilter(from: AIQAFixture.answer(instructions: AIDrafting.filterInstructions(now: today, categories: categories), input: ""),
+                                                    now: today, categories: categories).status, "planned")
+        XCTAssertEqual(try AIDrafting.importDrafts(from: AIQAFixture.answer(instructions: AIDrafting.importInstructions(now: today, categories: categories), input: ""),
+                                                   now: today, fallbackCategory: .study, categories: categories).count, 3)
+    }
+}
+
+/// The settings that decide whether anything is sent, and the request itself.
+final class MojiAISettingsTests: XCTestCase {
+    private var suite = ""
+    private var defaults: UserDefaults!
+
+    override func setUp() {
+        super.setUp()
+        suite = "moji.tests.ai." + UUID().uuidString
+        defaults = UserDefaults(suiteName: suite)
+    }
+
+    override func tearDown() {
+        defaults.removePersistentDomain(forName: suite)
+        super.tearDown()
+    }
+
+    @MainActor
+    func testNothingIsReadyUntilEnabledWithAKey() throws {
+        let keys = AIMemoryKeyStore()
+        let store = AISettingsStore(defaults: defaults, keys: keys)
+        XCTAssertFalse(store.isReady)
+        XCTAssertThrowsError(try store.credentials()) { XCTAssertEqual($0 as? AIRequestError, .disabled) }
+
+        try store.change { $0.isEnabled = true }
+        XCTAssertFalse(store.isReady, "on, but no key yet")
+        XCTAssertThrowsError(try store.credentials()) { XCTAssertEqual($0 as? AIRequestError, .missingKey) }
+
+        let added = try store.addProvider(.deepSeek, configuration: ProviderConfiguration(provider: .deepSeek), key: "  sk-test-123  ")
+        XCTAssertEqual(added.id, "deepSeek"); XCTAssertTrue(added.activated)
+        XCTAssertTrue(store.isReady)
+        let credentials = try store.credentials()
+        XCTAssertEqual(credentials.apiKey, "sk-test-123")
+        XCTAssertEqual(credentials.configuration.model, AIProvider.deepSeek.models.first?.id)
+
+        try store.change { $0.isEnabled = false }
+        XCTAssertFalse(store.isReady)
+    }
+
+    @MainActor
+    func testKeysAreNotWrittenIntoSettingsAndSurviveAReload() throws {
+        let keys = AIMemoryKeyStore()
+        let store = AISettingsStore(defaults: defaults, keys: keys)
+        try store.addProvider(.deepSeek, configuration: ProviderConfiguration(provider: .deepSeek), key: "sk-secret-value")
+        try store.change { $0.isEnabled = true }
+        let saved = try XCTUnwrap(defaults.data(forKey: AISettingsStore.defaultsKey))
+        XCTAssertFalse(String(decoding: saved, as: UTF8.self).contains("sk-secret-value"))
+
+        let reloaded = AISettingsStore(defaults: defaults, keys: keys)
+        XCTAssertTrue(reloaded.isReady)
+        XCTAssertEqual(reloaded.settings, store.settings)
+        XCTAssertFalse(AISettingsStore(defaults: defaults, keys: AIMemoryKeyStore()).isReady, "the same settings on a device without the key")
+    }
+
+    @MainActor
+    func testAddingASecondProviderDoesNotSwitchAndTheOneInUseCannotBeRemoved() throws {
+        let store = AISettingsStore(defaults: defaults, keys: AIMemoryKeyStore())
+        try store.addProvider(.deepSeek, configuration: ProviderConfiguration(provider: .deepSeek), key: "k1")
+        let second = try store.addProvider(.claude, configuration: ProviderConfiguration(provider: .claude), key: "k2")
+        XCTAssertFalse(second.activated)
+        XCTAssertEqual(store.settings.activeID, "deepSeek")
+        XCTAssertEqual(store.listedProviderIDs, ["deepSeek", "claude"])
+
+        try store.removeProvider("deepSeek")
+        XCTAssertEqual(store.listedProviderIDs, ["deepSeek", "claude"])
+        try store.removeProvider("claude")
+        XCTAssertEqual(store.listedProviderIDs, ["deepSeek"])
+        XCTAssertEqual(store.apiKey(for: "claude"), "")
+    }
+
+    @MainActor
+    func testAnAddressThatIsNotHTTPSIsRefusedAndNothingIsSaved() {
+        let keys = AIMemoryKeyStore()
+        let store = AISettingsStore(defaults: defaults, keys: keys)
+        var configuration = ProviderConfiguration(provider: .custom)
+        configuration.baseURL = "http://example.com/v1"
+        configuration.model = "some-model"
+        XCTAssertThrowsError(try store.addProvider(.custom, configuration: configuration, key: "k")) {
+            XCTAssertEqual($0 as? AIRequestError, .invalidURL)
+        }
+        XCTAssertEqual(store.apiKey(for: "custom"), "")
+        XCTAssertNil(defaults.data(forKey: AISettingsStore.defaultsKey))
+    }
+
+    func testEndpointAcceptsABaseAddressOrAFullOne() throws {
+        var configuration = ProviderConfiguration(provider: .custom)
+        configuration.style = .chatCompletions
+        configuration.baseURL = "https://api.example.com/v1/"
+        XCTAssertEqual(try AIClient.endpoint(configuration: configuration).absoluteString, "https://api.example.com/v1/chat/completions")
+        configuration.baseURL = "https://api.example.com/v1/chat/completions"
+        XCTAssertEqual(try AIClient.endpoint(configuration: configuration).absoluteString, "https://api.example.com/v1/chat/completions")
+        XCTAssertEqual(try AIClient.endpoint(configuration: configuration, models: true).absoluteString, "https://api.example.com/v1/models")
+        configuration.style = .anthropicMessages
+        XCTAssertEqual(try AIClient.endpoint(configuration: configuration).absoluteString, "https://api.example.com/v1/messages")
+        for bad in ["http://api.example.com/v1", "https://user:pass@api.example.com/v1", "https://api.example.com/v1?key=1", "api.example.com", ""] {
+            configuration.baseURL = bad
+            XCTAssertThrowsError(try AIClient.endpoint(configuration: configuration), bad)
+        }
+    }
+
+    func testRequestBodyCarriesOnlyTheInstructionsAndTheText() throws {
+        var configuration = ProviderConfiguration(provider: .custom)
+        configuration.model = "m"
+        configuration.style = .chatCompletions
+        let chat = AIClient.body(instructions: "指令", input: "原文", provider: .custom, configuration: configuration, model: "m")
+        XCTAssertEqual(Set(chat.keys), ["model", "messages"])
+        XCTAssertEqual(chat["messages"] as? [[String: String]], [["role": "system", "content": "指令"], ["role": "user", "content": "原文"]])
+
+        configuration.style = .anthropicMessages
+        let messages = AIClient.body(instructions: "指令", input: "原文", provider: .custom, configuration: configuration, model: "m")
+        XCTAssertEqual(messages["system"] as? String, "指令")
+        XCTAssertEqual(messages["messages"] as? [[String: String]], [["role": "user", "content": "原文"]])
+        XCTAssertNotNil(messages["max_tokens"])
+
+        configuration.style = .responses
+        let responses = AIClient.body(instructions: "指令", input: "原文", provider: .custom, configuration: configuration, model: "m")
+        XCTAssertEqual(responses["instructions"] as? String, "指令"); XCTAssertEqual(responses["input"] as? String, "原文")
+        XCTAssertEqual(responses["store"] as? Bool, false)
+    }
+
+    func testAnswersAreReadFromAllThreeInterfaceFormats() throws {
+        func data(_ object: Any) throws -> Data { try JSONSerialization.data(withJSONObject: object) }
+        XCTAssertEqual(try AIClient.parseText(try data(["choices": [["message": ["content": " 好 "], "finish_reason": "stop"]]]), style: .chatCompletions), "好")
+        XCTAssertEqual(try AIClient.parseText(try data(["content": [["type": "thinking", "thinking": "…"], ["type": "text", "text": "好"]], "stop_reason": "end_turn"]),
+                                              style: .anthropicMessages), "好")
+        XCTAssertEqual(try AIClient.parseText(try data(["status": "completed", "output": [["type": "message", "content": [["type": "output_text", "text": "好"]]]]]),
+                                              style: .responses), "好")
+        XCTAssertThrowsError(try AIClient.parseText(try data(["choices": [["message": ["content": "半句"], "finish_reason": "length"]]]), style: .chatCompletions)) {
+            XCTAssertEqual($0 as? AIRequestError, .incompleteResponse)
+        }
+        XCTAssertThrowsError(try AIClient.parseText(try data(["choices": [["message": ["content": ""], "finish_reason": "stop"]]]), style: .chatCompletions))
+        XCTAssertThrowsError(try AIClient.parseText(Data("not json".utf8), style: .responses))
+    }
+
+    func testStubbedProviderAnswersEachInterfaceFormat() throws {
+        let body = try JSONSerialization.data(withJSONObject: ["model": "m", "messages": [["role": "system", "content": AIDrafting.checklistInstructions],
+                                                                                         ["role": "user", "content": "备忘"]]])
+        for (path, style) in [("/v1/chat/completions", APIStyle.chatCompletions), ("/v1/messages", .anthropicMessages), ("/v1/responses", .responses)] {
+            let (status, data) = AIQAStubProtocol.response(path: path, body: body)
+            XCTAssertEqual(status, 200)
+            XCTAssertEqual(try AIDrafting.checklist(from: try AIClient.parseText(data, style: style)).count, 4, path)
+        }
     }
 }

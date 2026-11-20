@@ -45,7 +45,7 @@ import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 
 @Composable
-fun CountdownEditorScreenDialog(existing: CountdownEvent?, viewModel: MojiViewModel, context: String = "upcoming", onDismiss: () -> Unit) {
+fun CountdownEditorScreenDialog(existing: CountdownEvent?, viewModel: MojiViewModel, context: String = "upcoming", onCreated: ((CountdownEvent) -> Unit)? = null, onDismiss: () -> Unit) {
     val oldDate = existing?.let { Instant.parse(it.targetDate).atZone(ZoneId.systemDefault()).toLocalDate() }
     val draftId = remember(existing?.id) { existing?.id ?: java.util.UUID.randomUUID().toString() }
     var title by remember(existing?.id) { mutableStateOf(existing?.title ?: "") }
@@ -74,7 +74,7 @@ fun CountdownEditorScreenDialog(existing: CountdownEvent?, viewModel: MojiViewMo
                     if (advanced) editorTitle else "取消", if (advanced) "" else "保存", { if (advanced) advanced = false else requestDismiss() }, {
                         focusManager.clearFocus()
                         if (title.isNotBlank()) viewModel.saveCountdown(draftId, title, date, repeat, includesToday, pinned, calendarSync,
-                            existing?.symbolName ?: if (context == "past") "seal" else "hourglass", existing?.colorName ?: "vermilion", onSaved = onDismiss)
+                            existing?.symbolName ?: if (context == "past") "seal" else "hourglass", existing?.colorName ?: "vermilion", onCreated = onCreated, onSaved = onDismiss)
                     }, title.isNotBlank() || titleFocused, leadingIsBack = advanced)
                 // The main form uses 12pt section spacing; the pushed settings page keeps the inset-grouped default.
                 LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(top = 7.dp, bottom = 36.dp), verticalArrangement = Arrangement.spacedBy(if (advanced) 24.dp else 12.dp)) {

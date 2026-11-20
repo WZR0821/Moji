@@ -278,6 +278,58 @@ class MojiViewModel(application: Application) : AndroidViewModel(application) {
         message.value = "已撤销整理；后续已修改的计划保持不变"
     }
 
+    /** The plan a running focus session holds; drafts never move or remove it. */
+    private val focusBlockedPlanId: String?
+        get() = pomodoro.value.linkedPlanId.takeIf { it.isNotBlank() && pomodoro.value.phase == "focus" && (pomodoro.value.running || pomodoro.value.accumulatedSeconds > 0) }
+
+    val draftUndo = MutableStateFlow<com.raydon.moji.android.ai.PlanDraftUndo?>(null)
+    val draftNotice = MutableStateFlow<String?>(null)
+
+    /**
+     * Writes accepted drafts in one step and remembers how to take them back.
+     * [changed] replaces plans that already exist; [added] appends new ones.
+     */
+    fun commitDrafts(added: List<CheckInItem> = emptyList(), changed: List<CheckInItem> = emptyList(), notice: String, onSaved: (() -> Unit)? = null) = launchMutation {
+        val changedIds = mutableListOf<String>()
+        val before = mutableListOf<CheckInItem>()
+        val insertedIds = mutableListOf<String>()
+        app.repository.mutate { state ->
+            changedIds.clear(); before.clear(); insertedIds.clear()
+            val items = state.checkInItems.toMutableList()
+            for (item in changed) {
+                val index = items.indexOfFirst { it.id == item.id }
+                if (index < 0 || items[index] == item || state.activeSession?.checkInItemID == item.id || item.id == focusBlockedPlanId) continue
+                before += items[index]; changedIds += item.id; items[index] = item
+            }
+            for (item in added) if (items.none { it.id == item.id }) { items += item; insertedIds += item.id }
+            state.copy(checkInItems = items)
+        }
+        if (insertedIds.isEmpty() && changedIds.isEmpty()) return@launchMutation
+        // Remember the plans as they were stored, so a later edit is told apart from the draft itself.
+        val stored = app.repository.freshSnapshot().checkInItems.associateBy { it.id }
+        draftUndo.value = com.raydon.moji.android.ai.PlanDraftUndo(
+            added = insertedIds.mapNotNull { stored[it] },
+            changed = PlanWorkflowUndo(before.toList(), changedIds.mapNotNull { stored[it] }),
+        )
+        draftNotice.value = notice
+        onSaved?.invoke()
+    }
+
+    fun undoDrafts() = launchMutation {
+        val undo = draftUndo.value ?: return@launchMutation
+        var count = 0
+        app.repository.mutate { state -> undo.apply(state, focusBlockedPlanId).let { (next, undone) -> count = undone; next } }
+        draftUndo.value = null
+        val total = undo.added.size + undo.changed.before.size
+        draftNotice.value = when {
+            count == total -> "已撤销"
+            count > 0 -> "已撤销 $count 条；之后改过的保持不变"
+            else -> "这些计划之后都改过，保持不变"
+        }
+    }
+
+    fun clearDraftNotice() { draftNotice.value = null; draftUndo.value = null }
+
     fun saveWeeklyGoal(goal: WeeklyGoal, onSaved: (() -> Unit)? = null) = saveOperation(goal.id) {
         if ((goal.targetCount == null && goal.targetMinutes == null) || goal.targetCount?.let { it < 1 } == true || goal.targetMinutes?.let { it < 1 } == true) return@saveOperation
         app.repository.mutate { state -> state.copy(weeklyGoals = state.weeklyGoals.filterNot { it.id == goal.id || (it.weekStart == goal.weekStart && it.category == goal.category) } + goal) }
@@ -354,6 +406,7 @@ class MojiViewModel(application: Application) : AndroidViewModel(application) {
         calendarSync: Boolean,
         symbolName: String = "flag.fill",
         colorName: String = "ink",
+        onCreated: ((CountdownEvent) -> Unit)? = null,
         onSaved: (() -> Unit)? = null,
     ) {
         if (title.isBlank()) return
@@ -379,6 +432,7 @@ class MojiViewModel(application: Application) : AndroidViewModel(application) {
             }
             app.repository.saveCountdown(event)
             afterMutation()
+            if (old == null) onCreated?.invoke(event)
             onSaved?.invoke()
         }
     }
@@ -666,6 +720,10 @@ class MojiViewModel(application: Application) : AndroidViewModel(application) {
             resetPomodoro()
             visualQaRoute.value = route
             selectedTab.value = when {
+                route.startsWith("ai-memo") -> 1
+                route.startsWith("ai-preparation") -> 2
+                route == "ai" || route.startsWith("ai:") || route.startsWith("ai-reflection") || route == "ai-next-week" -> 3
+                route.startsWith("ai-") -> 0
                 route.startsWith("memo") -> 1
                 route.startsWith("moment") || route.startsWith("focus") -> 2
                 route.startsWith("review") || route.startsWith("settings") || route in listOf("goal", "reflection", "next-week", "record-editor", "record-untimed") -> 3

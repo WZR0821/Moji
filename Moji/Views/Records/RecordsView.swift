@@ -400,7 +400,7 @@ struct PersonalView: View {
 #if DEBUG
                 guard !didRunSettingsQAScenario else { return }
                 let scenario = ProcessInfo.processInfo.environment["MOJI_QA_SCENARIO"]
-                if let scenario, scenario.hasPrefix("workflow-") {
+                if let scenario, scenario.hasPrefix("workflow-") || ["ai-reflection", "ai-reflection-applied", "ai-next-week"].contains(scenario) {
                     didRunSettingsQAScenario = true
                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
                         if scenario.hasPrefix("workflow-settings") { isPresentingSettings = true }
@@ -437,6 +437,10 @@ struct PersonalView: View {
                 case "workflow-goal": WeeklyGoalEditor(store: store, week: Date(), goal: store.snapshot.weeklyGoals.first)
                 case "workflow-reflection": WeeklyReflectionEditor(store: store, week: Date(), reflection: store.snapshot.weeklyReflections.first)
                 case "workflow-next-week": NextWeekPlansSheet(store: store, week: Date())
+                case "ai-reflection", "ai-reflection-applied": WeeklyReflectionEditor(store: store, week: Date(), reflection: nil)
+                case "ai-next-week":
+                    PlanDraftSheet(store: store, title: "下周草稿", subject: "按这一周的记录和“下周关注”拟的", waitingText: "正在拟下周",
+                                   load: { try await AIAssistant.shared.draftNextWeek(snapshot: store.snapshot, week: Date()) })
                 default: EmptyView()
                 }
             }
@@ -697,6 +701,7 @@ struct PersonalView: View {
 
 private struct SettingsView: View {
     @ObservedObject var store: PlanStore
+    @ObservedObject private var ai = AISettingsStore.shared
     @Environment(\.dismiss) private var dismiss
     @State private var visualQAPath: [String] = []
 
@@ -794,6 +799,16 @@ private struct SettingsView: View {
                             symbol: "paintbrush"
                         )
                     }
+
+                    NavigationLink {
+                        AIModelSettingsView()
+                    } label: {
+                        settingsRow(
+                            title: "AI 模型",
+                            detail: aiDetail,
+                            symbol: "cpu"
+                        )
+                    }
                 }
 
                 Section("系统与数据") {
@@ -848,6 +863,7 @@ private struct SettingsView: View {
                 case "pomodoro": PomodoroSettingsView()
                 case "notifications": NotificationFeedbackSettingsView(store: store)
                 case "appearance": AppearanceSettingsView()
+                case "ai": AIModelSettingsView()
                 case "permissions": PermissionSettingsView()
                 case "backup": BackupSettingsView(store: store)
                 case "about": AboutSettingsView()
@@ -916,6 +932,11 @@ private struct SettingsView: View {
         let reminder = planNotificationsEnabled ? "提醒开" : "提醒关"
         let sound = notificationSoundEnabled ? "声音开" : "静音"
         return "全天 \(String(format: "%02d:00", allDayReminderHour)) · \(reminder) · \(sound)"
+    }
+
+    private var aiDetail: String {
+        guard ai.settings.isEnabled else { return "未开启" }
+        return ai.isReady ? ai.settings.engineLabel : "已开启 · 还没有填密钥"
     }
 
     private var appearanceDetail: String {
