@@ -80,10 +80,12 @@ import com.raydon.moji.android.FormToggle
 import com.raydon.moji.android.InkAsset
 import com.raydon.moji.android.InkDraftWaiting
 import com.raydon.moji.android.InkSeal
+import com.raydon.moji.android.AIWritesPage
 import com.raydon.moji.android.MojiIcon
 import com.raydon.moji.android.MojiLineIcon
 import com.raydon.moji.android.MojiScreen
 import com.raydon.moji.android.MojiSheetBar
+import com.raydon.moji.android.MojiViewModel
 import com.raydon.moji.android.inkSeed
 import com.raydon.moji.android.iosFill
 import com.raydon.moji.android.iosSecondaryLabel
@@ -107,6 +109,7 @@ private sealed interface AIRoute {
     object AddCustom : AIRoute
     class AddPreset(val provider: AIProvider) : AIRoute
     object Help : AIRoute
+    object Writes : AIRoute
     class Provider(val entryID: String) : AIRoute
     class Credentials(val entryID: String) : AIRoute
     class AddModel(val entryID: String) : AIRoute
@@ -121,6 +124,7 @@ private fun aiRoute(page: String): AIRoute? {
         "ai:add" -> return AIRoute.Add
         "ai:add-custom" -> return AIRoute.AddCustom
         "ai:help" -> return AIRoute.Help
+        "ai:writes" -> return AIRoute.Writes
     }
     if (page.startsWith("ai:add:")) {
         val provider = AIProvider.from(page.removePrefix("ai:add:")) ?: return null
@@ -195,7 +199,13 @@ fun aiQaInitialPage(): String? {
  * next page, or null to go back to the settings list.
  */
 @Composable
-fun AISettingsScreen(page: String, onOpen: (String?) -> Unit) {
+fun AISettingsScreen(
+    page: String,
+    rootBackTitle: String = "设置",
+    /** For 今天的整理, which takes writes back; without it the row is left out. */
+    viewModel: MojiViewModel? = null,
+    onOpen: (String?) -> Unit,
+) {
     val store = AISettingsStore.shared
     val settings by store.settings.collectAsStateWithLifecycle()
     val keyed by store.keyedIDs.collectAsStateWithLifecycle()
@@ -209,12 +219,13 @@ fun AISettingsScreen(page: String, onOpen: (String?) -> Unit) {
     val added: (String) -> Unit = { message -> notice = message; onOpen("ai") }
     Column(Modifier.fillMaxSize()) {
         when (route) {
-            null, AIRoute.Root -> AIModelSettingsPage(store, settings, keyed, notice, { notice = it }, onOpen)
+            null, AIRoute.Root -> AIModelSettingsPage(store, settings, keyed, notice, { notice = it }, rootBackTitle, viewModel != null, onOpen)
             AIRoute.Switcher -> AIModelSwitcherPage(store, settings, keyed, { notice = it }, onOpen)
             AIRoute.Add -> AIAddProviderPage(keyed, onOpen)
             AIRoute.AddCustom -> AIProviderSetupForm(store, AIProvider.custom, added, onOpen)
             is AIRoute.AddPreset -> AIProviderSetupForm(store, route.provider, added, onOpen)
             AIRoute.Help -> AIHelpPage(onOpen)
+            AIRoute.Writes -> if (viewModel != null) AIWritesPage(viewModel) { onOpen("ai") } else LaunchedEffect(page) { onOpen("ai") }
             is AIRoute.Provider -> AIProviderDetailPage(store, settings, keyed, route.entryID, onOpen)
             is AIRoute.Credentials -> AIProviderCredentialsPage(store, settings, keyed, route.entryID, onOpen)
             is AIRoute.AddModel -> AIAddModelPage(store, settings, keyed, route.entryID, onOpen)
@@ -652,12 +663,17 @@ private fun AIModelSettingsPage(
     keyed: Set<String>,
     notice: String?,
     setNotice: (String?) -> Unit,
+    /** 设置 from the settings list; 返回 inside the intro sheet. */
+    backTitle: String,
+    /** Whether 今天的整理 can open here: it needs the plans to take writes back from. */
+    showsWrites: Boolean,
     onOpen: (String?) -> Unit,
 ) {
+    val writes by AIWriteLog.shared.entries.collectAsStateWithLifecycle()
     val activeHasKey = settings.activeID in keyed
     val ready = settings.isEnabled && activeHasKey && settings.configuration.model.isNotBlank()
     Box(Modifier.fillMaxWidth()) {
-        MojiSheetBar("AI 模型", "设置", "", { onOpen(null) }, {}, leadingIsBack = true)
+        MojiSheetBar("AI 模型", backTitle, "", { onOpen(null) }, {}, leadingIsBack = true)
         // MojiSheetBar has no icon slot; the help button sits over its empty trailing side.
         Box(
             Modifier.align(Alignment.CenterEnd).padding(end = 18.dp).size(44.dp)
@@ -677,10 +693,34 @@ private fun AIModelSettingsPage(
             )
         )
         AISection(flow.place(null, true), footer = enabledFooter) {
-            FormToggle("使用 AI 整理", settings.isEnabled, { value -> setNotice(store.tryChange { it.copy(isEnabled = value) }) })
-            if (settings.isEnabled) {
-                FormSeparator()
-                FormToggle("识别首页写下的计划", settings.readsQuickEntry, { value -> setNotice(store.tryChange { it.copy(readsQuickEntry = value) }) })
+            FormToggle("使用 AI 整理", settings.isEnabled, { value ->
+                setNotice(store.tryChange { it.copy(isEnabled = value) })
+                AIWeeklyLetterState.reschedule()
+            })
+        }
+
+        val placesFooter = listOf(AIFooter("日期、钟点和时长在本机识别。开着今日提要或晚间收尾时，当天第一次显示会把今天计划的标题、时间和最近的倒数日发给模型；本周来信每周把这一周的计划记录发一次。没开启 AI 整理时，点入口会先介绍怎么开启。"))
+        AISection(flow.place("在哪里出现", true), "在哪里出现", placesFooter) {
+            FormToggle("识别首页写下的计划", settings.readsQuickEntry, { value -> setNotice(store.tryChange { it.copy(readsQuickEntry = value) }) })
+            FormSeparator()
+            FormToggle("今日提要", settings.dailyBrief, { value -> setNotice(store.tryChange { it.copy(dailyBrief = value) }) })
+            FormSeparator()
+            FormToggle("晚间收尾", settings.eveningWrap, { value -> setNotice(store.tryChange { it.copy(eveningWrap = value) }) })
+            FormSeparator()
+            FormToggle("顺延旁批", settings.carryOverNotes, { value -> setNotice(store.tryChange { it.copy(carryOverNotes = value) }) })
+            FormSeparator()
+            FormToggle("本周来信", settings.weeklyLetter, { value ->
+                setNotice(store.tryChange { it.copy(weeklyLetter = value) })
+                AIWeeklyLetterState.reschedule()
+            })
+            FormSeparator()
+            FormToggle("没开启时也显示入口", settings.showsEntriesWhenOff, { value -> setNotice(store.tryChange { it.copy(showsEntriesWhenOff = value) }) })
+        }
+
+        if (showsWrites) {
+            val count = AIWriteLog.activeCount(writes, AIClock.now().toLocalDate())
+            AISection(flow.place(null, false)) {
+                AIValueRow("今天的整理", if (count > 0) "$count 处" else "没有") { onOpen("ai:writes") }
             }
         }
 
@@ -1393,12 +1433,19 @@ private fun AIModelDetailPage(
 
 private val aiHelpPlaces: List<Triple<MojiIcon, String, String>> = listOf(
     Triple(MojiIcon.Edit, "首页写下计划", "带有“明天下午”“30 分钟”这类线索时，在那一行下面给出建议，点了才应用。"),
-    Triple(MojiIcon.TextLines, "计划 › 更多操作 › 拆成步骤", "把一件大的计划拆成几步；点顺延印也能“拆小一点”。"),
+    Triple(MojiIcon.ListIndent, "计划 › 展开 › 拆成步骤", "把一件大的计划拆成几步；点顺延印也能“拆小一点”。"),
+    Triple(MojiIcon.Sunrise, "今日提要", "今日计划上方，每天一张：今天几件、离最近的日子还有几天、哪件顺延了，并建议先做哪件。"),
+    Triple(MojiIcon.MoonStars, "晚间收尾", "21 点以后在今日计划上方：今天完成几件、专注多久；剩下的每件给一个安排（顺延到明天、明早先做、拆小、放下），照此处理前可以逐条改。"),
+    Triple(MojiIcon.TextAppend, "顺延旁批", "同一条计划顺延满 3 天，行下出一行朱字，点开就是拆小的草稿；点过“不用”就不再提。"),
+    Triple(MojiIcon.Envelope, "本周来信", "周日 20:00 起在回顾页：一个题签、几句这一周的情况和依据；可以放进复盘、拟下周计划，往期来信都留在本机。"),
     Triple(MojiIcon.DocMagnify, "回顾 › 周复盘 › 起草复盘", "按这一周的记录起草两栏文字，并注明依据的计划；还可以拟下周草稿。"),
     Triple(MojiIcon.TabChecklist, "备忘 › 备忘操作 › 整理成清单", "把正文里要做的事整理成清单；转为计划时预填日期和类型。"),
     Triple(MojiIcon.TimerSF, "时刻 › 新建后 › 准备计划", "为一个重要的日子拟几条提前要做的事。"),
     Triple(MojiIcon.FilterLines, "计划库 › 搜索框", "写一句“上周没做完的学习计划”，替你设好筛选。"),
     Triple(MojiIcon.TextViewfinder, "首页 ＋ › 从文字或截图添加", "从粘贴的文字或一张截图里找出要做的事。截图的文字在本机识别。"),
+    Triple(MojiIcon.Signature, "留痕", "墨记写入的计划，小字里带朱色的来源；当天写入的都能在「今天的整理」里逐条撤销。"),
+    Triple(MojiIcon.ShareUp, "分享", "在别的 App 里把文字或截图分享给墨记，打开墨记时先出计划草稿。"),
+    Triple(MojiIcon.Mic, "说一句添加", "下拉快捷设置里的「说一句添加」，或长按图标的快捷方式，打开墨记直接说。"),
 )
 
 @Composable
@@ -1433,6 +1480,10 @@ private fun AIHelpPage(onOpen: (String?) -> Unit) {
             AIParagraph("只在你点了上面这些操作时，把那一处用到的文字（计划标题、备忘正文、一周的计划记录）发给你选的供应商。请求从手机直接发出，不经过墨记的服务器。")
             FormSeparator()
             AIParagraph("首页识别是例外：开着“识别首页写下的计划”时，带时间线索的新计划会在添加后自动发去识别。可以单独关掉。")
+            FormSeparator()
+            AIParagraph("今日提要也是：开着时，每天第一次打开首页会把今天计划的标题、时间和最近的倒数日发去排先后。可以单独关掉。")
+            FormSeparator()
+            AIParagraph("晚间收尾和今日提要一样，只发今天计划的标题和时间；本周来信每周发一次这一周的计划记录。都可以单独关掉。")
         }
         AISection(flow.place("不会做什么", false), "不会做什么") {
             AIParagraph("结果都先以草稿出现，带一枚“稿”字印；你确认后才写入，写入后可以撤销。")

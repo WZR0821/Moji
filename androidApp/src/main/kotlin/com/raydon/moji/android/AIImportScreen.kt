@@ -49,6 +49,9 @@ import com.google.mlkit.vision.text.TextRecognition
 import com.google.mlkit.vision.text.chinese.ChineseTextRecognizerOptions
 import com.raydon.moji.android.ai.AIAssistant
 import com.raydon.moji.android.ai.AIDrafting
+import com.raydon.moji.android.ai.AIWriteText
+import com.raydon.moji.android.ai.ShareInbox
+import com.raydon.moji.android.ai.ShareInboxItem
 import androidx.lifecycle.compose.LifecycleResumeEffect
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
@@ -76,9 +79,13 @@ object LocalTextRecognizer {
     }
 }
 
-/** 从文字或截图添加: paste text or pick a screenshot, then turn it into plan drafts. */
+/**
+ * 从文字或截图添加: paste text or pick a screenshot, then turn it into plan drafts.
+ * [shared] is something shared in from another app: filled in, read on the
+ * device if it is a picture, taken out of the inbox, and drafted right away.
+ */
 @Composable
-fun PlanImportDialog(viewModel: MojiViewModel, onDismiss: () -> Unit) {
+fun PlanImportDialog(viewModel: MojiViewModel, shared: ShareInboxItem? = null, onDismiss: () -> Unit) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     var text by remember { mutableStateOf("") }
@@ -86,6 +93,13 @@ fun PlanImportDialog(viewModel: MojiViewModel, onDismiss: () -> Unit) {
     var failure by remember { mutableStateOf<String?>(null) }
     var showsDrafts by remember { mutableStateOf(false) }
     var draftSource by remember { mutableStateOf("") }
+    // Whether any of the words came from a picture, for 墨记's mark on the plans.
+    var readsPicture by remember { mutableStateOf(false) }
+    val origin = when {
+        shared != null -> AIWriteText.shareOrigin
+        readsPicture -> AIWriteText.imageOrigin
+        else -> AIWriteText.textOrigin
+    }
     val clean = text.trim()
     val count = AIDrafting.characterCount(clean)
     val tooLong = count > AIDrafting.maximumInputCharacters
@@ -107,11 +121,29 @@ fun PlanImportDialog(viewModel: MojiViewModel, onDismiss: () -> Unit) {
         scope.launch {
             try {
                 val found = LocalTextRecognizer.text(context, uri)
-                if (found.isBlank()) failure = "这张图里没有认出文字。" else append(found)
+                if (found.isBlank()) failure = "这张图里没有认出文字。" else { readsPicture = true; append(found) }
             } catch (error: Exception) {
                 failure = "这张图片读不出来，换一张试试。"
             } finally { readingPhoto = false }
         }
+    }
+    LaunchedEffect(shared) {
+        val item = shared ?: return@LaunchedEffect
+        // The picture is read before the item leaves the inbox, then the item goes in one piece.
+        item.text?.takeIf { it.isNotEmpty() }?.let { text = AIDrafting.prefix(it, ShareInbox.textLimit) }
+        val inbox = ShareInbox.of(context)
+        val image = inbox.imageFile(item)
+        if (image != null) {
+            readingPhoto = true
+            val found = try { LocalTextRecognizer.text(context, Uri.fromFile(image)) }
+                catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled } catch (error: Exception) { "" }
+            readingPhoto = false
+            if (found.isNotBlank()) { readsPicture = true; append(found) }
+        }
+        withContext(Dispatchers.IO) { inbox.remove(item) }
+        val words = text.trim()
+        if (words.isEmpty()) failure = "没能读到可以收进的文字或图片。"
+        else if (AIDrafting.characterCount(words) <= AIDrafting.maximumInputCharacters) { draftSource = words; showsDrafts = true }
     }
     LaunchedEffect(Unit) {
         // Debug only: read a screenshot pushed to the app's own external files folder, so the
@@ -138,7 +170,9 @@ fun PlanImportDialog(viewModel: MojiViewModel, onDismiss: () -> Unit) {
             if (showsDrafts) {
                 androidx.activity.compose.BackHandler { showsDrafts = false }
                 val source = draftSource
+                val mark = origin
                 PlanDraftPage(viewModel, "计划草稿", "从这段文字里找到的事", waitingText = "正在找要做的事",
+                    origin = mark, summary = { added, _ -> AIWriteText.imported(added, mark) },
                     load = { AIAssistant.shared.importPlans(source, aiCategories(viewModel)) },
                     leading = "返回", onLeading = { showsDrafts = false }, close = onDismiss)
             } else Column(Modifier.fillMaxSize()) {

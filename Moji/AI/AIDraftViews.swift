@@ -120,6 +120,12 @@ struct PlanDraftSheet: View {
     /// The plan the drafts replace, when the sheet offers to archive it.
     var source: CheckInItem?
     var archivesSourceByDefault = false
+    /// Written into every accepted plan as 墨记's mark, e.g. 拆自「准备季度汇报」.
+    var origin: String?
+    /// The line kept in 今天的整理: plans added, and whether the source was archived.
+    var summary: ((_ count: Int, _ archivedSource: Bool) -> String)?
+    /// Called after the drafts were written, with the plans added.
+    var onAccept: (([CheckInItem]) -> Void)?
     let load: @MainActor () async throws -> [PlanDraft]
 
     @Environment(\.dismiss) private var dismiss
@@ -129,7 +135,8 @@ struct PlanDraftSheet: View {
         NavigationStack {
             PlanDraftPage(store: store, title: title, subject: subject, waitingText: waitingText,
                           planNote: planNote, showsDates: showsDates, source: source,
-                          archivesSourceByDefault: archivesSourceByDefault, load: load,
+                          archivesSourceByDefault: archivesSourceByDefault, origin: origin,
+                          summary: summary, onAccept: onAccept, load: load,
                           needsRoom: { detent = .large }) { dismiss() }
                 .toolbar {
                     ToolbarItem(placement: .cancellationAction) {
@@ -151,6 +158,9 @@ struct PlanDraftPage: View {
     var showsDates = true
     var source: CheckInItem?
     var archivesSourceByDefault = false
+    var origin: String?
+    var summary: ((_ count: Int, _ archivedSource: Bool) -> String)?
+    var onAccept: (([CheckInItem]) -> Void)?
     let load: @MainActor () async throws -> [PlanDraft]
     /// Called once when the drafts do not fit the height the page was given,
     /// so a half-height sheet can open up instead of hiding its last rows.
@@ -260,7 +270,9 @@ struct PlanDraftPage: View {
         let plans = selected.map { draft -> CheckInItem in
             var clean = draft
             clean.title = draft.title.trimmingCharacters(in: .whitespacesAndNewlines)
-            return clean.plan(note: planNote)
+            var plan = clean.plan(note: planNote)
+            plan.aiOrigin = origin.map { String($0.prefix(40)) }
+            return plan
         }
         var changed: [CheckInItem] = []
         if archivesSource, let source, var original = store.checkInItems.first(where: { $0.id == source.id }) {
@@ -270,8 +282,10 @@ struct PlanDraftPage: View {
         store.commitDrafts(
             adding: plans,
             changing: changed,
-            notice: changed.isEmpty ? "已加入 \(plans.count) 条计划" : "已加入 \(plans.count) 条计划，原计划已归档"
+            notice: changed.isEmpty ? "已加入 \(plans.count) 条计划" : "已加入 \(plans.count) 条计划，原计划已归档",
+            summary: summary?(plans.count, !changed.isEmpty)
         )
+        onAccept?(plans)
         close()
     }
 }

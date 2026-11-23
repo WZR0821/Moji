@@ -101,6 +101,23 @@ struct EntrySuggestion: Equatable {
         }
         return item == original ? nil : item
     }
+
+    /// The suggestion without what the plan already says, so the strip only
+    /// offers changes. The chips the user adopted before adding are already
+    /// on the plan, and the model reads the same words again.
+    func removingMatches(of plan: CheckInItem, calendar: Calendar = .current) -> EntrySuggestion {
+        var value = self
+        if let day, calendar.isDate(day, inSameDayAs: plan.scheduledStart) { value.day = nil }
+        if let kind = scheduleKind, kind == plan.effectiveScheduleKind {
+            let time = calendar.dateComponents([.hour, .minute], from: plan.scheduledStart)
+            if kind != .exactTime || (time.hour == hour && time.minute == minute) { value.scheduleKind = nil }
+        }
+        if let minutes, minutes == plan.plannedDurationMinutes { value.minutes = nil }
+        if let category, category == plan.category { value.category = nil }
+        if let repeatRule, repeatRule == plan.effectiveRepeatRule { value.repeatRule = nil }
+        if let title, title == plan.title { value.title = nil }
+        return value
+    }
 }
 
 struct ReflectionDraft: Equatable {

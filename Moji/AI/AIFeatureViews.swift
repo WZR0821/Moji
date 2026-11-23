@@ -120,6 +120,8 @@ private extension CGImagePropertyOrientation {
 
 struct PlanImportView: View {
     @ObservedObject var store: PlanStore
+    /// Something shared from another app: filled in and drafted right away.
+    var shared: ShareInboxItem?
 
     @Environment(\.dismiss) private var dismiss
     @State private var text = ""
@@ -127,6 +129,14 @@ struct PlanImportView: View {
     @State private var isReadingPhoto = false
     @State private var failure: String?
     @State private var showsDrafts = false
+    /// Whether any of the words came from a picture, for the mark on the plans.
+    @State private var readsPicture = false
+    @State private var didTakeShare = false
+
+    private var origin: String {
+        if shared != nil { return AIWriteText.shareOrigin }
+        return readsPicture ? AIWriteText.imageOrigin : AIWriteText.textOrigin
+    }
 
     private var cleanText: String { text.trimmingCharacters(in: .whitespacesAndNewlines) }
     private var isTooLong: Bool { cleanText.count > AIDrafting.maximumInputCharacters }
@@ -219,8 +229,10 @@ struct PlanImportView: View {
             }
             .navigationDestination(isPresented: $showsDrafts) {
                 let source = cleanText
+                let origin = origin
                 PlanDraftPage(store: store, title: "计划草稿", subject: "从这段文字里找到的事",
-                              waitingText: "正在找要做的事",
+                              waitingText: "正在找要做的事", origin: origin,
+                              summary: { count, _ in AIWriteText.imported(count: count, origin: origin) },
                               load: { try await AIAssistant.shared.importPlans(source) },
                               close: { dismiss() })
             }
@@ -228,6 +240,7 @@ struct PlanImportView: View {
                 guard let item else { return }
                 Task { await read(item) }
             }
+            .task { await takeShare() }
             .onAppear {
 #if DEBUG
                 if ProcessInfo.processInfo.environment["MOJI_QA_SCENARIO"] == "ai-import-drafts", text.isEmpty {
@@ -236,6 +249,33 @@ struct PlanImportView: View {
                 }
 #endif
             }
+        }
+    }
+
+    /// A shared picture is read on the device like a chosen screenshot. The
+    /// item leaves the inbox only after it has been read, picture included; a
+    /// page closed while it was still reading keeps it for next time.
+    private func takeShare() async {
+        guard let shared, !didTakeShare else { return }
+        didTakeShare = true
+        if let words = shared.text, !words.isEmpty {
+            text = String(words.prefix(ShareInbox.textLimit))
+        }
+        if let image = ShareInbox.image(for: shared) {
+            isReadingPhoto = true
+            let found = (try? await LocalTextRecognizer.text(in: image)) ?? ""
+            isReadingPhoto = false
+            if !found.isEmpty {
+                readsPicture = true
+                text = text.isEmpty ? found : text + "\n" + found
+            }
+        }
+        guard !Task.isCancelled else { return }
+        ShareInbox.remove(shared)
+        if cleanText.isEmpty {
+            failure = "没能读到可以收进的文字或图片。"
+        } else if !isTooLong {
+            showsDrafts = true
         }
     }
 
@@ -253,6 +293,7 @@ struct PlanImportView: View {
                 failure = "这张图里没有认出文字。"
                 return
             }
+            readsPicture = true
             text = text.isEmpty ? found : text + "\n" + found
         } catch {
             failure = "这张图片读不出来，换一张试试。"

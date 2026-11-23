@@ -38,6 +38,10 @@ final class AISettingsStore: ObservableObject {
             && !settings.configuration.model.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
+    /// Entry points are on screen: ready, or off but not hidden by the user.
+    /// Tapping one while not ready opens the introduction instead of sending anything.
+    var showsEntries: Bool { isReady || settings.showsEntriesWhenOff }
+
     var listedProviderIDs: [String] { settings.listedProviderIDs(keyed: keyedIDs) }
 
     func apiKey(for entryID: String) -> String {

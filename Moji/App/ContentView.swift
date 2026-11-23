@@ -8,6 +8,8 @@ extension Notification.Name {
     )
     /// Carries the plan's `UUID` as the notification object.
     static let mojiOpenPlanEditor = Notification.Name("moji.openPlanEditor")
+    /// 说一句添加: the home page focuses its field and turns the microphone on.
+    static let mojiStartSaying = Notification.Name("moji.startSaying")
 }
 
 enum RootTab: Hashable {
@@ -34,6 +36,10 @@ struct ContentView: View {
     @ObservedObject var pomodoro: PomodoroEngine
     @State private var selectedTab: RootTab = .initialTab
     @State private var didRunDebugScenario = false
+    @Environment(\.scenePhase) private var scenePhase
+#if DEBUG
+    @State private var showsQAShareSheet = false
+#endif
     @AppStorage(PlanSettingsKeys.hapticsEnabled, store: SharedPersistence.sharedDefaults)
     private var hapticsEnabled = true
 
@@ -56,6 +62,10 @@ struct ContentView: View {
                 .tag(RootTab.profile)
         }
         .onOpenURL { url in
+            if url.host == "say" {
+                startSaying()
+                return
+            }
             switch url.host {
             case "memos", "notes": selectedTab = .memos
             case "countdowns": selectedTab = .countdowns
@@ -84,16 +94,58 @@ struct ContentView: View {
             selectedTab = .checklist
             store.reload()
         }
+        .onReceive(NotificationCenter.default.publisher(for: .mojiSayRequested)) { _ in
+            if MojiSayRequest.take() { startSaying() }
+        }
+        .onChange(of: scenePhase) { _, phase in
+            switch phase {
+            case .active:
+                if MojiSayRequest.take() { startSaying() }
+                AIWeeklyLetterState.shared.prepareIfNeeded(snapshot: store.snapshot, now: AIClock.now(), inBackground: false)
+                AIWeeklyLetterNotifier.reschedule()
+            case .background:
+                AIWeeklyLetterState.shared.prepareIfNeeded(snapshot: store.snapshot, now: AIClock.now(), inBackground: true)
+                AIWeeklyLetterNotifier.reschedule()
+            default:
+                break
+            }
+        }
         .overlay(alignment: .bottom) {
             DraftUndoToast(store: store)
         }
         .task {
+            // A cold launch from the 说一句 widget or Shortcut arrives here first.
+            if MojiSayRequest.take() { startSaying() }
+            AIWeeklyLetterNotifier.reschedule()
 #if DEBUG
             runCompletionRevertScenarioIfNeeded()
+            if AIQAFixture.scenario == "ai-share-sheet" {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { showsQAShareSheet = true }
+            }
 #endif
         }
+#if DEBUG
+        .sheet(isPresented: $showsQAShareSheet) {
+            ShareCaptureView(
+                model: ShareCaptureModel(text: "周五前交季度报告，周三下午和小王对一下数据，明天上午订会议室", isLoading: false),
+                keep: { true },
+                cancel: { showsQAShareSheet = false },
+                done: { showsQAShareSheet = false }
+            )
+        }
+#endif
         .sensoryFeedback(.selection, trigger: selectedTab) { oldValue, newValue in
             hapticsEnabled && oldValue != newValue
+        }
+    }
+
+    /// 说一句添加: today's list with the field focused and the microphone on.
+    private func startSaying() {
+        let wasOnChecklist = selectedTab == .checklist
+        selectedTab = .checklist
+        store.reload()
+        DispatchQueue.main.asyncAfter(deadline: .now() + (wasOnChecklist ? 0.05 : 0.35)) {
+            NotificationCenter.default.post(name: .mojiStartSaying, object: nil)
         }
     }
 

@@ -268,8 +268,19 @@ struct AISettings: Codable, Equatable {
     /// Off until the user turns it on; while off the app looks and behaves as before.
     var isEnabled = false
     /// Whether a plan typed into the home page's quick field is read for a
-    /// time, a length or a type. Only applies while `isEnabled` is on.
+    /// time, a length or a type: the chips under the field are worked out on
+    /// the device; the reading after it is added only happens while ready.
     var readsQuickEntry = true
+    /// Entry points stay in place while AI is off; tapping one explains how to turn it on.
+    var showsEntriesWhenOff = true
+    /// 今日提要 above today's list.
+    var dailyBrief = true
+    /// The vermilion line under a plan carried three days or more.
+    var carryOverNotes = true
+    /// 晚间收尾 above today's list after 21:00.
+    var eveningWrap = true
+    /// 本周来信 on the 回顾 page, with its Sunday 20:00 notification.
+    var weeklyLetter = true
     var activeID: String = AIProvider.deepSeek.rawValue
     /// Entries under 供应商, in order. `nil` until the list is first edited.
     var providerList: [String]? = nil
@@ -278,13 +289,19 @@ struct AISettings: Codable, Equatable {
     init() {}
 
     private enum CodingKeys: String, CodingKey {
-        case isEnabled, readsQuickEntry, activeID, providerList, configurations
+        case isEnabled, readsQuickEntry, showsEntriesWhenOff, dailyBrief, carryOverNotes, eveningWrap, weeklyLetter
+        case activeID, providerList, configurations
     }
 
     init(from decoder: Decoder) throws {
         let values = try decoder.container(keyedBy: CodingKeys.self)
         isEnabled = (try? values.decodeIfPresent(Bool.self, forKey: .isEnabled)) ?? false
         readsQuickEntry = (try? values.decodeIfPresent(Bool.self, forKey: .readsQuickEntry)) ?? true
+        showsEntriesWhenOff = (try? values.decodeIfPresent(Bool.self, forKey: .showsEntriesWhenOff)) ?? true
+        dailyBrief = (try? values.decodeIfPresent(Bool.self, forKey: .dailyBrief)) ?? true
+        carryOverNotes = (try? values.decodeIfPresent(Bool.self, forKey: .carryOverNotes)) ?? true
+        eveningWrap = (try? values.decodeIfPresent(Bool.self, forKey: .eveningWrap)) ?? true
+        weeklyLetter = (try? values.decodeIfPresent(Bool.self, forKey: .weeklyLetter)) ?? true
         activeID = (try? values.decodeIfPresent(String.self, forKey: .activeID)) ?? AIProvider.deepSeek.rawValue
         providerList = (try? values.decodeIfPresent([String].self, forKey: .providerList)) ?? nil
         configurations = (try? values.decodeIfPresent([String: ProviderConfiguration].self, forKey: .configurations)) ?? [:]

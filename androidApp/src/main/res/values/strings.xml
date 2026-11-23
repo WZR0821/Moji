@@ -3,4 +3,5 @@
     <string name="plan_widget_name">Moji 计划</string>
     <string name="countdown_widget_name">Moji 倒数日</string>
     <string name="anniversary_widget_name">Moji 纪念日</string>
+    <string name="say_shortcut">说一句添加</string>
 </resources>

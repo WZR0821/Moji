@@ -1,5 +1,6 @@
 import SwiftUI
 import UniformTypeIdentifiers
+import UserNotifications
 import WidgetKit
 
 #if DEBUG
@@ -288,6 +289,15 @@ struct PersonalView: View {
 
     @State private var isPresentingSettings = false
     @State private var selectedReviewDay: CheckInDaySummary?
+    @ObservedObject private var ai = AISettingsStore.shared
+    @ObservedObject private var letters = AIWeeklyLetterState.shared
+    @State private var showsLetterIntro = false
+    /// 放进复盘 and 拟下周计划, for the letter they were tapped on.
+    @State private var letterReflection: WeeklyLetter?
+    @State private var letterNextWeek: WeeklyLetter?
+    @State private var notificationStatus: UNAuthorizationStatus?
+    @State private var showsLetterArchive = false
+    @State private var shownLetter: WeeklyLetter?
 #if DEBUG
     @State private var didRunSettingsQAScenario = false
     @State private var workflowQARoute: WorkflowQARoute?
@@ -328,6 +338,8 @@ struct PersonalView: View {
 
                 ScrollView {
                     VStack(alignment: .leading, spacing: 18) {
+                        letterSection
+
                         reviewSnapshot
                             .inkReveal(delay: 0.02)
 
@@ -397,9 +409,22 @@ struct PersonalView: View {
                 }
             }
             .onAppear {
+                refreshLetter()
 #if DEBUG
                 guard !didRunSettingsQAScenario else { return }
                 let scenario = ProcessInfo.processInfo.environment["MOJI_QA_SCENARIO"]
+                if scenario == "ai-letter-archive" || scenario == "ai-letter-detail" {
+                    didRunSettingsQAScenario = true
+                    letters.seedArchiveForQA(now: AIClock.now())
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                        if scenario == "ai-letter-archive" {
+                            showsLetterArchive = true
+                        } else {
+                            shownLetter = letters.newestFirst.first { $0.title == "顺延集中在周四" }
+                        }
+                    }
+                    return
+                }
                 if let scenario, scenario.hasPrefix("workflow-") || ["ai-reflection", "ai-reflection-applied", "ai-next-week"].contains(scenario) {
                     didRunSettingsQAScenario = true
                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
@@ -426,6 +451,26 @@ struct PersonalView: View {
             .sheet(isPresented: $isPresentingSettings) {
                 SettingsView(store: store)
             }
+            .sheet(item: $letterReflection) { letter in
+                let monday = AIWeeklyLetter.monday(fromKey: letter.week) ?? AIWeeklyLetter.letterWeek(now: AIClock.now())
+                WeeklyReflectionEditor(
+                    store: store,
+                    week: monday,
+                    reflection: store.snapshot.weeklyReflections.first { $0.weekStart == letter.week },
+                    initialDraft: AIWeeklyLetter.reflectionDraft(letter)
+                )
+            }
+            .sheet(item: $letterNextWeek) { letter in
+                let monday = AIWeeklyLetter.monday(fromKey: letter.week) ?? AIWeeklyLetter.letterWeek(now: AIClock.now())
+                PlanDraftSheet(store: store, title: "下周草稿", subject: "按这一周的记录和“下周关注”拟的",
+                               waitingText: "正在拟下周", origin: AIWriteText.nextWeekOrigin,
+                               summary: { count, _ in AIWriteText.nextWeek(count: count) },
+                               load: { try await AIAssistant.shared.draftNextWeek(snapshot: store.snapshot, week: monday) })
+            }
+            .aiIntroSheet(isPresented: $showsLetterIntro)
+            .navigationDestination(isPresented: $showsLetterArchive) { WeeklyLetterArchiveView() }
+            .navigationDestination(item: $shownLetter) { WeeklyLetterDetailView(letter: $0) }
+            .task { notificationStatus = await PlanNotificationService.shared.authorizationStatus() }
 #if DEBUG
             .sheet(item: $workflowQARoute) { route in
                 switch route.id {
@@ -440,11 +485,89 @@ struct PersonalView: View {
                 case "ai-reflection", "ai-reflection-applied": WeeklyReflectionEditor(store: store, week: Date(), reflection: nil)
                 case "ai-next-week":
                     PlanDraftSheet(store: store, title: "下周草稿", subject: "按这一周的记录和“下周关注”拟的", waitingText: "正在拟下周",
+                                   origin: AIWriteText.nextWeekOrigin, summary: { count, _ in AIWriteText.nextWeek(count: count) },
                                    load: { try await AIAssistant.shared.draftNextWeek(snapshot: store.snapshot, week: Date()) })
                 default: EmptyView()
                 }
             }
 #endif
+        }
+    }
+
+    // MARK: 本周来信
+
+    private var letterMonday: Date { AIWeeklyLetter.letterWeek(now: AIClock.now()) }
+
+    /// Above 本周回顾: the letter, the wait for it, or the teaser; and the
+    /// letters kept so far.
+    @ViewBuilder
+    private var letterSection: some View {
+        if ai.settings.weeklyLetter && ai.showsEntries {
+            let now = AIClock.now()
+            let monday = letterMonday
+            let range = AIWeeklyLetter.rangeText(monday)
+            let facts = AIWeeklyLetter.facts(items: store.checkInItems, records: store.records, week: monday)
+            let enough = facts.planned >= AIWeeklyLetter.minimumPlans
+            let dismiss = { withAnimation(.easeOut(duration: 0.2)) { letters.dismiss(monday) } }
+            VStack(alignment: .leading, spacing: 10) {
+                if !letters.isDismissed(monday) {
+                    if let letter = letters.letter(for: monday) {
+                        WeeklyLetterCard(
+                            range: range,
+                            content: .letter(letter, facts: AIWeeklyLetter.factsLine(facts)),
+                            showsReminder: notificationStatus == .notDetermined,
+                            putIntoReflection: { letterReflection = letter },
+                            draftNextWeek: { if ai.isReady { letterNextWeek = letter } else { showsLetterIntro = true } },
+                            enableReminder: enableLetterReminder,
+                            dismiss: dismiss
+                        )
+                        .transition(.opacity)
+                    } else if ai.isReady, enough, letters.isLoading(monday) {
+                        WeeklyLetterCard(range: range, content: .loading, dismiss: dismiss)
+                            .transition(.opacity)
+                    } else if !ai.isReady, enough, AIWeeklyLetter.isTeaserTime(now) {
+                        WeeklyLetterCard(range: range, content: .teaser,
+                                         openIntro: { showsLetterIntro = true }, dismiss: dismiss)
+                    }
+                }
+                if !letters.letters.isEmpty {
+                    NavigationLink {
+                        WeeklyLetterArchiveView()
+                    } label: {
+                        HStack(spacing: 8) {
+                            Text("往期来信")
+                                .font(.subheadline.weight(.medium))
+                                .foregroundStyle(Color.planPrimary)
+                            Spacer(minLength: 0)
+                            Text("已存 \(letters.letters.count) 封 ›")
+                                .font(.footnote)
+                                .foregroundStyle(Color.planSecondary)
+                        }
+                        .padding(.horizontal, 14)
+                        .frame(minHeight: 40)
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityIdentifier("letter.archive.open")
+                }
+            }
+            .animation(.easeOut(duration: 0.25), value: letters.letters)
+            .animation(.easeOut(duration: 0.25), value: letters.loadingWeek)
+        }
+    }
+
+    /// The letter for the week just ended, asked for when the page appears.
+    private func refreshLetter() {
+        guard ai.settings.weeklyLetter, ai.showsEntries else { return }
+        letters.refreshIfNeeded(for: letterMonday, snapshot: store.snapshot, now: AIClock.now())
+    }
+
+    private func enableLetterReminder() {
+        Task {
+            _ = try? await PlanNotificationService.shared.requestAuthorizationIfNeeded()
+            let status = await PlanNotificationService.shared.authorizationStatus()
+            withAnimation(.easeOut(duration: 0.2)) { notificationStatus = status }
+            AIWeeklyLetterNotifier.reschedule()
         }
     }
 
@@ -801,7 +924,7 @@ private struct SettingsView: View {
                     }
 
                     NavigationLink {
-                        AIModelSettingsView()
+                        AIModelSettingsView(store: store)
                     } label: {
                         settingsRow(
                             title: "AI 模型",
@@ -863,7 +986,7 @@ private struct SettingsView: View {
                 case "pomodoro": PomodoroSettingsView()
                 case "notifications": NotificationFeedbackSettingsView(store: store)
                 case "appearance": AppearanceSettingsView()
-                case "ai": AIModelSettingsView()
+                case "ai": AIModelSettingsView(store: store)
                 case "permissions": PermissionSettingsView()
                 case "backup": BackupSettingsView(store: store)
                 case "about": AboutSettingsView()

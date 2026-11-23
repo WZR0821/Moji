@@ -11,6 +11,8 @@ struct MojiWidgetBundle: WidgetBundle {
         PlanBoardWidget()
         CountdownBoardWidget()
         AnniversaryBoardWidget()
+        // 说一句添加 on the lock screen.
+        MojiSayWidget()
         // The Live Activity is gated on iOS 18 because that is where
         // `supplementalActivityFamilies` lives, and without it the Apple Watch
         // Smart Stack falls back to the Dynamic Island layout — whose buttons
@@ -20,6 +22,8 @@ struct MojiWidgetBundle: WidgetBundle {
         // notification and the home screen widgets are unaffected on iOS 17.
         if #available(iOS 18.0, *) {
             PomodoroLiveActivity()
+            // 说一句添加 in Control Center.
+            MojiSayControl()
         }
     }
 }

@@ -412,6 +412,7 @@ private struct MemoEditorView: View {
     @State private var checklistCaretRequest: ChecklistCaretRequest?
     @ObservedObject private var ai = AISettingsStore.shared
     @State private var showsChecklistDraft = false
+    @State private var showsAIIntro = false
     /// The text a drafted checklist replaced, kept until the memo is saved or
     /// the mode is switched by hand.
     @State private var textBeforeChecklistDraft: String?
@@ -533,9 +534,13 @@ private struct MemoEditorView: View {
                                 systemImage: isPinned ? "pin.slash" : "pin"
                             )
                         }
-                        if ai.isReady, mode == .note, !cleanContent.isEmpty {
+                        if ai.showsEntries, mode == .note, !cleanContent.isEmpty {
                             Button {
-                                IMETextInput.commit { showsChecklistDraft = true }
+                                if ai.isReady {
+                                    IMETextInput.commit { showsChecklistDraft = true }
+                                } else {
+                                    showsAIIntro = true
+                                }
                             } label: {
                                 Label("整理成清单", systemImage: "list.bullet.indent")
                             }
@@ -596,6 +601,7 @@ private struct MemoEditorView: View {
                 }
             }
             .confirmDiscardEdits(isDirty: hasEdits, isPresented: $confirmsDiscard)
+            .aiIntroSheet(isPresented: $showsAIIntro)
             .sheet(isPresented: $showsChecklistDraft) {
                 let memoTitle = cleanTitle
                 let text = content

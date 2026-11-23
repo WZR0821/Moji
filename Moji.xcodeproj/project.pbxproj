@@ -21,6 +21,10 @@
 		F1A100000000000000000016 /* AIDraftViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1A100000000000000000015 /* AIDraftViews.swift */; };
 		F1A100000000000000000018 /* AISettingsViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1A100000000000000000017 /* AISettingsViews.swift */; };
 		F1A100000000000000000020 /* AIFeatureViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1A100000000000000000019 /* AIFeatureViews.swift */; };
+		F1A100000000000000000022 /* QuickEntryParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1A100000000000000000021 /* QuickEntryParser.swift */; };
+		F1A100000000000000000024 /* AIDailyBrief.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1A100000000000000000023 /* AIDailyBrief.swift */; };
+		F1A100000000000000000026 /* AIProactiveViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1A100000000000000000025 /* AIProactiveViews.swift */; };
+		F1A100000000000000000028 /* SpeechCapture.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1A100000000000000000027 /* SpeechCapture.swift */; };
 		F0A100000000000000000001 /* JFZSKSealScript_V3.ttf in Resources */ = {isa = PBXBuildFile; fileRef = F0A200000000000000000001 /* JFZSKSealScript_V3.ttf */; };
 		F0A100000000000000000002 /* JFZSKSealScript-OFL.txt in Resources */ = {isa = PBXBuildFile; fileRef = F0A200000000000000000002 /* JFZSKSealScript-OFL.txt */; };
 		F0A100000000000000000003 /* JFZSKSealScript_V3.ttf in Resources */ = {isa = PBXBuildFile; fileRef = F0A200000000000000000001 /* JFZSKSealScript_V3.ttf */; };
@@ -55,6 +59,22 @@
 		D949915FBB0859B0BABFD5EE /* WidgetActions.swift in Sources */ = {isa = PBXBuildFile; fileRef = 79A42A5AC2425610F728B4B2 /* WidgetActions.swift */; };
 		DEFB7D309ADF487732E96126 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = A23B3EFF893E2C4DE2B049C7 /* Assets.xcassets */; };
 		F7BF76C0B0DD6C3FFBB8F392 /* CountdownEditorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CA2AE43696652CD78FBD2D3B /* CountdownEditorView.swift */; };
+		F1A100000000000000000030 /* AIWriteLog.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1A100000000000000000029 /* AIWriteLog.swift */; };
+		F1A100000000000000000032 /* AIEveningWrap.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1A100000000000000000031 /* AIEveningWrap.swift */; };
+		F1A100000000000000000034 /* AIWeeklyLetter.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1A100000000000000000033 /* AIWeeklyLetter.swift */; };
+		F1A100000000000000000036 /* AIWrapLetterViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1A100000000000000000035 /* AIWrapLetterViews.swift */; };
+		F1B100000000000000000002 /* MojiShortcuts.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1B100000000000000000001 /* MojiShortcuts.swift */; };
+		F1B100000000000000000004 /* ShareInbox.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1B100000000000000000003 /* ShareInbox.swift */; };
+		F1B100000000000000000005 /* ShareInbox.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1B100000000000000000003 /* ShareInbox.swift */; };
+		F1B100000000000000000027 /* ShareInbox.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1B100000000000000000003 /* ShareInbox.swift */; };
+		F1B100000000000000000007 /* MojiSayIntent.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1B100000000000000000006 /* MojiSayIntent.swift */; };
+		F1B100000000000000000008 /* MojiSayIntent.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1B100000000000000000006 /* MojiSayIntent.swift */; };
+		F1B100000000000000000010 /* MojiSayWidget.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1B100000000000000000009 /* MojiSayWidget.swift */; };
+		F1B100000000000000000012 /* ShareCaptureView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1B100000000000000000011 /* ShareCaptureView.swift */; };
+		F1B100000000000000000013 /* ShareCaptureView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1B100000000000000000011 /* ShareCaptureView.swift */; };
+		F1B100000000000000000015 /* ShareViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1B100000000000000000014 /* ShareViewController.swift */; };
+		F1B100000000000000000016 /* AppGroupResolver.swift in Sources */ = {isa = PBXBuildFile; fileRef = F17000000000000000000002 /* AppGroupResolver.swift */; };
+		F1B100000000000000000018 /* MojiShare.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = F1B100000000000000000017 /* MojiShare.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -72,6 +92,13 @@
 			remoteGlobalIDString = 2E26630A6AC0E46C03FF5699;
 			remoteInfo = Moji;
 		};
+		F1B100000000000000000025 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 83AB06D4B42D83DA29C865C5 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = F1B100000000000000000020;
+			remoteInfo = MojiShare;
+		};
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXCopyFilesBuildPhase section */
@@ -82,6 +109,7 @@
 			dstSubfolderSpec = 13;
 			files = (
 				0F034D1F67025CDCD6E6AB74 /* MojiWidget.appex in Embed Foundation Extensions */,
+				F1B100000000000000000018 /* MojiShare.appex in Embed Foundation Extensions */,
 			);
 			name = "Embed Foundation Extensions";
 			runOnlyForDeploymentPostprocessing = 0;
@@ -102,6 +130,10 @@
 		F1A100000000000000000015 /* AIDraftViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIDraftViews.swift; sourceTree = "<group>"; };
 		F1A100000000000000000017 /* AISettingsViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AISettingsViews.swift; sourceTree = "<group>"; };
 		F1A100000000000000000019 /* AIFeatureViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIFeatureViews.swift; sourceTree = "<group>"; };
+		F1A100000000000000000021 /* QuickEntryParser.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuickEntryParser.swift; sourceTree = "<group>"; };
+		F1A100000000000000000023 /* AIDailyBrief.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIDailyBrief.swift; sourceTree = "<group>"; };
+		F1A100000000000000000025 /* AIProactiveViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIProactiveViews.swift; sourceTree = "<group>"; };
+		F1A100000000000000000027 /* SpeechCapture.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpeechCapture.swift; sourceTree = "<group>"; };
 		F0A200000000000000000001 /* JFZSKSealScript_V3.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = JFZSKSealScript_V3.ttf; sourceTree = "<group>"; };
 		F0A200000000000000000002 /* JFZSKSealScript-OFL.txt */ = {isa = PBXFileReference; lastKnownFileType = text; path = "JFZSKSealScript-OFL.txt"; sourceTree = "<group>"; };
 		0B701438954AE234DF88C25B /* Moji.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = Moji.app; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -131,6 +163,17 @@
 		E5C5DC093575A77E94395CC0 /* CountdownsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CountdownsView.swift; sourceTree = "<group>"; };
 		EE74EA9095AF45FB08C7EFE6 /* DashboardView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DashboardView.swift; sourceTree = "<group>"; };
 		FC26EF5582069AF138BC6F34 /* FocusQuickWidget.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FocusQuickWidget.swift; sourceTree = "<group>"; };
+		F1A100000000000000000029 /* AIWriteLog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIWriteLog.swift; sourceTree = "<group>"; };
+		F1A100000000000000000031 /* AIEveningWrap.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIEveningWrap.swift; sourceTree = "<group>"; };
+		F1A100000000000000000033 /* AIWeeklyLetter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIWeeklyLetter.swift; sourceTree = "<group>"; };
+		F1A100000000000000000035 /* AIWrapLetterViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIWrapLetterViews.swift; sourceTree = "<group>"; };
+		F1B100000000000000000001 /* MojiShortcuts.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MojiShortcuts.swift; sourceTree = "<group>"; };
+		F1B100000000000000000003 /* ShareInbox.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShareInbox.swift; sourceTree = "<group>"; };
+		F1B100000000000000000006 /* MojiSayIntent.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MojiSayIntent.swift; sourceTree = "<group>"; };
+		F1B100000000000000000009 /* MojiSayWidget.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MojiSayWidget.swift; sourceTree = "<group>"; };
+		F1B100000000000000000011 /* ShareCaptureView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShareCaptureView.swift; sourceTree = "<group>"; };
+		F1B100000000000000000014 /* ShareViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShareViewController.swift; sourceTree = "<group>"; };
+		F1B100000000000000000017 /* MojiShare.appex */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = "wrapper.app-extension"; path = MojiShare.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXGroup section */
@@ -140,6 +183,7 @@
 				FC26EF5582069AF138BC6F34 /* FocusQuickWidget.swift */,
 				5F71C1E9E247373BA18E99AF /* ImportantCountdownWidget.swift */,
 				8240E8498D11F4B5708787B4 /* MojiWidgetBundle.swift */,
+				F1B100000000000000000009 /* MojiSayWidget.swift */,
 			);
 			path = MojiWidget;
 			sourceTree = "<group>";
@@ -176,6 +220,14 @@
 				F1A100000000000000000015 /* AIDraftViews.swift */,
 				F1A100000000000000000017 /* AISettingsViews.swift */,
 				F1A100000000000000000019 /* AIFeatureViews.swift */,
+				F1A100000000000000000021 /* QuickEntryParser.swift */,
+				F1A100000000000000000023 /* AIDailyBrief.swift */,
+				F1A100000000000000000025 /* AIProactiveViews.swift */,
+				F1A100000000000000000027 /* SpeechCapture.swift */,
+				F1A100000000000000000029 /* AIWriteLog.swift */,
+				F1A100000000000000000031 /* AIEveningWrap.swift */,
+				F1A100000000000000000033 /* AIWeeklyLetter.swift */,
+				F1A100000000000000000035 /* AIWrapLetterViews.swift */,
 			);
 			path = AI;
 			sourceTree = "<group>";
@@ -197,6 +249,7 @@
 				408D14888BBA8A2339A167DF /* Moji */,
 				CF3C98FE7D31251269259510 /* MojiTests */,
 				0545F7D04759630F4E835F3E /* MojiWidget */,
+				F1B100000000000000000019 /* MojiShare */,
 				FEF2089649EFE430342A4C9D /* Shared */,
 				6C4A0F12FB2F663982CDD8EA /* Products */,
 			);
@@ -208,6 +261,7 @@
 				0B701438954AE234DF88C25B /* Moji.app */,
 				43932251CF5E7CA8DAE1246D /* MojiTests.xctest */,
 				5F60FAAFFBFA7A793D5F772A /* MojiWidget.appex */,
+				F1B100000000000000000017 /* MojiShare.appex */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -238,6 +292,7 @@
 				8345810D2752DD61637A598B /* ContentView.swift */,
 				84580816F4D8CAF4177EDE67 /* MojiApp.swift */,
 				4A2FAE32E2172B2B0843064D /* PlanStore.swift */,
+				F1B100000000000000000001 /* MojiShortcuts.swift */,
 			);
 			path = App;
 			sourceTree = "<group>";
@@ -281,6 +336,8 @@
 				F15000000000000000000002 /* PlanWorkflow.swift */,
 				3CF703C26466C2387B8C7374 /* SharedPersistence.swift */,
 				79A42A5AC2425610F728B4B2 /* WidgetActions.swift */,
+				F1B100000000000000000003 /* ShareInbox.swift */,
+				F1B100000000000000000006 /* MojiSayIntent.swift */,
 			);
 			path = Shared;
 			sourceTree = "<group>";
@@ -292,6 +349,15 @@
 				F0A200000000000000000002 /* JFZSKSealScript-OFL.txt */,
 			);
 			path = Fonts;
+			sourceTree = "<group>";
+		};
+		F1B100000000000000000019 /* MojiShare */ = {
+			isa = PBXGroup;
+			children = (
+				F1B100000000000000000011 /* ShareCaptureView.swift */,
+				F1B100000000000000000014 /* ShareViewController.swift */,
+			);
+			path = MojiShare;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -327,6 +393,7 @@
 			);
 			dependencies = (
 				F07F5D659E76340D4B525F68 /* PBXTargetDependency */,
+				F1B100000000000000000026 /* PBXTargetDependency */,
 			);
 			name = Moji;
 			packageProductDependencies = (
@@ -353,6 +420,23 @@
 			productReference = 43932251CF5E7CA8DAE1246D /* MojiTests.xctest */;
 			productType = "com.apple.product-type.bundle.unit-test";
 		};
+		F1B100000000000000000020 /* MojiShare */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = F1B100000000000000000022 /* Build configuration list for PBXNativeTarget "MojiShare" */;
+			buildPhases = (
+				F1B100000000000000000021 /* Sources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = MojiShare;
+			packageProductDependencies = (
+			);
+			productName = MojiShare;
+			productReference = F1B100000000000000000017 /* MojiShare.appex */;
+			productType = "com.apple.product-type.app-extension";
+		};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
@@ -374,6 +458,10 @@
 						DevelopmentTeam = "";
 						ProvisioningStyle = Automatic;
 					};
+					F1B100000000000000000020 = {
+						DevelopmentTeam = "";
+						ProvisioningStyle = Automatic;
+					};
 				};
 			};
 			buildConfigurationList = B759D3A72FB6ED3D18B510D3 /* Build configuration list for PBXProject "Moji" */;
@@ -392,6 +480,7 @@
 			targets = (
 				2E26630A6AC0E46C03FF5699 /* Moji */,
 				0E2002A018EC37D581B377EA /* MojiWidget */,
+				F1B100000000000000000020 /* MojiShare */,
 				DD1FACE2172AF51E55057F6E /* MojiTests */,
 			);
 		};
@@ -457,6 +546,10 @@
 				F1A100000000000000000016 /* AIDraftViews.swift in Sources */,
 				F1A100000000000000000018 /* AISettingsViews.swift in Sources */,
 				F1A100000000000000000020 /* AIFeatureViews.swift in Sources */,
+				F1A100000000000000000022 /* QuickEntryParser.swift in Sources */,
+				F1A100000000000000000024 /* AIDailyBrief.swift in Sources */,
+				F1A100000000000000000026 /* AIProactiveViews.swift in Sources */,
+				F1A100000000000000000028 /* SpeechCapture.swift in Sources */,
 				CBB93044BEBF2B1F8ABB3D49 /* PlanStore.swift in Sources */,
 				5C49DE2AA0B407FCC52DD0AB /* RecordEditorView.swift in Sources */,
 				D45AA6445ED9780CF4DF6154 /* RecordsView.swift in Sources */,
@@ -464,6 +557,14 @@
 				C3F84366081E440414909A54 /* SharedPersistence.swift in Sources */,
 				9CB6568DC199EE263BEC07A4 /* WeeklySummaryView.swift in Sources */,
 				D949915FBB0859B0BABFD5EE /* WidgetActions.swift in Sources */,
+				F1A100000000000000000030 /* AIWriteLog.swift in Sources */,
+				F1A100000000000000000032 /* AIEveningWrap.swift in Sources */,
+				F1A100000000000000000034 /* AIWeeklyLetter.swift in Sources */,
+				F1A100000000000000000036 /* AIWrapLetterViews.swift in Sources */,
+				F1B100000000000000000002 /* MojiShortcuts.swift in Sources */,
+				F1B100000000000000000004 /* ShareInbox.swift in Sources */,
+				F1B100000000000000000007 /* MojiSayIntent.swift in Sources */,
+				F1B100000000000000000012 /* ShareCaptureView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -480,6 +581,20 @@
 				F17000000000000000000003 /* AppGroupResolver.swift in Sources */,
 				86795DBC134A9CA2B19ACC4E /* SharedPersistence.swift in Sources */,
 				903E63178A5D215F022C4E4B /* WidgetActions.swift in Sources */,
+				F1B100000000000000000027 /* ShareInbox.swift in Sources */,
+				F1B100000000000000000008 /* MojiSayIntent.swift in Sources */,
+				F1B100000000000000000010 /* MojiSayWidget.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		F1B100000000000000000021 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				F1B100000000000000000013 /* ShareCaptureView.swift in Sources */,
+				F1B100000000000000000015 /* ShareViewController.swift in Sources */,
+				F1B100000000000000000005 /* ShareInbox.swift in Sources */,
+				F1B100000000000000000016 /* AppGroupResolver.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -495,6 +610,11 @@
 			isa = PBXTargetDependency;
 			target = 2E26630A6AC0E46C03FF5699 /* Moji */;
 			targetProxy = EAC004E582A394999A672420 /* PBXContainerItemProxy */;
+		};
+		F1B100000000000000000026 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = F1B100000000000000000020 /* MojiShare */;
+			targetProxy = F1B100000000000000000025 /* PBXContainerItemProxy */;
 		};
 /* End PBXTargetDependency section */
 
@@ -610,7 +730,7 @@
 				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
 				CODE_SIGN_STYLE = Automatic;
 				COPY_PHASE_STRIP = NO;
-			CURRENT_PROJECT_VERSION = 46;
+			CURRENT_PROJECT_VERSION = 47;
 				DEBUG_INFORMATION_FORMAT = dwarf;
 				DEVELOPMENT_TEAM = "";
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
@@ -630,7 +750,7 @@
 				GCC_WARN_UNUSED_FUNCTION = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
-			MARKETING_VERSION = 1.8.0;
+			MARKETING_VERSION = 1.9.0;
 				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
 				MTL_FAST_MATH = YES;
 				ONLY_ACTIVE_ARCH = YES;
@@ -713,7 +833,7 @@
 				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
 				CODE_SIGN_STYLE = Automatic;
 				COPY_PHASE_STRIP = NO;
-			CURRENT_PROJECT_VERSION = 46;
+			CURRENT_PROJECT_VERSION = 47;
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
 				DEVELOPMENT_TEAM = "";
 				ENABLE_NS_ASSERTIONS = NO;
@@ -727,7 +847,7 @@
 				GCC_WARN_UNUSED_FUNCTION = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
-			MARKETING_VERSION = 1.8.0;
+			MARKETING_VERSION = 1.9.0;
 				MTL_ENABLE_DEBUG_INFO = NO;
 				MTL_FAST_MATH = YES;
 				PRODUCT_NAME = "$(TARGET_NAME)";
@@ -736,6 +856,44 @@
 				SWIFT_COMPILATION_MODE = wholemodule;
 				SWIFT_OPTIMIZATION_LEVEL = "-O";
 				SWIFT_VERSION = 5.9;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+		F1B100000000000000000023 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				APPLICATION_EXTENSION_API_ONLY = YES;
+				CODE_SIGN_ENTITLEMENTS = MojiShare/MojiShare.entitlements;
+				INFOPLIST_FILE = MojiShare/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.raydon.minuteplan.share;
+				PRODUCT_NAME = MojiShare;
+				SDKROOT = iphoneos;
+				SKIP_INSTALL = YES;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		F1B100000000000000000024 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				APPLICATION_EXTENSION_API_ONLY = YES;
+				CODE_SIGN_ENTITLEMENTS = MojiShare/MojiShare.entitlements;
+				INFOPLIST_FILE = MojiShare/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.raydon.minuteplan.share;
+				PRODUCT_NAME = MojiShare;
+				SDKROOT = iphoneos;
+				SKIP_INSTALL = YES;
 				TARGETED_DEVICE_FAMILY = "1,2";
 			};
 			name = Release;
@@ -775,6 +933,15 @@
 			buildConfigurations = (
 				5DCB46774F100389B393CD4B /* Debug */,
 				1EE8955E8EF8C2FC8259E223 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		F1B100000000000000000022 /* Build configuration list for PBXNativeTarget "MojiShare" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				F1B100000000000000000023 /* Debug */,
+				F1B100000000000000000024 /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Debug;

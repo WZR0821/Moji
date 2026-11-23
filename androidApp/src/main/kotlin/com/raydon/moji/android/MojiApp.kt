@@ -135,6 +135,8 @@ fun MojiApp(
             if (backupBusy) LinearProgressIndicator(Modifier.fillMaxWidth().align(Alignment.TopCenter))
             // iOS sits the toast 58pt above the safe-area bottom, which is 9pt above its tab bar.
             DraftUndoToast(viewModel, bottomPadding = 9.dp)
+            // The AI introduction, opened from any entry point while no model is set up.
+            AIIntroHost()
         }
     }
     }

@@ -128,6 +128,25 @@ data class EntrySuggestion(
         for (change in changes) item = change.applyTo(item, zone) ?: continue
         return if (item == original) null else item
     }
+
+    /**
+     * The suggestion without what the plan already says, so the strip only
+     * offers changes. The chips adopted before adding are already on the
+     * plan, and the model reads the same words again.
+     */
+    fun removingMatches(plan: CheckInItem, zone: ZoneId = ZoneId.systemDefault()): EntrySuggestion {
+        var value = this
+        val start = AIDrafting.instant(plan.scheduledStart)?.atZone(zone)
+        if (day != null && start != null && start.toLocalDate() == day) value = value.copy(day = null)
+        if (scheduleKind != null && scheduleKind == (plan.scheduleKind ?: "exactTime")) {
+            if (scheduleKind != "exactTime" || (start != null && start.hour == hour && start.minute == minute)) value = value.copy(scheduleKind = null)
+        }
+        if (minutes != null && minutes == AIDrafting.plannedDurationMinutes(plan)) value = value.copy(minutes = null)
+        if (category != null && category == plan.category) value = value.copy(category = null)
+        if (repeatRule != null && repeatRule == (plan.repeatRule ?: "never")) value = value.copy(repeatRule = null)
+        if (title != null && title == plan.title) value = value.copy(title = null)
+        return value
+    }
 }
 
 data class ReflectionDraft(

@@ -50,6 +50,7 @@ struct PlanLibraryView: View {
     /// The sentence the filters were last set from, and what they were before.
     @State private var appliedFilterSentence: String?
     @State private var filterBeforeSentence: LibraryFilter?
+    @State private var showsAIIntro = false
 
     private var plans: [CheckInItem] {
         let today = Calendar.current.startOfDay(for: Date())
@@ -82,6 +83,7 @@ struct PlanLibraryView: View {
             .sheet(isPresented: $showBatch) { PlanBatchSheet(store: store, ids: selected) { selected.removeAll(); selecting = false } }
             .sheet(item: $editing) { CheckInEditorView(store: store, item: $0.item) }
             .sheet(item: $copying) { PlanCopySheet(store: store, item: $0.item) }
+            .aiIntroSheet(isPresented: $showsAIIntro)
             .onChange(of: mode) { _, _ in selected.removeAll(); selecting = false }
             .onChange(of: plans.filter { $0.status != .inProgress }.map(\.id)) { _, ids in selected.formIntersection(ids) }
             .onChange(of: from) { _, day in if to < day { to = day } }
@@ -117,8 +119,8 @@ struct PlanLibraryView: View {
                 Spacer(minLength: 4)
                 Button("还原") { restoreFilterBeforeSentence() }.font(.footnote.weight(.semibold)).buttonStyle(.borderless)
             }
-        } else if ai.isReady, AIDrafting.looksLikeFilterSentence(query) {
-            Button("按这句话筛选") { applySentenceFilter() }
+        } else if ai.showsEntries, AIDrafting.looksLikeFilterSentence(query) {
+            Button("按这句话筛选") { if ai.isReady { applySentenceFilter() } else { showsAIIntro = true } }
                 .font(.subheadline.weight(.medium))
                 .accessibilityIdentifier("library.sentenceFilter")
             if let filterFailure { Text(filterFailure).font(.footnote).foregroundStyle(.secondary) }
@@ -216,6 +218,12 @@ struct PlanLibraryView: View {
         }
     }
 
+    /// 留痕: ` · 墨记拆自「…」` in vermilion after the small line.
+    private func originMark(_ item: CheckInItem) -> Text {
+        guard let origin = item.aiOrigin, !origin.isEmpty else { return Text("") }
+        return Text(" · ") + Text(AIWriteText.mark(origin)).foregroundStyle(Color.planVermilion)
+    }
+
     private func libraryRow(_ item: CheckInItem) -> some View {
         Button {
             if selecting { guard item.status != .inProgress else { return }; if !selected.insert(item.id).inserted { selected.remove(item.id) } }
@@ -225,7 +233,8 @@ struct PlanLibraryView: View {
                 if selecting { Image(systemName: selected.contains(item.id) ? "checkmark.circle.fill" : "circle") }
                 VStack(alignment: .leading, spacing: 5) {
                     Text(item.title).font(.body).foregroundStyle(.primary)
-                    Text("\(item.scheduledStart.formatted(.dateTime.month().day())) · \(item.category.displayName) · \(item.isArchived == true ? "已归档" : item.status.displayName)")
+                    (Text("\(item.scheduledStart.formatted(.dateTime.month().day())) · \(item.category.displayName) · \(item.isArchived == true ? "已归档" : item.status.displayName)")
+                        + originMark(item))
                         .font(.caption).foregroundStyle(.secondary)
                 }
                 Spacer(minLength: 0)
@@ -311,6 +320,7 @@ struct MemoConversionView: View {
     @State private var hints: [UUID?: ConversionHint] = [:]
     @State private var isReadingHints = false
     @State private var hintFailure: String?
+    @State private var showsAIIntro = false
     private var checklistRows: [MemoChecklistItem] {
         memo.mode == .checklist ? memo.checklistItems.filter { !$0.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty } : []
     }
@@ -319,10 +329,10 @@ struct MemoConversionView: View {
             Form {
                 Section { DatePicker("计划日期", selection: $day, displayedComponents: .date)
                     Picker("计划类型", selection: $category) { ForEach(workflowCategories(category)) { Text($0.displayName).tag($0) } }
-                    if ai.isReady {
+                    if ai.showsEntries {
                         if isReadingHints { InkDraftWaiting(text: "正在看每一行") }
                         else if hints.isEmpty {
-                            Button("按内容预填每一行") { readHints() }.accessibilityIdentifier("memo.conversion.prefill")
+                            Button("按内容预填每一行") { if ai.isReady { readHints() } else { showsAIIntro = true } }.accessibilityIdentifier("memo.conversion.prefill")
                             if let hintFailure { Text(hintFailure).font(.footnote).foregroundStyle(.secondary) }
                         } else {
                             HStack {
@@ -343,6 +353,7 @@ struct MemoConversionView: View {
             .navigationTitle("备忘转计划").navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .confirmationAction) { Button("完成") { dismiss() } } }
             .sheet(item: $editing) { CheckInEditorView(store: store, item: $0.item) }
+            .aiIntroSheet(isPresented: $showsAIIntro)
 #if DEBUG
             .onAppear {
                 if ProcessInfo.processInfo.environment["MOJI_QA_SCENARIO"] == "ai-memo-convert", hints.isEmpty, !isReadingHints { readHints() }
@@ -401,6 +412,7 @@ struct WorkflowWeekSection: View {
     @State private var editingGoal: WeeklyGoal?
     @ObservedObject private var ai = AISettingsStore.shared
     @State private var nextWeekDrafts = false
+    @State private var showsAIIntro = false
     private var key: String { PlanWorkflow.weekKey(week) }
     private var summary: WorkflowWeekSummary { .make(snapshot: store.snapshot, week: week) }
     private var reflection: WeeklyReflection? { store.snapshot.weeklyReflections.first { $0.weekStart == key } }
@@ -444,20 +456,22 @@ struct WorkflowWeekSection: View {
                 Text(reflection?.nextFocus.isEmpty == false ? reflection!.nextFocus : "给下周留下一句提醒。")
                     .font(.subheadline).foregroundStyle(.secondary)
                 Button("选择待办移至下周") { carryEditor = true }.font(.subheadline.weight(.semibold))
-                if ai.isReady {
-                    Button("拟下周草稿") { nextWeekDrafts = true }.font(.subheadline.weight(.semibold))
+                if ai.showsEntries {
+                    Button("拟下周草稿") { if ai.isReady { nextWeekDrafts = true } else { showsAIIntro = true } }.font(.subheadline.weight(.semibold))
                         .accessibilityIdentifier("week.nextWeekDraft")
                 }
             }.planCard()
         }
         .sheet(isPresented: $nextWeekDrafts) {
             PlanDraftSheet(store: store, title: "下周草稿", subject: "按这一周的记录和“下周关注”拟的",
-                           waitingText: "正在拟下周",
+                           waitingText: "正在拟下周", origin: AIWriteText.nextWeekOrigin,
+                           summary: { count, _ in AIWriteText.nextWeek(count: count) },
                            load: { try await AIAssistant.shared.draftNextWeek(snapshot: store.snapshot, week: week, categories: workflowCategories()) })
         }
         .sheet(isPresented: $goalEditor) { WeeklyGoalEditor(store: store, week: week, goal: editingGoal) }
         .sheet(isPresented: $reflectionEditor) { WeeklyReflectionEditor(store: store, week: week, reflection: reflection) }
         .sheet(isPresented: $carryEditor) { NextWeekPlansSheet(store: store, week: week) }
+        .aiIntroSheet(isPresented: $showsAIIntro)
     }
     private func metric(_ title: String, _ value: String) -> some View {
         VStack(alignment: .leading, spacing: 3) { Text(value).font(.subheadline.weight(.semibold)); Text(title).font(.caption).foregroundStyle(.secondary) }.frame(maxWidth: .infinity, alignment: .leading)
@@ -525,22 +539,26 @@ struct WeeklyReflectionEditor: View {
     @Environment(\.dismiss) private var dismiss
     @State private var note: String
     @State private var nextFocus: String
-    init(store: PlanStore, week: Date, reflection: WeeklyReflection?) {
+    /// `initialDraft` opens the editor with a draft already in the draft area,
+    /// as 本周来信's 放进复盘 does; it still has to be put into the two fields.
+    init(store: PlanStore, week: Date, reflection: WeeklyReflection?, initialDraft: ReflectionDraft? = nil) {
         self.store = store; self.week = week; self.reflection = reflection
         _note = State(initialValue: reflection?.note ?? ""); _nextFocus = State(initialValue: reflection?.nextFocus ?? "")
+        _draft = State(initialValue: initialDraft)
     }
     @State private var confirmsDiscard = false
     @ObservedObject private var ai = AISettingsStore.shared
     @State private var draft: ReflectionDraft?
     @State private var isDrafting = false
     @State private var draftFailure: String?
+    @State private var showsAIIntro = false
     /// What the two fields held before a draft was put into them.
     @State private var beforeDraft: (note: String, nextFocus: String)?
     private var hasEdits: Bool { note != (reflection?.note ?? "") || nextFocus != (reflection?.nextFocus ?? "") }
     var body: some View {
         NavigationStack {
             Form {
-                if ai.isReady { draftSection }
+                if ai.showsEntries { draftSection }
                 Section("本周复盘") { TextField("做得好的事、遇到的问题", text: $note, axis: .vertical).lineLimit(5...12) }
                 Section("下周关注") { TextField("给下周留下一句提醒", text: $nextFocus, axis: .vertical).lineLimit(3...8) }
             }
@@ -554,6 +572,7 @@ struct WeeklyReflectionEditor: View {
             .scrollContentBackground(.hidden).background { InkWashBackground() }
             .navigationTitle("周复盘").navigationBarTitleDisplayMode(.inline)
             .confirmDiscardEdits(isDirty: hasEdits, isPresented: $confirmsDiscard)
+            .aiIntroSheet(isPresented: $showsAIIntro)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("取消") { IMETextInput.commit { if hasEdits { confirmsDiscard = true } else { dismiss() } } } }
                 ToolbarItem(placement: .confirmationAction) { Button("保存") { IMETextInput.commit { store.saveWeeklyReflection(WeeklyReflection(id: reflection?.id ?? UUID(), weekStart: PlanWorkflow.weekKey(week), note: note, nextFocus: nextFocus)); dismiss() } }.fontWeight(.semibold) }
@@ -604,7 +623,7 @@ extension WeeklyReflectionEditor {
                 .listRowInsets(EdgeInsets())
                 .listRowBackground(Color.clear)
             } else {
-                Button("起草复盘") { runDraft() }.accessibilityIdentifier("reflection.draft.run")
+                Button("起草复盘") { if ai.isReady { runDraft() } else { showsAIIntro = true } }.accessibilityIdentifier("reflection.draft.run")
                 if let draftFailure { Text(draftFailure).font(.footnote).foregroundStyle(.secondary) }
             }
         } footer: {

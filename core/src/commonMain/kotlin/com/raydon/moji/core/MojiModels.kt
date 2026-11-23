@@ -29,6 +29,8 @@ data class CheckInItem(
     val isArchived: Boolean? = false,
     val sourceMemoID: String? = null,
     val sourceMemoChecklistItemID: String? = null,
+    /** Where Moji got a plan it wrote (拆自「…」, 从文字整理…); null for plans the user wrote. */
+    val aiOrigin: String? = null,
 )
 
 @Serializable

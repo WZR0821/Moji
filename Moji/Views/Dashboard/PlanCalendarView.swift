@@ -829,6 +829,12 @@ struct PlanCalendarView: View {
         .accessibilityIdentifier("calendar.day")
     }
 
+    /// 留痕: where Moji got a plan from, for the small line.
+    private func aiOrigin(of entry: PlanCalendarEntry) -> String? {
+        guard case let .checkIn(item) = entry.source, let origin = item.aiOrigin, !origin.isEmpty else { return nil }
+        return origin
+    }
+
     private func calendarEntryRow(_ entry: PlanCalendarEntry) -> some View {
         HStack(spacing: 2) {
             Button {
@@ -852,6 +858,13 @@ struct PlanCalendarView: View {
                             Text(entry.timingText)
                             Text("·")
                             Text(entry.isCountdown ? "倒数日" : entry.category.displayName)
+                            if let origin = aiOrigin(of: entry) {
+                                Text("·")
+                                Text(AIWriteText.mark(origin))
+                                    .foregroundStyle(Color.planVermilion)
+                                    .layoutPriority(-1)
+                                    .accessibilityIdentifier("plan.origin")
+                            }
                         }
                         .font(.caption)
                         .foregroundStyle(.secondary)

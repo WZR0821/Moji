@@ -49,6 +49,20 @@
                ReferencedContainer = "container:Moji.xcodeproj">
             </BuildableReference>
          </BuildActionEntry>
+         <BuildActionEntry
+            buildForTesting = "YES"
+            buildForRunning = "YES"
+            buildForProfiling = "YES"
+            buildForArchiving = "YES"
+            buildForAnalyzing = "YES">
+            <BuildableReference
+               BuildableIdentifier = "primary"
+               BlueprintIdentifier = "F1B100000000000000000020"
+               BuildableName = "MojiShare.appex"
+               BlueprintName = "MojiShare"
+               ReferencedContainer = "container:Moji.xcodeproj">
+            </BuildableReference>
+         </BuildActionEntry>
       </BuildActionEntries>
    </BuildAction>
    <TestAction

@@ -38,6 +38,33 @@ struct AIAssistant {
         return try AIDrafting.entrySuggestion(from: answer, original: text, now: now, categories: categories)
     }
 
+    /// 今日提要: the order of today's plans and why the first one goes first.
+    func dailyBrief(pending: [CheckInItem], countdowns: [CountdownEvent],
+                    now: Date = Date()) async throws -> (order: [Int], reason: String?) {
+        let plans = Array(pending.prefix(AIDailyBrief.maximumPlans))
+        let answer = try await ask(AIDailyBrief.instructions(now: now),
+                                   AIDailyBrief.input(pending: plans, countdowns: countdowns, today: now), timeout: 25)
+        return try AIDailyBrief.order(from: answer, count: plans.count)
+    }
+
+    /// 晚间收尾: what to do with each plan left this evening.
+    func eveningWrap(done: [CheckInItem], pending: [CheckInItem], countdowns: [CountdownEvent],
+                     now: Date = Date()) async throws -> [Int: WrapArrangement] {
+        let plans = Array(pending.prefix(AIEveningWrap.maximumPlans))
+        let answer = try await ask(AIEveningWrap.instructions(now: now),
+                                   AIEveningWrap.input(done: done, pending: plans, countdowns: countdowns, today: now),
+                                   timeout: 25)
+        return try AIEveningWrap.arrangement(from: answer, count: plans.count)
+    }
+
+    /// 本周来信, from the same record of the week that 周复盘 is drafted from.
+    func weeklyLetter(snapshot: PlanSnapshot, week: Date, now: Date = Date()) async throws -> AIWeeklyLetter.Draft {
+        let record = AIDrafting.weekRecord(snapshot: snapshot, week: week, now: now)
+        guard !record.plans.isEmpty else { throw AIRequestError.emptyText }
+        return try AIWeeklyLetter.letter(from: try await ask(AIWeeklyLetter.instructions, record.text),
+                                         plans: record.plans)
+    }
+
     func breakDown(_ plan: CheckInItem) async throws -> [PlanDraft] {
         let answer = try await ask(AIDrafting.breakdownInstructions, AIDrafting.breakdownInput(plan))
         return try AIDrafting.steps(from: answer, plan: plan)

@@ -27,8 +27,87 @@ enum AIQAFixture {
         return store
     }
 
+    static var scenario: String { ProcessInfo.processInfo.environment["MOJI_QA_SCENARIO"] ?? "" }
+
+    /// 21:30 today for the evening screens, this week's Sunday 20:30 for the
+    /// letter, otherwise nil (the real clock).
+    static var clock: Date? {
+        let calendar = Calendar.mojiISO
+        let today = Date()
+        if scenario.hasPrefix("ai-wrap") || scenario == "ai-writes" {
+            return calendar.date(bySettingHour: 21, minute: 30, second: 0, of: today)
+        }
+        if scenario.hasPrefix("ai-letter") {
+            let monday = PlanWorkflow.weekStart(today, calendar: calendar)
+            let sunday = calendar.date(byAdding: .day, value: 6, to: monday) ?? today
+            return calendar.date(bySettingHour: 20, minute: 30, second: 0, of: sunday)
+        }
+        return nil
+    }
+
+    /// Whole days from today to this week's Sunday: the letter screens move
+    /// the sample data that far so it falls inside the week being written about.
+    static var letterShiftDays: Int {
+        guard scenario.hasPrefix("ai-letter") else { return 0 }
+        let calendar = Calendar.mojiISO
+        let today = calendar.startOfDay(for: Date())
+        let monday = PlanWorkflow.weekStart(today, calendar: calendar)
+        let sunday = calendar.date(byAdding: .day, value: 6, to: monday) ?? today
+        return calendar.dateComponents([.day], from: today, to: sunday).day ?? 0
+    }
+
+    static func shifted(_ snapshot: PlanSnapshot, byDays days: Int) -> PlanSnapshot {
+        guard days != 0 else { return snapshot }
+        let calendar = Calendar.current
+        func move(_ date: Date) -> Date { calendar.date(byAdding: .day, value: days, to: date) ?? date }
+        var value = snapshot
+        for index in value.checkInItems.indices {
+            value.checkInItems[index].scheduledStart = move(value.checkInItems[index].scheduledStart)
+            value.checkInItems[index].createdAt = move(value.checkInItems[index].createdAt)
+            value.checkInItems[index].completedAt = value.checkInItems[index].completedAt.map(move)
+            value.checkInItems[index].actualStartDate = value.checkInItems[index].actualStartDate.map(move)
+            value.checkInItems[index].actualEndDate = value.checkInItems[index].actualEndDate.map(move)
+        }
+        for index in value.records.indices {
+            value.records[index].startDate = move(value.records[index].startDate)
+            value.records[index].endDate = move(value.records[index].endDate)
+        }
+        return value
+    }
+
     /// The answer a model would give, picked by the task named in the instructions.
     static func answer(instructions: String, input: String) -> String {
+        if instructions.contains("收尾今天") {
+            var items: [String] = []
+            var inPending = false
+            for line in input.components(separatedBy: "\n") {
+                if line.hasPrefix("没做完的") { inPending = true; continue }
+                if line.hasPrefix("最近的日子") { inPending = false }
+                guard inPending, line.hasPrefix("["), let close = line.firstIndex(of: "]"),
+                      let number = Int(line[line.index(after: line.startIndex)..<close]) else { continue }
+                items.append(line.contains("已顺延")
+                    ? #"{"index":\#(number),"action":"split","note":"已经顺延三天"}"#
+                    : #"{"index":\#(number),"action":"tomorrow","note":""}"#)
+            }
+            return #"{"items":[\#(items.joined(separator: ","))]}"#
+        }
+        if instructions.contains("本周来信") {
+            var numbers: [(Int, String)] = []
+            for line in input.components(separatedBy: "\n") {
+                guard line.hasPrefix("["), let close = line.firstIndex(of: "]"),
+                      let number = Int(line[line.index(after: line.startIndex)..<close]) else { continue }
+                numbers.append((number, line))
+            }
+            let a = numbers.first { $0.1.contains("待办") }?.0 ?? 1
+            var b = numbers.first { $0.1.contains("汇报") || $0.1.contains("发布") }?.0 ?? 2
+            if b == a { b = numbers.contains { $0.0 == a + 1 } ? a + 1 : 1 }
+            return #"{"title":"卡在第一步的一周","body":"前半周很稳；周四起两件大事一直顺延，都卡在没拆开的第一步。","next_focus":"先把大事拆出能马上开始的第一步。","evidence":[{"point":"「归纳昨日待办」一直顺延","plans":[\#(a)]},{"point":"大事还没开始","plans":[\#(b)]}]}"#
+        }
+        if instructions.contains("排今天计划的先后") {
+            let line = input.components(separatedBy: "\n").first { $0.contains("发布说明") } ?? ""
+            let number = line.split(separator: "]").first.flatMap { Int($0.dropFirst()) } ?? 1
+            return #"{"order":[\#(number)],"reason":"离项目交付只剩两天，先把说明定稿"}"#
+        }
         if instructions.contains("拆出结构") {
             let parts = input.components(separatedBy: CharacterSet(charactersIn: "、，,")).map {
                 $0.trimmingCharacters(in: .whitespaces)
@@ -59,6 +138,10 @@ enum AIQAFixture {
         }
         if instructions.contains("计划库的筛选条件") {
             return #"{"keyword":null,"category":"学习","status":"planned","period":"last_week","from":null,"to":null}"#
+        }
+        if instructions.contains("粘贴的一段文字"), input.contains("季度报告") {
+            // ai-share: the shared sentence, so the drafts match what was shared.
+            return #"{"plans":[{"title":"交季度报告","date":null,"offset_days":null,"weekday":5,"week_offset":0,"part":null,"time":null,"minutes":null,"category":"工作"},{"title":"和小王对一下数据","date":null,"offset_days":null,"weekday":3,"week_offset":0,"part":"afternoon","time":null,"minutes":30,"category":"工作"},{"title":"订会议室","date":null,"offset_days":1,"weekday":null,"week_offset":null,"part":"morning","time":null,"minutes":10,"category":"工作"}]}"#
         }
         if instructions.contains("粘贴的一段文字") {
             return #"{"plans":[{"title":"交志望理由書终稿","date":null,"offset_days":2,"weekday":null,"week_offset":null,"part":"exact","time":"17:00","minutes":null,"category":"学习"},{"title":"预约体检","date":null,"offset_days":null,"weekday":5,"week_offset":0,"part":"morning","time":null,"minutes":20,"category":null},{"title":"给老师回邮件确认面谈时间","date":null,"offset_days":0,"weekday":null,"week_offset":null,"part":null,"time":null,"minutes":10,"category":"学习"}]}"#

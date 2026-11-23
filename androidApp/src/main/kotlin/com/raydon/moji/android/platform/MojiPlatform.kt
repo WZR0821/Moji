@@ -32,6 +32,7 @@ object NotificationChannels {
     const val REMINDERS = "moji.reminders"
     const val FOCUS = "moji.focus"
     const val SILENT = "moji.silent"
+    const val WEEKLY_LETTER = "moji.ai.weeklyLetter"
 
     fun create(context: Context) {
         val manager = context.getSystemService(NotificationManager::class.java)
@@ -40,6 +41,7 @@ object NotificationChannels {
                 NotificationChannel(REMINDERS, "计划提醒", NotificationManager.IMPORTANCE_HIGH),
                 NotificationChannel(FOCUS, "番茄专注", NotificationManager.IMPORTANCE_DEFAULT),
                 NotificationChannel(SILENT, "静音提醒", NotificationManager.IMPORTANCE_LOW).apply { setSound(null, null); enableVibration(false) },
+                NotificationChannel(WEEKLY_LETTER, "本周来信", NotificationManager.IMPORTANCE_DEFAULT),
             )
         )
     }
@@ -190,6 +192,7 @@ class BootReceiver : BroadcastReceiver() {
                 AlarmScheduler.schedulePomodoro(context, focus.targetEpochMillis, focus.title)
                 AlarmScheduler.showRunningPomodoro(context, focus)
             }
+            AIWeeklyLetterNotifier.reschedule(context)
             } finally { pending.finish() }
         }
     }

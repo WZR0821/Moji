@@ -1,4 +1,5 @@
 import XCTest
+import UIKit
 import UniformTypeIdentifiers
 @testable import Moji
 
@@ -3693,5 +3694,910 @@ final class MojiAISettingsTests: XCTestCase {
             XCTAssertEqual(status, 200)
             XCTAssertEqual(try AIDrafting.checklist(from: try AIClient.parseText(data, style: style)).count, 4, path)
         }
+    }
+}
+
+/// The chips under the home page's field are read on the device with fixed
+/// rules, so one sentence gives the same chips on both platforms and nothing
+/// is sent while typing.
+final class MojiQuickEntryParserTests: XCTestCase {
+    private var calendar: Calendar {
+        var c = Calendar(identifier: .gregorian)
+        c.timeZone = TimeZone(identifier: "Asia/Tokyo")!
+        c.firstWeekday = 2
+        return c
+    }
+    private func date(_ text: String) -> Date { ISO8601DateFormatter().date(from: text)! }
+    /// The start of that day in Tokyo.
+    private func day(_ text: String) -> Date { date(text + "T00:00:00+09:00") }
+    /// Sunday 2026-11-22, 10:00 in Tokyo.
+    private var now: Date { date("2026-11-22T01:00:00Z") }
+
+    private func read(_ text: String, categories: [RecordCategory] = [.study, .work]) -> [QuickEntryToken] {
+        QuickEntryParser.tokens(in: text, now: now, calendar: calendar, categories: categories, defaultCategory: .study)
+    }
+
+    private func adoptingAll(_ text: String) -> String {
+        let tokens = read(text)
+        return QuickEntryParser.title(from: text, tokens: tokens, adopted: Set(tokens.map(\.id)))
+    }
+
+    func testTheSharedSentencesGiveTheSameChipsAndTitles() {
+        let samples: [(text: String, chips: [String], day: String?, title: String)] = [
+            ("周三下午三点交周报 45分钟", ["周三", "15:00", "45 分钟"], "2026-11-25", "交周报"),
+            ("明天下午三点交保险计划书 45分钟", ["明天", "15:00", "45 分钟"], "2026-11-23", "交保险计划书"),
+            ("今晚8点跑步半小时", ["20:00", "30 分钟"], nil, "跑步"),
+            ("明早背单词", ["明天", "上午"], "2026-11-23", "背单词"),
+            ("后天上午开组会", ["后天", "上午"], "2026-11-24", "开组会"),
+            ("12月5日交论文", ["12月5日"], "2026-12-05", "交论文"),
+            ("3号还书", ["12月3日"], "2026-12-03", "还书"),
+            ("每天读书20分钟", ["20 分钟", "每天"], nil, "读书"),
+            ("每周三上午开例会", ["周三", "上午", "每周"], "2026-11-25", "开例会"),
+            ("工作日早上8点打卡", ["08:00", "每个工作日"], nil, "打卡"),
+            ("下周一 9:30 面试 1小时", ["下周一", "09:30", "1 小时"], "2026-11-23", "面试"),
+            ("两点半开会", ["14:30"], nil, "开会"),
+            ("一个半小时整理笔记", ["1 小时 30 分钟"], nil, "整理笔记"),
+            ("下午三点前交报告", ["15:00"], nil, "交报告"),
+            ("晚上去健身", ["晚上"], nil, "去健身"),
+            ("1.5小时写作", ["1 小时 30 分钟"], nil, "写作"),
+            ("中午吃饭", ["12:00"], nil, "吃饭"),
+            ("复习工作笔记", ["工作"], nil, "复习工作笔记"),
+        ]
+        for sample in samples {
+            let tokens = read(sample.text)
+            XCTAssertEqual(tokens.map(\.text), sample.chips, sample.text)
+            XCTAssertEqual(tokens.first(where: { $0.kind == .day })?.day, sample.day.map { day($0) }, sample.text)
+            XCTAssertEqual(adoptingAll(sample.text), sample.title, sample.text)
+        }
+    }
+
+    func testChipsCarryTheValuesTheyShow() throws {
+        let weekly = read("每周三上午开例会")
+        XCTAssertEqual(weekly.first(where: { $0.kind == .repeatRule })?.repeatRule, .weekly)
+        XCTAssertEqual(weekly.first(where: { $0.kind == .time })?.scheduleKind, .morning)
+
+        let workdays = read("工作日早上8点打卡")
+        let clock = try XCTUnwrap(workdays.first(where: { $0.kind == .time }))
+        XCTAssertEqual(clock.scheduleKind, .exactTime)
+        XCTAssertEqual(clock.hour, 8); XCTAssertEqual(clock.minute, 0)
+        XCTAssertEqual(workdays.first(where: { $0.kind == .repeatRule })?.repeatRule, .weekdays)
+        XCTAssertFalse(workdays.contains(where: { $0.kind == .category }), "工作 inside 工作日 is not a type")
+
+        XCTAssertEqual(read("一个半小时整理笔记").first?.minutes, 90)
+        XCTAssertEqual(read("1.5小时写作").first?.minutes, 90)
+        XCTAssertEqual(read("今晚8点跑步半小时").last?.minutes, 30)
+        let evening = try XCTUnwrap(read("今晚8点跑步半小时").first)
+        XCTAssertEqual(evening.scheduleKind, .exactTime); XCTAssertEqual(evening.hour, 20)
+        let noon = try XCTUnwrap(read("中午吃饭").first)
+        XCTAssertEqual(noon.scheduleKind, .exactTime); XCTAssertEqual(noon.hour, 12)
+        XCTAssertEqual(read("晚上去健身").first?.scheduleKind, .evening)
+        XCTAssertEqual(read("后天上午开组会").last?.scheduleKind, .morning)
+        let type = try XCTUnwrap(read("复习工作笔记").first)
+        XCTAssertEqual(type.category, .work)
+        XCTAssertNil(type.range, "a type keeps its words in the title")
+    }
+
+    func testWordsThatOnlyLookLikeTimesGiveNoChips() {
+        for text in ["复习学习笔记", "提三点意见", "多读一点书", "十分重要的事", "考了90分", "周报", "写第三点", "一周三次",
+                     "今天天气好", "今天把明天的事做完", "2月30日交房租", "16:305", "30minutes", "周日跑步", "22号交", "", "   "] {
+            XCTAssertEqual(read(text).map(\.text), [], text)
+        }
+    }
+
+    func testTheExtraRulesBothPlatformsShare() throws {
+        let samples: [(text: String, chips: [String])] = [
+            ("1点开会", ["13:00"]),
+            ("一点半开会", ["13:30"]),
+            ("两个半小时跑步", ["2 小时 30 分钟"]),
+            ("2个半小时跑步", ["2 小时 30 分钟"]),
+            ("三点钟开会", ["15:00"]),
+            ("下午 3:30 开会", ["15:30"]),
+            ("明早 8点跑步", ["明天", "08:00"]),
+            ("跑步 45 分钟", ["45 分钟"]),
+            ("每周一次跑步", ["每周"]),
+            ("写工作日志", ["工作"]),
+            ("下午三点二十分钟练琴", ["15:00", "20 分钟"]),
+            ("晚上12点睡觉", ["晚上"]),
+            ("明天和后天", ["明天"]),
+            ("6:30起床", ["18:30"]),
+            ("跑步30min", ["30 分钟"]),
+            ("跑步30 Mins", ["30 分钟"]),
+            ("下周日跑步", ["下周日"]),
+            ("大后天出发", ["大后天"]),
+            ("11月20日续签", ["11月20日"]),
+            ("20号交房租", ["12月20日"]),
+        ]
+        for sample in samples {
+            XCTAssertEqual(read(sample.text).map(\.text), sample.chips, sample.text)
+        }
+        XCTAssertEqual(adoptingAll("三点钟开会"), "开会")
+        XCTAssertEqual(adoptingAll("下午 3:30 开会"), "开会")
+        XCTAssertEqual(adoptingAll("明早 8点跑步"), "跑步")
+        XCTAssertEqual(adoptingAll("下午三点二十分钟练琴"), "练琴")
+        XCTAssertEqual(read("11月20日续签").first?.day, day("2027-11-20"), "a day that has passed this year is next year's")
+        XCTAssertEqual(read("20号交房租").first?.day, day("2026-12-20"))
+        XCTAssertEqual(read("下周日跑步").first?.day, day("2026-11-29"))
+
+        let sport = try XCTUnwrap(RecordCategory.custom(named: "运动"))
+        let report = try XCTUnwrap(RecordCategory.custom(named: "工作日报"))
+        XCTAssertEqual(read("运动后工作", categories: [.study, .work, sport]).compactMap(\.category), [sport])
+        XCTAssertEqual(read("写工作日报", categories: [.study, .work, report]).compactMap(\.category), [report],
+                       "at the same place the longer name wins")
+    }
+
+    func testSharedWordsLeaveOnlyWhenEveryChipOnThemIsAdopted() throws {
+        let text = "明早背单词"
+        let tokens = read(text)
+        let date = try XCTUnwrap(tokens.first(where: { $0.kind == .day }))
+        XCTAssertEqual(QuickEntryParser.title(from: text, tokens: tokens, adopted: [date.id]), text)
+        let suggestion = try XCTUnwrap(QuickEntryParser.suggestion(text: text, tokens: tokens, adopted: [date.id]))
+        XCTAssertEqual(suggestion.day, day("2026-11-23"))
+        XCTAssertNil(suggestion.title, "the sentence stays as typed")
+        XCTAssertNil(suggestion.scheduleKind)
+        XCTAssertNil(QuickEntryParser.suggestion(text: text, tokens: tokens, adopted: []))
+    }
+
+    func testAdoptedChipsBecomeOneSuggestion() throws {
+        let text = "明天下午三点交保险计划书 45分钟"
+        let tokens = read(text)
+        let suggestion = try XCTUnwrap(QuickEntryParser.suggestion(text: text, tokens: tokens, adopted: Set(tokens.map(\.id))))
+        XCTAssertEqual(suggestion.title, "交保险计划书")
+        XCTAssertEqual(suggestion.day, day("2026-11-23"))
+        XCTAssertEqual(suggestion.scheduleKind, .exactTime)
+        XCTAssertEqual(suggestion.hour, 15); XCTAssertEqual(suggestion.minute, 0)
+        XCTAssertEqual(suggestion.minutes, 45)
+        XCTAssertNil(suggestion.category); XCTAssertNil(suggestion.repeatRule)
+
+        let length = try XCTUnwrap(tokens.first(where: { $0.kind == .duration }))
+        let partial = try XCTUnwrap(QuickEntryParser.suggestion(text: text, tokens: tokens, adopted: [length.id]))
+        XCTAssertEqual(partial.title, "明天下午三点交保险计划书", "only the words of the adopted chip go")
+        XCTAssertEqual(partial.minutes, 45); XCTAssertNil(partial.day)
+
+        let plan = CheckInItem(title: text, category: .study, scheduledStart: now, plannedMinutes: 25,
+                               scheduleKind: .allDay, detailsConfigured: false, plannedDurationEnabled: false)
+        let saved = try XCTUnwrap(suggestion.applied(to: plan, calendar: calendar))
+        XCTAssertEqual(saved.title, "交保险计划书")
+        XCTAssertEqual(saved.scheduledStart, date("2026-11-23T06:00:00Z"))
+        XCTAssertEqual(saved.effectiveScheduleKind, .exactTime)
+        XCTAssertEqual(saved.plannedDurationMinutes, 45)
+    }
+
+    func testAChipKeepsItsIdentityWhileTypingGoesOn() {
+        let first = read("周三交周报")
+        XCTAssertEqual(first.first?.id, read("周三交周报 45分钟").first?.id)
+        XCTAssertNotEqual(read("周四交周报").first?.id, first.first?.id)
+    }
+
+    func testNumbersInDigitsAndChineseNumerals() {
+        XCTAssertEqual(QuickEntryParser.number("15"), 15)
+        XCTAssertEqual(QuickEntryParser.number("十五"), 15)
+        XCTAssertEqual(QuickEntryParser.number("二十"), 20)
+        XCTAssertEqual(QuickEntryParser.number("两"), 2)
+        XCTAssertEqual(QuickEntryParser.number("一百二十"), 120)
+        XCTAssertEqual(QuickEntryParser.number("一百零五"), 105)
+        XCTAssertNil(QuickEntryParser.number("二三"))
+        XCTAssertNil(QuickEntryParser.number(""))
+        XCTAssertNil(QuickEntryParser.number("半"))
+        XCTAssertEqual([3, 10, 12, 20, 25, 99].map { QuickEntryParser.chineseNumeral($0) }, ["三", "十", "十二", "二十", "二十五", "九十九"])
+        XCTAssertEqual(QuickEntryParser.chineseNumeral(100), "100")
+    }
+}
+
+/// 今日提要 and 顺延旁批: the facts are counted on the device; only an order
+/// and one reason come from the model, and both are checked before use.
+final class MojiDailyBriefTests: XCTestCase {
+    private var calendar: Calendar {
+        var c = Calendar(identifier: .gregorian)
+        c.timeZone = TimeZone(identifier: "Asia/Tokyo")!
+        c.firstWeekday = 2
+        return c
+    }
+    private func date(_ text: String) -> Date { ISO8601DateFormatter().date(from: text)! }
+    /// Sunday 2026-11-22, 10:00 in Tokyo.
+    private var now: Date { date("2026-11-22T01:00:00Z") }
+
+    private func plan(_ title: String, at time: String, minutes: Int? = nil,
+                      status: CheckInStatus = .planned) -> CheckInItem {
+        CheckInItem(title: title, category: .study, scheduledStart: date(time), plannedMinutes: minutes ?? 25,
+                    status: status, plannedDurationEnabled: minutes != nil)
+    }
+
+    private var countdowns: [CountdownEvent] {
+        [CountdownEvent(title: "项目交付", targetDate: date("2026-11-24T03:00:00Z")),
+         CountdownEvent(title: "考试", targetDate: date("2026-12-20T03:00:00Z")),
+         CountdownEvent(title: "过去的事", targetDate: date("2026-11-01T03:00:00Z"))]
+    }
+
+    func testFactsLineIsCountedOnTheDevice() {
+        let pending = [plan("整理发布说明", at: "2026-11-22T05:00:00Z", minutes: 30),
+                       plan("回邮件", at: "2026-11-22T07:00:00Z", minutes: 45),
+                       plan("归纳昨日待办", at: "2026-11-19T00:00:00Z")]
+        let facts = AIDailyBrief.facts(pending: pending, countdowns: countdowns, today: now, calendar: calendar)
+        XCTAssertEqual(facts.count, 3)
+        XCTAssertEqual(facts.totalMinutes, 75)
+        XCTAssertEqual(facts.countdownTitle, "项目交付"); XCTAssertEqual(facts.countdownDays, 2)
+        XCTAssertEqual(facts.carried.map(\.title), ["归纳昨日待办"]); XCTAssertEqual(facts.carried.first?.days, 3)
+        XCTAssertTrue(AIDailyBrief.shouldShow(facts))
+        XCTAssertEqual(AIDailyBrief.factsLine(facts), "今天 3 件，约 1 小时 15 分钟；离「项目交付」还有 2 天；「归纳昨日待办」已顺延 3 天。")
+
+        let single = AIDailyBrief.facts(pending: [plan("整理发布说明", at: "2026-11-22T05:00:00Z")],
+                                        countdowns: [CountdownEvent(title: "项目交付", targetDate: date("2026-11-22T10:00:00Z"))],
+                                        today: now, calendar: calendar)
+        XCTAssertEqual(AIDailyBrief.factsLine(single), "今天 1 件；「项目交付」就是今天。")
+        XCTAssertTrue(AIDailyBrief.shouldShow(single))
+
+        let tomorrow = AIDailyBrief.facts(pending: [plan("A", at: "2026-11-22T05:00:00Z"), plan("B", at: "2026-11-22T06:00:00Z")],
+                                          countdowns: [CountdownEvent(title: "项目交付", targetDate: date("2026-11-23T03:00:00Z"))],
+                                          today: now, calendar: calendar)
+        XCTAssertEqual(AIDailyBrief.factsLine(tomorrow), "今天 2 件；明天就是「项目交付」。")
+
+        let several = AIDailyBrief.facts(pending: [plan("A", at: "2026-11-21T00:00:00Z"),
+                                                   plan("写完研究计划书第三节和第四节", at: "2026-11-17T00:00:00Z")],
+                                         countdowns: [], today: now, calendar: calendar)
+        XCTAssertEqual(AIDailyBrief.factsLine(several), "今天 2 件；「写完研究计划书第三节和…」等 2 件已顺延，最久 5 天。")
+    }
+
+    func testTheCardNeedsTwoPlansOrSomethingToSay() {
+        let alone = AIDailyBrief.facts(pending: [plan("读书", at: "2026-11-22T05:00:00Z")], countdowns: [], today: now, calendar: calendar)
+        XCTAssertFalse(AIDailyBrief.shouldShow(alone))
+        XCTAssertFalse(AIDailyBrief.shouldShow(AIDailyBrief.facts(pending: [], countdowns: countdowns, today: now, calendar: calendar)))
+        let carried = AIDailyBrief.facts(pending: [plan("读书", at: "2026-11-21T05:00:00Z")], countdowns: [], today: now, calendar: calendar)
+        XCTAssertTrue(AIDailyBrief.shouldShow(carried))
+
+        let pinned = [CountdownEvent(title: "甲", targetDate: date("2026-11-24T03:00:00Z")),
+                      CountdownEvent(title: "乙", targetDate: date("2026-11-24T03:00:00Z"), isPinned: true)]
+        XCTAssertEqual(AIDailyBrief.facts(pending: [plan("读书", at: "2026-11-22T05:00:00Z")], countdowns: pinned,
+                                          today: now, calendar: calendar).countdownTitle, "乙", "a marked day first among equals")
+    }
+
+    func testTheModelsOrderIsCheckedBeforeUse() throws {
+        let first = try AIDailyBrief.order(from: #"{"order":[3,1,2],"reason":"离交付只剩两天，先定稿。"}"#, count: 3)
+        XCTAssertEqual(first.order, [3, 1, 2]); XCTAssertEqual(first.reason, "离交付只剩两天，先定稿")
+        let loose = try AIDailyBrief.order(from: #"{"order":[5,"x",true,1,1]}"#, count: 3)
+        XCTAssertEqual(loose.order, [1, 2, 3]); XCTAssertNil(loose.reason)
+        XCTAssertThrowsError(try AIDailyBrief.order(from: #"{"order":[]}"#, count: 3))
+        XCTAssertThrowsError(try AIDailyBrief.order(from: "先做第一件", count: 3))
+        XCTAssertThrowsError(try AIDailyBrief.order(from: #"{"order":[1]}"#, count: 0))
+        let fenced = try AIDailyBrief.order(from: "```json\n{\"order\":[\"2\"],\"reason\":\"  \"}\n```", count: 2)
+        XCTAssertEqual(fenced.order, [2, 1]); XCTAssertNil(fenced.reason)
+    }
+
+    func testOnlyTheDaysPlansAndNearDaysAreSent() throws {
+        let pending = [plan("整理发布说明", at: "2026-11-22T05:00:00Z", minutes: 30),
+                       plan("归纳昨日待办", at: "2026-11-19T00:00:00Z"),
+                       plan("背单词", at: "2026-11-22T00:30:00Z", status: .inProgress)]
+        XCTAssertEqual(AIDailyBrief.input(pending: pending, countdowns: countdowns, today: now, calendar: calendar), """
+        今天的计划：
+        [1] 整理发布说明（14:00，30 分钟，学习）
+        [2] 归纳昨日待办（09:00，学习，已顺延 3 天）
+        [3] 背单词（09:30，学习，正在进行）
+        最近的日子：项目交付（还有 2 天）、考试（还有 28 天）
+        """)
+        let instructions = AIDailyBrief.instructions(now: now, calendar: calendar)
+        XCTAssertTrue(instructions.contains("排今天计划的先后"))
+        XCTAssertTrue(instructions.contains(#"{"order""#))
+
+        // The answer shown on QA screens goes through the same reading.
+        let answer = AIQAFixture.answer(instructions: instructions,
+                                        input: AIDailyBrief.input(pending: pending, countdowns: countdowns, today: now, calendar: calendar))
+        let parsed = try AIDailyBrief.order(from: answer, count: pending.count)
+        XCTAssertEqual(parsed.order, [1, 2, 3])
+        XCTAssertNotNil(parsed.reason)
+    }
+
+    func testTheListFollowsTheOrderAndTheAdviceFollowsWhatIsLeft() {
+        let a = plan("A", at: "2026-11-22T01:00:00Z"), b = plan("B", at: "2026-11-22T02:00:00Z")
+        let c = plan("C", at: "2026-11-22T03:00:00Z"), d = plan("D", at: "2026-11-22T04:00:00Z")
+        XCTAssertEqual(AIDailyBrief.ordered([a, b, c, d], by: [c.id, a.id]).map(\.title), ["C", "A", "B", "D"])
+        XCTAssertEqual(AIDailyBrief.ordered([a, b], by: []).map(\.title), ["A", "B"])
+        XCTAssertEqual(AIDailyBrief.ordered([a, b], by: [b.id, b.id, UUID()]).map(\.title), ["B", "A"])
+
+        let ids = [c.id, a.id, b.id]
+        XCTAssertEqual(AIDailyBrief.firstPlan(order: ids, pending: [a, b, c])?.item.id, c.id)
+        XCTAssertEqual(AIDailyBrief.firstPlan(order: ids, pending: [a, b, c])?.isModelFirst, true)
+        let afterDone = AIDailyBrief.firstPlan(order: ids, pending: [a, b])
+        XCTAssertEqual(afterDone?.item.id, a.id)
+        XCTAssertEqual(afterDone?.isModelFirst, false, "the reason was for the plan already done")
+        XCTAssertNil(AIDailyBrief.firstPlan(order: ids, pending: []))
+        XCTAssertNil(AIDailyBrief.firstPlan(order: [], pending: [a]))
+
+        XCTAssertEqual(AIDailyBrief.adviceLine(title: "整理发布说明", reason: "离项目交付只剩两天"), "宜先做「整理发布说明」，离项目交付只剩两天。")
+        XCTAssertEqual(AIDailyBrief.adviceLine(title: "写完研究计划书第三节和第四节", reason: nil), "宜先做「写完研究计划书第三节和第四节」。",
+                       "the advice keeps the whole title")
+    }
+
+    func testCarryNoteWordsCountTheDays() {
+        XCTAssertEqual(AIDailyBrief.carryNoteDays, 3)
+        XCTAssertEqual(AIDailyBrief.carryNoteText(daysLate: 3), "顺延三天了，拆小一点 ›")
+        XCTAssertEqual(AIDailyBrief.carryNoteText(daysLate: 10), "顺延十天了，拆小一点 ›")
+        XCTAssertEqual(AIDailyBrief.carryNoteText(daysLate: 12), "顺延十二天了，拆小一点 ›")
+        XCTAssertEqual(AIDailyBrief.carryNoteText(daysLate: 25), "顺延二十五天了，拆小一点 ›")
+        XCTAssertEqual(AIDailyBrief.carryNoteText(daysLate: 100), "顺延 100 天了，拆小一点 ›")
+    }
+}
+
+/// What 今日提要 and 顺延旁批 remember stays on this device, and only for its day.
+final class MojiAIDailyStateTests: XCTestCase {
+    private var suite = ""
+    private var defaults: UserDefaults!
+    private let today = Date()
+    private var tomorrow: Date { today.addingTimeInterval(30 * 3_600) }
+
+    override func setUp() {
+        super.setUp()
+        suite = "moji.tests.ai.daily." + UUID().uuidString
+        defaults = UserDefaults(suiteName: suite)
+    }
+
+    override func tearDown() {
+        defaults.removePersistentDomain(forName: suite)
+        super.tearDown()
+    }
+
+    @MainActor
+    func testClosingTheCardLastsOneDay() {
+        let state = AIDailyState(defaults: defaults)
+        XCTAssertFalse(state.isDismissed(on: today))
+        state.dismiss(on: today)
+        XCTAssertTrue(state.isDismissed(on: today))
+        XCTAssertFalse(state.isDismissed(on: tomorrow))
+        XCTAssertTrue(AIDailyState(defaults: defaults).isDismissed(on: today), "kept across launches")
+    }
+
+    @MainActor
+    func testTheListOrderIsForOneDayAndCanBeUndone() {
+        let state = AIDailyState(defaults: defaults)
+        let ids = [UUID(), UUID(), UUID()]
+        XCTAssertNil(state.orderIDs(on: today))
+        state.applyOrder(ids, on: today)
+        XCTAssertEqual(state.orderIDs(on: today), ids)
+        XCTAssertNil(state.orderIDs(on: tomorrow))
+        XCTAssertEqual(AIDailyState(defaults: defaults).orderIDs(on: today), ids)
+        state.clearOrder()
+        XCTAssertNil(state.orderIDs(on: today))
+        XCTAssertNil(AIDailyState(defaults: defaults).orderIDs(on: today))
+    }
+
+    @MainActor
+    func testTheDaysAnswerIsReadOnlyOnItsOwnDay() throws {
+        let ids = [UUID(), UUID()]
+        let saved = AIDailyState.Brief(day: AIDailyState.dayKey(today), order: ids.map(\.uuidString) + ["不是编号"], reason: "先定稿")
+        defaults.set(try JSONEncoder().encode(saved), forKey: AIDailyState.Keys.brief)
+        let state = AIDailyState(defaults: defaults)
+        XCTAssertEqual(state.brief(on: today)?.reason, "先定稿")
+        XCTAssertEqual(state.briefOrder(on: today), ids)
+        XCTAssertNil(state.brief(on: tomorrow))
+        XCTAssertEqual(state.briefOrder(on: tomorrow), [])
+    }
+
+    @MainActor
+    func testWavedAwayNotesAreRememberedUpToALimit() {
+        let state = AIDailyState(defaults: defaults)
+        let ids = (0...AIDailyState.carryDismissedLimit).map { _ in UUID() }
+        state.dismissCarryNote(ids[0])
+        state.dismissCarryNote(ids[0])
+        XCTAssertEqual(state.dismissedCarryNotes.count, 1)
+        for id in ids.dropFirst() { state.dismissCarryNote(id) }
+        XCTAssertEqual(state.dismissedCarryNotes.count, AIDailyState.carryDismissedLimit)
+        XCTAssertFalse(state.isCarryNoteDismissed(ids[0]), "the oldest goes first")
+        XCTAssertTrue(state.isCarryNoteDismissed(ids[ids.count - 1]))
+        XCTAssertEqual(AIDailyState(defaults: defaults).dismissedCarryNotes.count, AIDailyState.carryDismissedLimit)
+    }
+
+    @MainActor
+    func testNothingIsAskedWhileTheModelIsNotReady() {
+        let state = AIDailyState(defaults: defaults)
+        let ai = AISettingsStore(defaults: defaults, keys: AIMemoryKeyStore())
+        let plans = [CheckInItem(title: "A", category: .study, scheduledStart: today, plannedMinutes: 25),
+                     CheckInItem(title: "B", category: .study, scheduledStart: today, plannedMinutes: 25)]
+        state.refreshIfNeeded(pending: plans, countdowns: [], now: today, ai: ai)
+        XCTAssertFalse(state.isLoading)
+        XCTAssertNil(state.lastAttempt)
+    }
+
+    @MainActor
+    func testTheDayKeyIsTheCalendarDay() {
+        var tokyo = Calendar(identifier: .gregorian)
+        tokyo.timeZone = TimeZone(identifier: "Asia/Tokyo")!
+        XCTAssertEqual(AIDailyState.dayKey(ISO8601DateFormatter().date(from: "2026-11-22T15:30:00Z")!, calendar: tokyo), "2026-11-23")
+    }
+}
+
+/// The switches for what Moji offers on its own, and the suggestion strip
+/// that only says what the plan does not already say.
+final class MojiAIProactiveSettingsTests: XCTestCase {
+    func testOlderSettingsWithoutTheNewSwitchesTurnThemOn() throws {
+        var settings = AISettings()
+        settings.isEnabled = true
+        var object = try XCTUnwrap(JSONSerialization.jsonObject(with: JSONEncoder().encode(settings)) as? [String: Any])
+        for key in ["showsEntriesWhenOff", "dailyBrief", "carryOverNotes"] {
+            let removed = object.removeValue(forKey: key)
+            XCTAssertNotNil(removed, key)
+        }
+        let decoded = try JSONDecoder().decode(AISettings.self, from: JSONSerialization.data(withJSONObject: object))
+        XCTAssertTrue(decoded.isEnabled)
+        XCTAssertTrue(decoded.showsEntriesWhenOff); XCTAssertTrue(decoded.dailyBrief); XCTAssertTrue(decoded.carryOverNotes)
+
+        settings.showsEntriesWhenOff = false
+        settings.dailyBrief = false
+        settings.carryOverNotes = false
+        let again = try JSONDecoder().decode(AISettings.self, from: JSONEncoder().encode(settings))
+        XCTAssertFalse(again.showsEntriesWhenOff); XCTAssertFalse(again.dailyBrief); XCTAssertFalse(again.carryOverNotes)
+    }
+
+    @MainActor
+    func testEntriesShowWhileOffUntilHidden() throws {
+        let suite = "moji.tests.ai.entries." + UUID().uuidString
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let store = AISettingsStore(defaults: defaults, keys: AIMemoryKeyStore())
+        XCTAssertFalse(store.isReady)
+        XCTAssertTrue(store.showsEntries, "the entries are there before anything is set up")
+        try store.change { $0.showsEntriesWhenOff = false }
+        XCTAssertFalse(store.showsEntries)
+        try store.addProvider(.deepSeek, configuration: ProviderConfiguration(provider: .deepSeek), key: "k")
+        try store.change { $0.isEnabled = true }
+        XCTAssertTrue(store.isReady)
+        XCTAssertTrue(store.showsEntries, "once it is on, the entries are always there")
+    }
+
+    func testASuggestionDropsWhatThePlanAlreadySays() {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(identifier: "Asia/Tokyo")!
+        func date(_ text: String) -> Date { ISO8601DateFormatter().date(from: text)! }
+        // Monday 2026-11-23, 15:00 in Tokyo.
+        let plan = CheckInItem(title: "交周报", category: .work, scheduledStart: date("2026-11-23T06:00:00Z"), plannedMinutes: 45,
+                               scheduleKind: .exactTime, repeatRule: .weekly, plannedDurationEnabled: true)
+        let same = EntrySuggestion(title: "交周报", day: date("2026-11-22T15:00:00Z"), scheduleKind: .exactTime, hour: 15, minute: 0,
+                                   minutes: 45, category: .work, repeatRule: .weekly)
+        let left = same.removingMatches(of: plan, calendar: calendar)
+        XCTAssertTrue(left.isEmpty)
+        XCTAssertNil(left.title)
+
+        let other = EntrySuggestion(title: "交月报", day: date("2026-11-23T15:00:00Z"), scheduleKind: .exactTime, hour: 16, minute: 0,
+                                    minutes: 30, category: .study, repeatRule: .daily)
+        XCTAssertEqual(other.removingMatches(of: plan, calendar: calendar), other)
+        XCTAssertEqual(EntrySuggestion(scheduleKind: .exactTime, hour: 15, minute: 30).removingMatches(of: plan, calendar: calendar).scheduleKind,
+                       .exactTime, "another minute is a change")
+
+        let morning = CheckInItem(title: "背单词", category: .study, scheduledStart: date("2026-11-23T00:00:00Z"), plannedMinutes: 25,
+                                  scheduleKind: .morning, plannedDurationEnabled: false)
+        XCTAssertNil(EntrySuggestion(scheduleKind: .morning, hour: 9).removingMatches(of: morning, calendar: calendar).scheduleKind)
+        XCTAssertEqual(EntrySuggestion(scheduleKind: .evening).removingMatches(of: morning, calendar: calendar).scheduleKind, .evening)
+        XCTAssertEqual(EntrySuggestion(minutes: 25).removingMatches(of: morning, calendar: calendar).minutes, 25, "the plan had no length yet")
+        XCTAssertNil(EntrySuggestion(repeatRule: .never).removingMatches(of: morning, calendar: calendar).repeatRule)
+        XCTAssertEqual(EntrySuggestion(parts: ["买菜", "取快递"]).removingMatches(of: morning, calendar: calendar).parts, ["买菜", "取快递"])
+    }
+}
+
+/// 晚间收尾: the sentence of facts, the reading of the answer and what 照此处理 writes.
+final class MojiEveningWrapTests: XCTestCase {
+    private var tokyo: Calendar {
+        var calendar = Calendar(identifier: .iso8601)
+        calendar.timeZone = TimeZone(identifier: "Asia/Tokyo")!
+        calendar.locale = Locale(identifier: "zh_CN")
+        calendar.firstWeekday = 2
+        calendar.minimumDaysInFirstWeek = 4
+        return calendar
+    }
+
+    private func at(_ calendar: Calendar, _ day: Int, _ hour: Int, _ minute: Int = 0) -> Date {
+        calendar.date(from: DateComponents(year: 2026, month: 11, day: day, hour: hour, minute: minute))!
+    }
+
+    func testTheFirstSentenceComparesOnlyARealDifference() {
+        XCTAssertEqual(AIEveningWrap.factsLine(EveningWrapFacts(completed: 3, focusMinutes: 100, weekAverage: 80)),
+                       "今天完成 3 件，专注 1 小时 40 分钟，比这周平均多 20 分钟。")
+        XCTAssertEqual(AIEveningWrap.factsLine(EveningWrapFacts(completed: 0, focusMinutes: 0, weekAverage: 80)),
+                       "今天还没有完成的计划。")
+        XCTAssertEqual(AIEveningWrap.factsLine(EveningWrapFacts(completed: 2, focusMinutes: 30, weekAverage: nil)),
+                       "今天完成 2 件，专注 30 分钟。", "a Monday has nothing to compare with")
+        XCTAssertEqual(AIEveningWrap.factsLine(EveningWrapFacts(completed: 2, focusMinutes: 85, weekAverage: 80)),
+                       "今天完成 2 件，专注 1 小时 25 分钟。", "five minutes is not a difference")
+        XCTAssertEqual(AIEveningWrap.factsLine(EveningWrapFacts(completed: 1, focusMinutes: 50, weekAverage: 80)),
+                       "今天完成 1 件，专注 50 分钟，比这周平均少 30 分钟。")
+    }
+
+    func testTheSecondSentenceSaysWhereTheRestStands() {
+        XCTAssertEqual(AIEveningWrap.secondLine(applied: true, pending: 2, hasArrangement: true), "剩下的已经安排好了。")
+        XCTAssertEqual(AIEveningWrap.secondLine(applied: false, pending: 0, hasArrangement: false), "今天的计划都做完了。")
+        XCTAssertEqual(AIEveningWrap.secondLine(applied: false, pending: 2, hasArrangement: true), "剩下 2 件这样安排：")
+        XCTAssertEqual(AIEveningWrap.secondLine(applied: false, pending: 2, hasArrangement: false), "剩下 2 件没做完。")
+        XCTAssertTrue(AIEveningWrap.shouldShow(EveningWrapFacts(completed: 1), pending: 0))
+        XCTAssertTrue(AIEveningWrap.shouldShow(EveningWrapFacts(), pending: 1))
+        XCTAssertFalse(AIEveningWrap.shouldShow(EveningWrapFacts(), pending: 0))
+    }
+
+    func testTheFactsAreTheReviewPagesNumbers() {
+        let calendar = Calendar.mojiISO
+        func day(_ day: Int, _ hour: Int, _ minute: Int = 0) -> Date { at(calendar, day, hour, minute) }
+        // Monday 16 and Tuesday 17 average 80 minutes; Wednesday 18 is today.
+        let records = [
+            TimeRecord(title: "一", category: .study, startDate: day(16, 9), endDate: day(16, 10)),
+            TimeRecord(title: "二", category: .study, startDate: day(17, 9), endDate: day(17, 10, 40)),
+            TimeRecord(title: "三", category: .work, startDate: day(18, 9), endDate: day(18, 10, 40))
+        ]
+        let done = (0..<3).map { index in
+            CheckInItem(title: "做完 \(index)", category: .work, scheduledStart: day(18, 8 + index), plannedMinutes: 30,
+                        status: .completed, completedAt: day(18, 12))
+        }
+        let pending = CheckInItem(title: "没做完", category: .work, scheduledStart: day(18, 15), plannedMinutes: 30)
+        let facts = AIEveningWrap.facts(items: done + [pending], records: records, today: day(18, 21, 30), calendar: calendar)
+        XCTAssertEqual(facts, EveningWrapFacts(completed: 3, focusMinutes: 100, weekAverage: 80))
+        XCTAssertEqual(AIEveningWrap.factsLine(facts), "今天完成 3 件，专注 1 小时 40 分钟，比这周平均多 20 分钟。")
+        let monday = AIEveningWrap.facts(items: [], records: records, today: day(16, 21, 30), calendar: calendar)
+        XCTAssertNil(monday.weekAverage)
+        XCTAssertEqual(monday.focusMinutes, 60)
+    }
+
+    func testTheAnswerIsReadPlanByPlan() throws {
+        let answer = #"{"items":[{"index":2,"action":"drop","note":"已经不需要了。"},{"index":1,"action":"split"}]}"#
+        let result = try AIEveningWrap.arrangement(from: answer, count: 3)
+        XCTAssertEqual(result[1], WrapArrangement(action: .split, note: nil))
+        XCTAssertEqual(result[2], WrapArrangement(action: .drop, note: "已经不需要了"))
+        XCTAssertNil(result[3])
+        XCTAssertEqual(result[3]?.action ?? .tomorrow, .tomorrow, "a plan left out is carried to tomorrow")
+
+        XCTAssertThrowsError(try AIEveningWrap.arrangement(
+            from: #"{"items":[{"index":1,"action":"later"},{"index":true,"action":"drop"}]}"#, count: 3))
+        XCTAssertThrowsError(try AIEveningWrap.arrangement(from: #"{"items":[{"index":4,"action":"drop"}]}"#, count: 3))
+        XCTAssertThrowsError(try AIEveningWrap.arrangement(from: #"{"items":[{"index":1,"action":"keep"}]}"#, count: 1))
+
+        let repeated = try AIEveningWrap.arrangement(
+            from: #"{"items":[{"index":1,"action":"morning"},{"index":1,"action":"drop"},{"index":2,"action":"tomorrow","note":"离交付还有两天。"}]}"#,
+            count: 2)
+        XCTAssertEqual(repeated[1]?.action, .morning, "only the first answer for a number counts")
+        XCTAssertEqual(repeated[2], WrapArrangement(action: .tomorrow, note: "离交付还有两天"))
+    }
+
+    func testCarryingOutTheArrangement() throws {
+        let calendar = tokyo
+        let today = at(calendar, 18, 21, 30)
+        let tomorrow = at(calendar, 19, 0)
+        let report = CheckInItem(title: "交周报", category: .work, scheduledStart: at(calendar, 18, 14, 30), plannedMinutes: 45,
+                                 plannedDurationEnabled: true)
+        let reading = CheckInItem(title: "阅读产品设计章节", category: .study, scheduledStart: at(calendar, 18, 16), plannedMinutes: 60,
+                                  plannedDurationEnabled: true)
+        let big = CheckInItem(title: "归纳上周待办", category: .work, scheduledStart: at(calendar, 18, 19), plannedMinutes: 30,
+                              plannedDurationEnabled: true)
+        let old = CheckInItem(title: "旧清单", category: .study, scheduledStart: at(calendar, 18, 10), plannedMinutes: 20)
+        let stays = CheckInItem(title: "留着", category: .study, scheduledStart: at(calendar, 18, 20), plannedMinutes: 20)
+        var running = CheckInItem(title: "正在做", category: .work, scheduledStart: at(calendar, 18, 21), plannedMinutes: 25)
+        running.status = .inProgress
+
+        let outcome = AIEveningWrap.apply([(report, .tomorrow), (reading, .morning), (big, .split), (old, .drop),
+                                           (stays, .keep), (running, .tomorrow)], today: today, calendar: calendar)
+        XCTAssertEqual(outcome.summary, "收尾：顺延 1 件，明早 2 件，放下 1 件")
+        XCTAssertEqual(outcome.changed.count, 4, "kept and in-progress plans are not written")
+        XCTAssertEqual(outcome.firstSplit, big.id)
+
+        let moved = try XCTUnwrap(outcome.changed.first { $0.id == report.id })
+        XCTAssertEqual(moved.scheduledStart, at(calendar, 19, 14, 30), "tomorrow keeps the time")
+        let morning = try XCTUnwrap(outcome.changed.first { $0.id == reading.id })
+        XCTAssertTrue(calendar.isDate(morning.scheduledStart, inSameDayAs: tomorrow))
+        XCTAssertEqual(morning.scheduleKind, .morning)
+        XCTAssertEqual(morning.plannedDurationMinutes, 60, "the length stays")
+        let split = try XCTUnwrap(outcome.changed.first { $0.id == big.id })
+        XCTAssertEqual(split.scheduleKind, .morning)
+        XCTAssertTrue(calendar.isDate(split.scheduledStart, inSameDayAs: tomorrow))
+        let dropped = try XCTUnwrap(outcome.changed.first { $0.id == old.id })
+        XCTAssertEqual(dropped.isArchived, true)
+        XCTAssertEqual(dropped.scheduledStart, old.scheduledStart)
+        XCTAssertNil(outcome.changed.first { $0.id == stays.id })
+        XCTAssertNil(outcome.changed.first { $0.id == running.id })
+    }
+
+    func testTheEveningStartsAtNine() {
+        let calendar = Calendar.current
+        let day = calendar.startOfDay(for: Date())
+        XCTAssertFalse(AIEveningWrap.isEvening(day.addingTimeInterval(20 * 3_600 + 59 * 60), calendar: calendar))
+        XCTAssertTrue(AIEveningWrap.isEvening(day.addingTimeInterval(21 * 3_600), calendar: calendar))
+    }
+
+    @MainActor
+    func testTheEveningsAnswerIsKeptForItsDayOnly() throws {
+        let suite = "moji.tests.ai.wrap." + UUID().uuidString
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let today = Date()
+        let tomorrow = today.addingTimeInterval(30 * 3_600)
+        let plan = CheckInItem(title: "A", category: .study, scheduledStart: today, plannedMinutes: 25)
+        let saved = AIEveningWrapState.Saved(day: AIDailyState.dayKey(today),
+                                             items: [.init(id: plan.id.uuidString, action: .drop, note: "不必再做"),
+                                                     .init(id: "不是编号", action: .morning, note: nil)])
+        defaults.set(try JSONEncoder().encode(saved), forKey: AIEveningWrapState.Keys.wrap)
+        let state = AIEveningWrapState(defaults: defaults)
+        XCTAssertEqual(state.arrangement(on: today)[plan.id]?.action, .drop)
+        XCTAssertEqual(state.arrangement(on: today).count, 1)
+        XCTAssertTrue(state.arrangement(on: tomorrow).isEmpty)
+        XCTAssertTrue(state.hasArrangement(on: today, pending: [plan]))
+        XCTAssertFalse(state.hasArrangement(on: today, pending: []))
+
+        state.dismiss(on: today)
+        XCTAssertTrue(state.isDismissed(on: today))
+        XCTAssertFalse(state.isDismissed(on: tomorrow))
+        state.markApplied(on: today)
+        XCTAssertTrue(AIEveningWrapState(defaults: defaults).isApplied(on: today), "kept across launches")
+
+        // Nothing is asked while the model is not ready.
+        let fresh = AIEveningWrapState(defaults: defaults)
+        let ai = AISettingsStore(defaults: defaults, keys: AIMemoryKeyStore())
+        fresh.refreshIfNeeded(done: [], pending: [plan], countdowns: [], now: tomorrow, ai: ai)
+        XCTAssertFalse(fresh.isLoading)
+        XCTAssertNil(fresh.lastAttempt)
+    }
+}
+
+/// 本周来信: which week it is about, the sentence of facts and the reading of the answer.
+final class MojiWeeklyLetterTests: XCTestCase {
+    private var tokyo: Calendar {
+        var calendar = Calendar(identifier: .iso8601)
+        calendar.timeZone = TimeZone(identifier: "Asia/Tokyo")!
+        calendar.locale = Locale(identifier: "zh_CN")
+        calendar.firstWeekday = 2
+        calendar.minimumDaysInFirstWeek = 4
+        return calendar
+    }
+
+    private func at(_ month: Int, _ day: Int, _ hour: Int, _ minute: Int = 0) -> Date {
+        tokyo.date(from: DateComponents(year: 2026, month: month, day: day, hour: hour, minute: minute))!
+    }
+
+    func testTheWeekTurnsOnSundayEvening() {
+        let calendar = tokyo
+        // Sunday 22 November.
+        XCTAssertEqual(AIWeeklyLetter.letterWeek(now: at(11, 22, 19, 59), calendar: calendar), at(11, 9, 0))
+        XCTAssertEqual(AIWeeklyLetter.letterWeek(now: at(11, 22, 20, 0), calendar: calendar), at(11, 16, 0))
+        XCTAssertEqual(AIWeeklyLetter.letterWeek(now: at(11, 23, 9, 0), calendar: calendar), at(11, 16, 0),
+                       "on Monday morning it is the week just past")
+        XCTAssertEqual(AIWeeklyLetter.nextNotification(after: at(11, 18, 10), calendar: calendar), at(11, 22, 20))
+        XCTAssertEqual(AIWeeklyLetter.nextNotification(after: at(11, 22, 20), calendar: calendar), at(11, 29, 20))
+        XCTAssertEqual(AIWeeklyLetter.nextNotification(after: at(11, 22, 19, 59), calendar: calendar), at(11, 22, 20))
+    }
+
+    func testWhenTheTeaserAndThePreparationHappen() {
+        let calendar = tokyo
+        XCTAssertFalse(AIWeeklyLetter.isTeaserTime(at(11, 22, 19, 59), calendar: calendar))
+        XCTAssertTrue(AIWeeklyLetter.isTeaserTime(at(11, 22, 20, 0), calendar: calendar))
+        XCTAssertTrue(AIWeeklyLetter.isTeaserTime(at(11, 23, 23, 59), calendar: calendar))
+        XCTAssertFalse(AIWeeklyLetter.isTeaserTime(at(11, 24, 0, 0), calendar: calendar))
+        XCTAssertFalse(AIWeeklyLetter.isPreparingTime(at(11, 22, 11, 59), calendar: calendar))
+        XCTAssertTrue(AIWeeklyLetter.isPreparingTime(at(11, 22, 12, 0), calendar: calendar))
+        XCTAssertFalse(AIWeeklyLetter.isPreparingTime(at(11, 22, 20, 0), calendar: calendar))
+        XCTAssertFalse(AIWeeklyLetter.isPreparingTime(at(11, 21, 15, 0), calendar: calendar))
+    }
+
+    func testTheRangeAndTheKey() {
+        let calendar = tokyo
+        XCTAssertEqual(AIWeeklyLetter.rangeText(at(11, 16, 0), calendar: calendar), "11月16日 – 22日")
+        XCTAssertEqual(AIWeeklyLetter.rangeText(at(11, 30, 0), calendar: calendar), "11月30日 – 12月6日")
+        let key = AIWeeklyLetter.weekKey(at(11, 16, 0), calendar: calendar)
+        XCTAssertEqual(key, "2026-11-16")
+        XCTAssertEqual(AIWeeklyLetter.monday(fromKey: key, calendar: calendar), at(11, 16, 0))
+        XCTAssertNil(AIWeeklyLetter.monday(fromKey: "11-16", calendar: calendar))
+    }
+
+    func testTheFactsSentence() {
+        XCTAssertEqual(AIWeeklyLetter.factsLine(.init(planned: 14, completed: 9, focusMinutes: 380, previousFocusMinutes: 320)),
+                       "这周完成 9/14，专注 6 小时 20 分钟，比上周多 1 小时。")
+        XCTAssertEqual(AIWeeklyLetter.factsLine(.init(planned: 14, completed: 9, focusMinutes: 380, previousFocusMinutes: 0)),
+                       "这周完成 9/14，专注 6 小时 20 分钟。", "nothing last week, nothing to compare")
+        XCTAssertEqual(AIWeeklyLetter.factsLine(.init(planned: 5, completed: 2, focusMinutes: 0, previousFocusMinutes: 90)),
+                       "这周完成 2/5。")
+        XCTAssertEqual(AIWeeklyLetter.factsLine(.init(planned: 6, completed: 6, focusMinutes: 200, previousFocusMinutes: 260)),
+                       "这周完成 6/6，专注 3 小时 20 分钟，比上周少 1 小时。")
+    }
+
+    func testTheLetterIsReadFromTheAnswer() throws {
+        let plans = [CheckInItem(title: "归纳上周待办", category: .work, scheduledStart: Date(), plannedMinutes: 30),
+                     CheckInItem(title: "准备季度汇报", category: .work, scheduledStart: Date(), plannedMinutes: 60)]
+        let answer = #"{"title":"「卡在第一步的一周」","body":"前半周很稳；周四起两件大事一直顺延。","next_focus":"先把大事拆出第一步。","evidence":[{"point":"「归纳上周待办」顺延 4 次","plans":[1]},{"point":"编号超出","plans":[5]},{"point":"还没开始","plans":[2,9]}]}"#
+        let draft = try AIWeeklyLetter.letter(from: answer, plans: plans)
+        XCTAssertEqual(draft.title, "卡在第一步的一周")
+        XCTAssertEqual(draft.body, "前半周很稳；周四起两件大事一直顺延。")
+        XCTAssertEqual(draft.nextFocus, "先把大事拆出第一步。")
+        XCTAssertEqual(draft.evidence, [WeeklyLetter.Evidence(point: "「归纳上周待办」顺延 4 次", plans: ["归纳上周待办"]),
+                                        WeeklyLetter.Evidence(point: "还没开始", plans: ["准备季度汇报"])])
+        XCTAssertEqual(AIWeeklyLetter.evidenceLine(draft.evidence), "依据：「归纳上周待办」顺延 4 次 · 还没开始")
+        XCTAssertNil(AIWeeklyLetter.evidenceLine([]))
+
+        XCTAssertThrowsError(try AIWeeklyLetter.letter(from: #"{"title":"","body":"有正文"}"#, plans: plans))
+        XCTAssertThrowsError(try AIWeeklyLetter.letter(from: #"{"title":"「」","body":"有正文"}"#, plans: plans))
+        XCTAssertThrowsError(try AIWeeklyLetter.letter(from: #"{"title":"一周"}"#, plans: plans))
+    }
+
+    func testTheLetterGoesIntoTheReflectionAsADraft() {
+        let letter = WeeklyLetter(week: "2026-11-16", title: "卡在第一步的一周", body: "前半周很稳。", nextFocus: "先拆第一步。",
+                                  facts: "这周完成 9/14。", evidence: [.init(point: "一直顺延", plans: ["归纳上周待办"])],
+                                  createdAt: 0)
+        let draft = AIWeeklyLetter.reflectionDraft(letter)
+        XCTAssertEqual(draft.note, "这周完成 9/14。前半周很稳。")
+        XCTAssertEqual(draft.nextFocus, "先拆第一步。")
+        XCTAssertEqual(draft.evidence.map(\.planTitles), [["归纳上周待办"]])
+        XCTAssertEqual(AIWeeklyLetter.notificationBody(title: "卡在第一步的一周"), "这周的来信：「卡在第一步的一周」")
+        XCTAssertEqual(AIWeeklyLetter.notificationBody(title: nil), "这一周过完了，打开回顾看看墨记的来信。")
+    }
+
+    @MainActor
+    func testOneLetterAWeekAndTheNewestFiftyTwo() throws {
+        let suite = "moji.tests.ai.letters." + UUID().uuidString
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        func letter(_ week: String, _ title: String) -> WeeklyLetter {
+            WeeklyLetter(week: week, title: title, body: "正文", nextFocus: "", facts: "", evidence: [], createdAt: 0)
+        }
+        let state = AIWeeklyLetterState(defaults: defaults)
+        state.store(letter("2026-11-09", "旧"))
+        state.store(letter("2026-11-16", "一"))
+        state.store(letter("2026-11-16", "二"))
+        XCTAssertEqual(state.letters.map(\.title), ["旧", "二"], "one letter a week, the newer one kept")
+        XCTAssertEqual(state.newestFirst.map(\.week), ["2026-11-16", "2026-11-09"])
+        XCTAssertEqual(AIWeeklyLetterState(defaults: defaults).letters.count, 2, "kept across launches")
+
+        var many: [WeeklyLetter] = []
+        let calendar = tokyo
+        let start = calendar.date(from: DateComponents(year: 2025, month: 1, day: 6))!
+        for index in 0..<55 {
+            let monday = calendar.date(byAdding: .day, value: 7 * index, to: start)!
+            many = AIWeeklyLetterState.merged(many, with: letter(AIWeeklyLetter.weekKey(monday, calendar: calendar), "\(index)"))
+        }
+        XCTAssertEqual(many.count, AIWeeklyLetter.limit)
+        XCTAssertEqual(many.first?.title, "3", "the oldest go first")
+
+        state.dismiss(at(11, 16, 0))
+        XCTAssertTrue(state.isDismissed(at(11, 16, 0)))
+        XCTAssertFalse(state.isDismissed(at(11, 9, 0)))
+    }
+}
+
+/// 留痕: what each write says, the log that keeps it and the undo that leaves edited plans alone.
+final class MojiAIWriteLogTests: XCTestCase {
+    func testWhereAPlanCameFrom() {
+        XCTAssertEqual(AIWriteText.splitOrigin("准备季度汇报"), "拆自「准备季度汇报」")
+        XCTAssertEqual(AIWriteText.mark(AIWriteText.splitOrigin("准备季度汇报")), "墨记拆自「准备季度汇报」")
+        XCTAssertEqual(AIWriteText.splitOrigin("整理第三季度客户回访记录"), "拆自「整理第三季度客户回访记录」", "twelve characters stay whole")
+        XCTAssertEqual(AIWriteText.splitOrigin("整理第三季度客户回访记录表"), "拆自「整理第三季度客户回访记…」")
+        XCTAssertEqual(AIWriteText.preparationOrigin("项目交付"), "为「项目交付」拟")
+        XCTAssertEqual(AIWriteText.mark(AIWriteText.nextWeekOrigin), "墨记按上周记录拟")
+    }
+
+    func testWhatEachWriteSays() {
+        XCTAssertEqual(AIWriteText.breakdown(count: 3, title: "准备季度汇报", archived: true), "拆成 3 步：「准备季度汇报」，原计划已归档")
+        XCTAssertEqual(AIWriteText.breakdown(count: 2, title: "准备季度汇报", archived: false), "拆成 2 步：「准备季度汇报」")
+        XCTAssertEqual(AIWriteText.entrySplit(count: 2, original: "买菜和取快递"), "拆成 2 条：「买菜和取快递」")
+        XCTAssertEqual(AIWriteText.entryChange(title: "交周报", fields: ["日期", "时间"]), "改了「交周报」的日期、时间")
+        XCTAssertEqual(AIWriteText.imported(count: 3, origin: AIWriteText.shareOrigin), "从分享加入 3 条")
+        XCTAssertEqual(AIWriteText.imported(count: 2, origin: AIWriteText.imageOrigin), "从截图加入 2 条")
+        XCTAssertEqual(AIWriteText.imported(count: 1, origin: AIWriteText.textOrigin), "从文字加入 1 条")
+        XCTAssertEqual(AIWriteText.nextWeek(count: 4), "拟下周 4 条")
+        XCTAssertEqual(AIWriteText.preparation(count: 3, title: "项目交付"), "为「项目交付」拟 3 条")
+        XCTAssertEqual(AIWriteText.wrap(tomorrow: 1, morning: 2, dropped: 1), "收尾：顺延 1 件，明早 2 件，放下 1 件")
+        XCTAssertEqual(AIWriteText.wrap(tomorrow: 0, morning: 0, dropped: 2), "收尾：放下 2 件")
+        XCTAssertEqual(AIWriteText.undoResult(undone: 3, total: 3), "已撤销")
+        XCTAssertEqual(AIWriteText.undoResult(undone: 2, total: 3), "已撤销 2 条；之后改过的保持不变")
+        XCTAssertEqual(AIWriteText.undoResult(undone: 0, total: 3), "这些计划之后都改过，保持不变")
+    }
+
+    func testTheChangedFieldsAreNamedInOrder() {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(identifier: "Asia/Tokyo")!
+        let start = calendar.date(from: DateComponents(year: 2026, month: 11, day: 23, hour: 15))!
+        let plan = CheckInItem(title: "交周报", category: .work, scheduledStart: start, plannedMinutes: 45,
+                               scheduleKind: .exactTime, plannedDurationEnabled: true)
+        var moved = plan
+        moved.scheduledStart = calendar.date(byAdding: .hour, value: 18, to: start)!
+        moved.plannedMinutes = 30
+        moved.title = "交月报"
+        XCTAssertEqual(AIWriteText.changedFields(from: plan, to: moved, calendar: calendar), ["日期", "时间", "时长", "标题"])
+        XCTAssertEqual(AIWriteText.changedFields(from: plan, to: plan, calendar: calendar), [])
+        var recurring = plan
+        recurring.repeatRule = .weekly
+        recurring.category = .study
+        XCTAssertEqual(AIWriteText.changedFields(from: plan, to: recurring, calendar: calendar), ["类型", "重复"])
+    }
+
+    @MainActor
+    func testTheLogKeepsAWeekAndAtMostTwoHundred() throws {
+        let suite = "moji.tests.ai.writes." + UUID().uuidString
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let log = AIWriteLog(defaults: defaults)
+        let now = Date()
+        let first = log.record(summary: "一", added: [], before: [], after: [], at: now)
+        log.record(summary: "二", added: [], before: [], after: [], at: now.addingTimeInterval(1))
+        log.record(summary: "三", added: [], before: [], after: [], at: now.addingTimeInterval(2))
+        log.markUndone(first)
+        XCTAssertEqual(log.activeCount(on: now), 2)
+        XCTAssertEqual(log.entries(on: now).map(\.summary), ["三", "二", "一"], "newest first")
+        XCTAssertEqual(AIWriteLog(defaults: defaults).activeCount(on: now), 2, "kept across launches")
+        XCTAssertEqual(log.entry(first)?.undone, true)
+
+        let calendar = Calendar.current
+        func entry(_ summary: String, daysAgo: Int) -> AIWriteEntry {
+            let day = calendar.date(byAdding: .day, value: -daysAgo, to: now)!
+            return AIWriteEntry(id: UUID(), at: day.timeIntervalSince1970, summary: summary, added: [], before: [], after: [],
+                                undone: false)
+        }
+        let pruned = AIWriteLog.pruned([entry("八天前", daysAgo: 8), entry("七天前", daysAgo: 7), entry("六天前", daysAgo: 6),
+                                        entry("今天", daysAgo: 0)], now: now, calendar: calendar)
+        XCTAssertEqual(pruned.map(\.summary), ["六天前", "今天"])
+
+        let many = (0..<205).map { index in
+            AIWriteEntry(id: UUID(), at: now.timeIntervalSince1970 + Double(index), summary: "\(index)", added: [], before: [],
+                         after: [], undone: false)
+        }
+        let kept = AIWriteLog.pruned(many, now: now, calendar: calendar)
+        XCTAssertEqual(kept.count, AIWriteLog.limit)
+        XCTAssertEqual(kept.first?.summary, "5", "the oldest go first")
+    }
+
+    func testUndoingAWriteLeavesEditedPlansAlone() {
+        let day = Date()
+        let kept = CheckInItem(title: "第一步", category: .work, scheduledStart: day, plannedMinutes: 25)
+        let edited = CheckInItem(title: "第二步", category: .work, scheduledStart: day, plannedMinutes: 25)
+        let original = CheckInItem(title: "交周报", category: .work, scheduledStart: day, plannedMinutes: 45)
+        var moved = original
+        moved.scheduledStart = day.addingTimeInterval(86_400)
+        let entry = AIWriteEntry(id: UUID(), at: day.timeIntervalSince1970, summary: "写入", added: [kept, edited],
+                                 before: [original], after: [moved], undone: false)
+        XCTAssertEqual(entry.total, 3)
+
+        var snapshot = PlanSnapshot.empty
+        var changedSince = edited
+        changedSince.title = "第二步（已改）"
+        snapshot.checkInItems = [kept, changedSince, moved]
+        let undone = entry.undo.apply(to: &snapshot)
+        XCTAssertEqual(undone, 2)
+        XCTAssertEqual(snapshot.checkInItems.map(\.title).sorted(), ["交周报", "第二步（已改）"].sorted())
+        XCTAssertEqual(snapshot.checkInItems.first { $0.id == original.id }?.scheduledStart, original.scheduledStart)
+        XCTAssertEqual(AIWriteText.undoResult(undone: undone, total: entry.total), "已撤销 2 条；之后改过的保持不变")
+    }
+
+    func testOlderSettingsTurnTheNewCardsOn() throws {
+        var settings = AISettings()
+        settings.isEnabled = true
+        var object = try XCTUnwrap(JSONSerialization.jsonObject(with: JSONEncoder().encode(settings)) as? [String: Any])
+        for key in ["eveningWrap", "weeklyLetter"] {
+            XCTAssertNotNil(object.removeValue(forKey: key), key)
+        }
+        let decoded = try JSONDecoder().decode(AISettings.self, from: JSONSerialization.data(withJSONObject: object))
+        XCTAssertTrue(decoded.eveningWrap)
+        XCTAssertTrue(decoded.weeklyLetter)
+        settings.eveningWrap = false
+        settings.weeklyLetter = false
+        let again = try JSONDecoder().decode(AISettings.self, from: JSONEncoder().encode(settings))
+        XCTAssertFalse(again.eveningWrap)
+        XCTAssertFalse(again.weeklyLetter)
+    }
+}
+
+/// 分享面板的收件箱: what the share sheet keeps comes back the same, cut at 6,000 characters.
+final class MojiShareInboxTests: XCTestCase {
+    func testWhatIsKeptComesBackTheSame() throws {
+        let item = try ShareInbox.add(text: "  周五前交季度报告，周三下午和小王对一下数据  ", image: nil)
+        defer { ShareInbox.remove(item) }
+        XCTAssertEqual(item.text, "周五前交季度报告，周三下午和小王对一下数据")
+        XCTAssertNil(item.image)
+        XCTAssertEqual(ShareInbox.items().first { $0.id == item.id }, item)
+
+        let long = try ShareInbox.add(text: String(repeating: "字", count: 6_100), image: nil)
+        defer { ShareInbox.remove(long) }
+        XCTAssertEqual(long.text?.count, ShareInbox.textLimit)
+        XCTAssertEqual(ShareInbox.items().first { $0.id == long.id }?.text?.count, 6_000)
+
+        XCTAssertThrowsError(try ShareInbox.add(text: "   ", image: nil), "nothing to keep")
+    }
+
+    func testAPictureIsKeptBesideIt() throws {
+        let picture = UIGraphicsImageRenderer(size: CGSize(width: 12, height: 8)).image { context in
+            UIColor.systemRed.setFill()
+            context.fill(CGRect(x: 0, y: 0, width: 12, height: 8))
+        }
+        let item = try ShareInbox.add(text: nil, image: picture)
+        XCTAssertNotNil(item.image)
+        XCTAssertNotNil(ShareInbox.image(for: item))
+        ShareInbox.remove(item)
+        XCTAssertNil(ShareInbox.items().first { $0.id == item.id })
+        XCTAssertNil(ShareInbox.image(for: item), "the picture goes with it")
     }
 }

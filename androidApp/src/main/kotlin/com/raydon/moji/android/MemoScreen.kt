@@ -165,7 +165,7 @@ fun MemoEditorDialog(existing: MemoItem?, viewModel: MojiViewModel, onDismiss: (
     var checklistMenu by remember { mutableStateOf(false) }
     var focusedId by remember { mutableStateOf<String?>(null) }
     var requestedId by remember { mutableStateOf<String?>(null) }
-    val aiReady = rememberAIReady()
+    val showsAI = rememberAIShowsEntries()
     var showsChecklistDraft by remember { mutableStateOf(false) }
     // The text a drafted checklist replaced, kept until the memo is saved or the mode is switched by hand.
     var textBeforeChecklistDraft by remember(existing?.id) { mutableStateOf<String?>(null) }
@@ -211,7 +211,7 @@ fun MemoEditorDialog(existing: MemoItem?, viewModel: MojiViewModel, onDismiss: (
                             }
                             DropdownMenu(menu, { menu = false }) {
                                 DropdownMenuItem({ Text(if (pinned) "取消置顶" else "置顶") }, { pinned = !pinned; menu = false })
-                                if (aiReady && !checklist && content.trim().isNotEmpty()) DropdownMenuItem({ Text("整理成清单") }, { menu = false; showsChecklistDraft = true })
+                                if (showsAI && !checklist && content.trim().isNotEmpty()) DropdownMenuItem({ Text("整理成清单") }, { menu = false; aiEntry { showsChecklistDraft = true } })
                                 if (existing != null) DropdownMenuItem({ Text("删除备忘") }, { menu = false; deleteConfirm = true })
                             }
                         }

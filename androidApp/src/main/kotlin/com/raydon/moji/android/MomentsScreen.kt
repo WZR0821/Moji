@@ -180,6 +180,8 @@ fun MomentsScreen(viewModel: MojiViewModel) {
     preparing?.let { event ->
         PlanDraftSheet(viewModel, "准备计划", "为“${event.title}”做准备，还有 ${daysUntil(event)} 天", waitingText = "正在拟准备计划",
             planNote = "为“${event.title}”做准备",
+            origin = com.raydon.moji.android.ai.AIWriteText.preparationOrigin(event.title),
+            summary = { count, _ -> com.raydon.moji.android.ai.AIWriteText.preparation(count, event.title) },
             load = { com.raydon.moji.android.ai.AIAssistant.shared.draftPreparation(event, aiCategories(viewModel)) }) { preparing = null }
     }
 }

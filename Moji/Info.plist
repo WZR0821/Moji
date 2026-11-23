@@ -40,6 +40,10 @@
 	<true/>
 	<key>NSCalendarsWriteOnlyAccessUsageDescription</key>
 	<string>用于把你主动选择的计划或纪念日单向添加到 Apple 日历。</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>用于在首页说一句话添加计划。</string>
+	<key>NSSpeechRecognitionUsageDescription</key>
+	<string>用于把你在首页说的一句话转成文字，写进计划输入框。</string>
 	<key>NSSupportsLiveActivities</key>
 	<true/>
 	<key>UIApplicationSceneManifest</key>

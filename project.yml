@@ -12,8 +12,8 @@ settings:
     SWIFT_VERSION: "5.9"
     IPHONEOS_DEPLOYMENT_TARGET: "17.0"
     TARGETED_DEVICE_FAMILY: "1,2"
-    MARKETING_VERSION: "1.8.0"
-    CURRENT_PROJECT_VERSION: "46"
+    MARKETING_VERSION: "1.9.0"
+    CURRENT_PROJECT_VERSION: "47"
     DEVELOPMENT_TEAM: ""
     CODE_SIGN_STYLE: Automatic
     SUPPORTS_MACCATALYST: NO
@@ -28,6 +28,8 @@ targets:
           - Info.plist
           - Moji.entitlements
       - path: Shared
+      # The share sheet's screen, also shown by the debug build for QA.
+      - path: MojiShare/ShareCaptureView.swift
     settings:
       base:
         # Upgrade identity: keep stable so Moji installs over the existing app.
@@ -39,6 +41,8 @@ targets:
         ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
     dependencies:
       - target: MojiWidget
+        embed: true
+      - target: MojiShare
         embed: true
 
   MojiWidget:
@@ -56,6 +60,26 @@ targets:
         PRODUCT_NAME: MojiWidget
         INFOPLIST_FILE: MojiWidget/Info.plist
         CODE_SIGN_ENTITLEMENTS: MojiWidget/MojiWidget.entitlements
+        APPLICATION_EXTENSION_API_ONLY: YES
+        SKIP_INSTALL: YES
+
+  # 收进墨记: the share extension keeps text, a link or a picture for the app.
+  MojiShare:
+    type: app-extension
+    platform: iOS
+    sources:
+      - path: MojiShare
+        excludes:
+          - Info.plist
+          - MojiShare.entitlements
+      - path: Shared/ShareInbox.swift
+      - path: Shared/AppGroupResolver.swift
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.raydon.minuteplan.share
+        PRODUCT_NAME: MojiShare
+        INFOPLIST_FILE: MojiShare/Info.plist
+        CODE_SIGN_ENTITLEMENTS: MojiShare/MojiShare.entitlements
         APPLICATION_EXTENSION_API_ONLY: YES
         SKIP_INSTALL: YES
 
@@ -77,6 +101,7 @@ schemes:
       targets:
         Moji: all
         MojiWidget: all
+        MojiShare: all
         MojiTests: [test]
     run:
       config: Debug

@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 private struct PlanEditorRoute: Identifiable {
     let id = UUID()
@@ -33,6 +34,22 @@ struct DashboardView: View {
     @State private var readingEntryIDs: Set<UUID> = []
     @State private var breakdownRoute: PlanBreakdownRoute?
     @State private var showsImport = false
+    /// Chips under the quick-entry field the user tapped; used once, on adding.
+    @State private var adoptedChipIDs: Set<String> = []
+    @StateObject private var speech = SpeechCapture()
+    @ObservedObject private var daily = AIDailyState.shared
+    @State private var showsAIIntro = false
+    @State private var introStartsWithDemo = false
+    /// The introduction opened for something shared in while AI 整理 is not set up.
+    @State private var introForShare = false
+    @ObservedObject private var wrap = AIEveningWrapState.shared
+    @ObservedObject private var writes = AIWriteLog.shared
+    /// 逐条改: the choices made on the card, in memory only.
+    @State private var wrapEdits: [UUID: WrapAction] = [:]
+    @State private var isEditingWrap = false
+    @State private var showsWrites = false
+    /// Something shared from another app, being turned into drafts.
+    @State private var sharedItem: ShareInboxItem?
 #if DEBUG
     @State private var showsCalendar = [
         "calendar-month",
@@ -55,7 +72,8 @@ struct DashboardView: View {
     @State private var didRunQAScenario = false
 #endif
 
-    private var pendingItems: [CheckInItem] {
+    /// Today's open plans in time order: what 今日提要 reads and sends.
+    private var schedulePendingItems: [CheckInItem] {
         store.checkInItems
             .filter {
                 $0.kind == .planned
@@ -69,6 +87,17 @@ struct DashboardView: View {
                 return $0.createdAt < $1.createdAt
             }
     }
+
+    /// The list as shown: in time order, or in the order 今日提要 suggested
+    /// once the user tapped 按建议排序. That order is kept for the day only.
+    private var pendingItems: [CheckInItem] {
+        let items = schedulePendingItems
+        guard ai.settings.dailyBrief, ai.showsEntries, isShowingToday,
+              let order = daily.orderIDs(on: checklistDate) else { return items }
+        return AIDailyBrief.ordered(items, by: order)
+    }
+
+    private var isShowingToday: Bool { Calendar.current.isDateInToday(checklistDate) }
 
     /// Only what was finished on the day the checklist is showing. Yesterday's
     /// finished plans belong to yesterday — they stay in the calendar and the
@@ -138,6 +167,34 @@ struct DashboardView: View {
                         )
                         .listRowBackground(Color.clear)
                         .listRowSeparator(.hidden)
+
+                    if showsWrap {
+                        eveningWrapCard
+                            .listRowInsets(
+                                EdgeInsets(
+                                    top: 3,
+                                    leading: PlanLayout.pageHorizontalPadding,
+                                    bottom: 7,
+                                    trailing: PlanLayout.pageHorizontalPadding
+                                )
+                            )
+                            .listRowBackground(Color.clear)
+                            .listRowSeparator(.hidden)
+                            .transition(.opacity)
+                    } else if showsBrief {
+                        dailyBriefCard
+                            .listRowInsets(
+                                EdgeInsets(
+                                    top: 3,
+                                    leading: PlanLayout.pageHorizontalPadding,
+                                    bottom: 7,
+                                    trailing: PlanLayout.pageHorizontalPadding
+                                )
+                            )
+                            .listRowBackground(Color.clear)
+                            .listRowSeparator(.hidden)
+                            .transition(.opacity)
+                    }
 
                     if let active = store.activeSession {
                         activeStrip(active)
@@ -255,9 +312,9 @@ struct DashboardView: View {
                             Label("详细添加计划", systemImage: "slider.horizontal.3")
                         }
 
-                        if ai.isReady {
+                        if ai.showsEntries {
                             Button {
-                                showsImport = true
+                                if ai.isReady { showsImport = true } else { showsAIIntro = true }
                             } label: {
                                 Label("从文字或截图添加", systemImage: "text.viewfinder")
                             }
@@ -277,16 +334,34 @@ struct DashboardView: View {
 #if DEBUG
                 runEditorQAScenarioIfNeeded()
 #endif
+                refreshDailyBrief()
+                refreshEveningWrap()
+                takeSharedItemIfNeeded()
             }
+            .onDisappear { speech.stop() }
             .onReceive(
                 NotificationCenter.default.publisher(for: .mojiOpenPlanEditor)
             ) { notification in
                 openPlanEditor(for: notification.object as? UUID)
             }
             .onChange(of: scenePhase) { _, newValue in
-                guard newValue == .active else { return }
+                guard newValue == .active else {
+                    speech.stop()
+                    return
+                }
                 checklistDate = Date()
                 store.reload()
+                refreshDailyBrief()
+                refreshEveningWrap()
+                takeSharedItemIfNeeded()
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .mojiStartSaying)) { _ in
+                startSaying()
+            }
+            .onChange(of: quickTitle) { _, _ in
+                // A chip stays adopted while its words stay; changed words are a new chip.
+                let ids = Set(quickTokens.map(\.id))
+                if !adoptedChipIDs.isSubset(of: ids) { adoptedChipIDs.formIntersection(ids) }
             }
             .sheet(item: $editorRoute) { route in
                 CheckInEditorView(
@@ -299,7 +374,12 @@ struct DashboardView: View {
             }
             .sheet(isPresented: $showsLibrary) { PlanLibraryView(store: store) }
             .sheet(item: $copyingItem) { PlanCopySheet(store: store, item: $0) }
-            .sheet(isPresented: $showsImport) { PlanImportView(store: store) }
+            .sheet(isPresented: $showsImport, onDismiss: { sharedItem = nil }) {
+                PlanImportView(store: store, shared: sharedItem)
+            }
+            .sheet(isPresented: $showsWrites) { AIWritesSheet(store: store) }
+            .aiIntroSheet(isPresented: $showsAIIntro, startsWithDemo: introStartsWithDemo, forShare: introForShare)
+            .onChange(of: showsAIIntro) { _, shown in if !shown { introForShare = false } }
             .sheet(item: $breakdownRoute) { route in
                 PlanDraftSheet(
                     store: store,
@@ -310,6 +390,10 @@ struct DashboardView: View {
                     showsDates: false,
                     source: route.item,
                     archivesSourceByDefault: route.replacesOriginal,
+                    origin: AIWriteText.splitOrigin(route.item.title),
+                    summary: { count, archived in
+                        AIWriteText.breakdown(count: count, title: route.item.title, archived: archived)
+                    },
                     load: { try await AIAssistant.shared.breakDown(route.item) }
                 )
             }
@@ -376,35 +460,51 @@ struct DashboardView: View {
     }
 
     private var quickEntry: some View {
-        HStack(spacing: 10) {
-            IMESafeTextField(
-                placeholder: "写下一件要做的事",
-                text: $quickTitle,
-                isFocused: $isQuickEntryFocused,
-                keepsFocusOnSubmit: true,
-                accessibilityIdentifier: "plan.quickTitle",
-                onSubmit: addQuickPlan
-            )
-
-            Button {
-                IMETextInput.commit(addQuickPlan)
-            } label: {
-                InkBrushMedallion(
-                    symbol: "plus",
-                    tint: .planPrimary,
-                    size: 36
+        let tokens = quickTokens
+        return VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: 10) {
+                IMESafeTextField(
+                    placeholder: "写下一件要做的事",
+                    text: $quickTitle,
+                    isFocused: $isQuickEntryFocused,
+                    keepsFocusOnSubmit: true,
+                    accessibilityIdentifier: "plan.quickTitle",
+                    onSubmit: addQuickPlan
                 )
-                    .frame(width: 44, height: 44)
-                    .contentShape(Rectangle())
+
+                // 说一句添加 turns the microphone on even with the entry points hidden.
+                if (ai.showsEntries && speech.isAvailable) || speech.isListening {
+                    QuickEntryMicButton(isListening: speech.isListening, action: toggleSpeech)
+                        .padding(.trailing, -8)
+                }
+
+                Button {
+                    IMETextInput.commit(addQuickPlan)
+                } label: {
+                    InkBrushMedallion(
+                        symbol: "plus",
+                        tint: .planPrimary,
+                        size: 36
+                    )
+                        .frame(width: 44, height: 44)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .disabled(cleanQuickTitle.isEmpty)
+                .opacity(cleanQuickTitle.isEmpty ? 0.35 : 1)
+                .accessibilityLabel("添加文字计划")
             }
-            .buttonStyle(.plain)
-            .disabled(cleanQuickTitle.isEmpty)
-            .opacity(cleanQuickTitle.isEmpty ? 0.35 : 1)
-            .accessibilityLabel("添加文字计划")
+            .frame(height: 52)
+
+            if !tokens.isEmpty {
+                QuickEntryChipsRow(tokens: tokens, adopted: $adoptedChipIDs)
+                    .padding(.trailing, 8)
+                    .padding(.bottom, 11)
+                    .transition(.opacity.combined(with: .move(edge: .top)))
+            }
         }
         .padding(.leading, 16)
         .padding(.trailing, 8)
-        .frame(height: 52)
         .inkPaperSurface(
             cornerRadius: 25,
             showsBrushMark: false,
@@ -412,6 +512,220 @@ struct DashboardView: View {
             borderWidth: isQuickEntryFocused ? 1.1 : 0.75
         )
         .animation(.easeOut(duration: 0.22), value: isQuickEntryFocused)
+        .animation(.easeOut(duration: 0.22), value: tokens.isEmpty)
+    }
+
+    /// What the words in the field already say, read on the device. Nothing is
+    /// sent for this; the chips only take effect if tapped before adding.
+    private var quickTokens: [QuickEntryToken] {
+        guard ai.settings.readsQuickEntry, ai.showsEntries, !cleanQuickTitle.isEmpty else { return [] }
+        return QuickEntryParser.tokens(
+            in: quickTitle,
+            categories: AIAssistant.categories(),
+            defaultCategory: quickEntryCategory
+        )
+    }
+
+    private func toggleSpeech() {
+        speech.toggle(appendingTo: quickTitle, write: { quickTitle = $0 }) {
+            store.workflowNotice = "没有麦克风或语音识别权限，可以在系统设置里打开。"
+        }
+    }
+
+    // MARK: 今日提要
+
+    private var briefFacts: DailyBriefFacts {
+        AIDailyBrief.facts(pending: schedulePendingItems, countdowns: store.countdowns, today: checklistDate)
+    }
+
+    private var showsBrief: Bool {
+        ai.settings.dailyBrief && ai.showsEntries && isShowingToday
+            && !daily.isDismissed(on: checklistDate)
+            && AIDailyBrief.shouldShow(briefFacts)
+    }
+
+    private var dailyBriefCard: some View {
+        let facts = briefFacts
+        let pending = pendingItems
+        let first = ai.isReady
+            ? AIDailyBrief.firstPlan(order: daily.briefOrder(on: checklistDate), pending: pending)
+            : nil
+        let advice = first.map {
+            AIDailyBrief.adviceLine(title: $0.item.title,
+                                    reason: $0.isModelFirst ? daily.brief(on: checklistDate)?.reason : nil)
+        }
+        let longest = facts.carried.first
+        return DailyBriefCard(
+            factsLine: AIDailyBrief.factsLine(facts),
+            advice: advice,
+            isLoading: daily.isLoading,
+            isReady: ai.isReady,
+            isOrdered: daily.orderIDs(on: checklistDate) != nil,
+            canBreakDown: longest?.isPlanned == true,
+            sort: {
+                withAnimation(.spring(response: 0.42, dampingFraction: 0.84)) {
+                    daily.applyOrder(daily.briefOrder(on: checklistDate), on: checklistDate)
+                }
+            },
+            restore: {
+                withAnimation(.spring(response: 0.42, dampingFraction: 0.84)) { daily.clearOrder() }
+            },
+            breakDown: {
+                guard let id = longest?.id, let item = pending.first(where: { $0.id == id }) else { return }
+                openBreakdown(item, replacesOriginal: true)
+            },
+            openIntro: { showsAIIntro = true },
+            dismiss: {
+                withAnimation(.easeOut(duration: 0.2)) { daily.dismiss(on: checklistDate) }
+            }
+        )
+        .animation(.easeOut(duration: 0.25), value: advice)
+        .animation(.easeOut(duration: 0.25), value: daily.isLoading)
+    }
+
+    /// Asked for once a day while the card is on screen; see AIDailyState.
+    private func refreshDailyBrief() {
+        guard showsBrief, !showsWrap else { return }
+        daily.refreshIfNeeded(pending: schedulePendingItems, countdowns: store.countdowns)
+    }
+
+    // MARK: 晚间收尾
+
+    private var wrapFacts: EveningWrapFacts {
+        AIEveningWrap.facts(items: store.checkInItems, records: store.records, today: checklistDate)
+    }
+
+    /// After 21:00 on today's list, in the place of 今日提要.
+    private var showsWrap: Bool {
+        let now = AIClock.now()
+        return ai.settings.eveningWrap && ai.showsEntries && isShowingToday
+            && AIEveningWrap.isEvening(now) && !wrap.isDismissed(on: now)
+            && AIEveningWrap.shouldShow(wrapFacts, pending: pendingItems.count)
+    }
+
+    private var eveningWrapCard: some View {
+        let now = AIClock.now()
+        let pending = pendingItems
+        let applied = wrap.isApplied(on: now)
+        let saved = ai.isReady ? wrap.arrangement(on: now) : [:]
+        let arranged = !applied && pending.contains { saved[$0.id] != nil }
+        let rows: [EveningWrapRow] = arranged
+            ? pending.prefix(AIEveningWrap.maximumRows).map { item in
+                let model = saved[item.id]?.action ?? .tomorrow
+                let action = wrapEdits[item.id] ?? model
+                return EveningWrapRow(id: item.id, title: item.title, action: action,
+                                      note: action == model ? saved[item.id]?.note : nil)
+            }
+            : []
+        return EveningWrapCard(
+            factsLine: AIEveningWrap.factsLine(wrapFacts),
+            secondLine: AIEveningWrap.secondLine(applied: applied, pending: pending.count, hasArrangement: arranged),
+            rows: rows,
+            hiddenCount: arranged ? max(0, pending.count - AIEveningWrap.maximumRows) : 0,
+            isLoading: wrap.isLoading && !applied,
+            isReady: ai.isReady,
+            isEditing: isEditingWrap,
+            writesCount: writes.activeCount(on: now),
+            choose: { id, action in wrapEdits[id] = action },
+            apply: { applyWrap(pending: pending, saved: saved) },
+            toggleEditing: { withAnimation(.easeOut(duration: 0.2)) { isEditingWrap.toggle() } },
+            openIntro: { showsAIIntro = true },
+            openWrites: { showsWrites = true },
+            dismiss: {
+                withAnimation(.easeOut(duration: 0.2)) { wrap.dismiss(on: now) }
+            }
+        )
+        .animation(.easeOut(duration: 0.25), value: rows)
+        .animation(.easeOut(duration: 0.25), value: wrap.isLoading)
+    }
+
+    /// Asked for once an evening while the card is on screen; see AIEveningWrapState.
+    private func refreshEveningWrap() {
+        guard showsWrap else { return }
+        wrap.refreshIfNeeded(done: completedItemsForChecklistDate.filter(\.isCompleted),
+                             pending: schedulePendingItems, countdowns: store.countdowns, now: AIClock.now())
+    }
+
+    /// 照此处理: one write for every plan left, undoable, kept in 今天的整理.
+    /// Plans past the six rows are carried to tomorrow as usual.
+    private func applyWrap(pending: [CheckInItem], saved: [UUID: AIEveningWrapState.Entry]) {
+        let now = AIClock.now()
+        let plans = pending.enumerated().map { index, item -> (item: CheckInItem, action: WrapAction) in
+            guard index < AIEveningWrap.maximumRows else { return (item, .tomorrow) }
+            return (item, wrapEdits[item.id] ?? saved[item.id]?.action ?? .tomorrow)
+        }
+        let outcome = AIEveningWrap.apply(plans, today: now)
+        withAnimation(.spring(response: 0.42, dampingFraction: 0.84)) {
+            if !outcome.changed.isEmpty {
+                store.commitDrafts(changing: outcome.changed, notice: "已照此安排，可撤销", summary: outcome.summary)
+            }
+            wrap.markApplied(on: now)
+            isEditingWrap = false
+            wrapEdits = [:]
+        }
+        if let id = outcome.firstSplit, let item = store.checkInItems.first(where: { $0.id == id }) {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.45) { openBreakdown(item, replacesOriginal: true) }
+        }
+    }
+
+    // MARK: 分享、说一句添加
+
+    /// The oldest thing shared in from another app: drafts at once when a
+    /// model is set up, otherwise the introduction, keeping the item for later.
+    /// The import page takes the item out of the inbox once it has read it:
+    /// removing it here would delete a shared picture before it is read.
+    private func takeSharedItemIfNeeded() {
+        guard sharedItem == nil, !showsImport, !showsAIIntro, let item = ShareInbox.oldest() else { return }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
+            guard sharedItem == nil, !showsImport, !showsAIIntro else { return }
+            if ai.isReady {
+                sharedItem = item
+                showsImport = true
+            } else {
+                introStartsWithDemo = false
+                introForShare = true
+                showsAIIntro = true
+            }
+        }
+    }
+
+    /// 说一句添加: today's list, the field focused and the microphone on (only
+    /// the keyboard when speech cannot be recognised here).
+    private func startSaying() {
+        checklistDate = Date()
+        expandedItemID = nil
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+            isQuickEntryFocused = true
+#if DEBUG
+            if AIQAFixture.scenario == "ai-say" {
+                speech.simulateForQA(text: "明天上午交周报") { quickTitle = $0 }
+                return
+            }
+#endif
+            guard speech.isAvailable, !speech.isListening else { return }
+            toggleSpeech()
+        }
+    }
+
+    // MARK: 顺延旁批
+
+    /// Days late when the note in the margin belongs under this row.
+    private func carryNoteDays(for item: CheckInItem) -> Int? {
+        guard ai.settings.carryOverNotes, ai.showsEntries, item.status == .planned,
+              !daily.isCarryNoteDismissed(item.id),
+              let days = CarryOverSeal.daysLate(scheduledStart: item.scheduledStart, on: checklistDate),
+              days >= AIDailyBrief.carryNoteDays else { return nil }
+        return days
+    }
+
+    /// 拆成步骤 from any entry point: the draft sheet when a model is set up,
+    /// otherwise the introduction. Nothing is sent from the introduction.
+    private func openBreakdown(_ item: CheckInItem, replacesOriginal: Bool) {
+        guard ai.isReady else {
+            showsAIIntro = true
+            return
+        }
+        breakdownRoute = PlanBreakdownRoute(item: item, replacesOriginal: replacesOriginal)
     }
 
     private var todayHeading: some View {
@@ -594,8 +908,8 @@ struct DashboardView: View {
             },
             openEditor: { openEditor(for: item) },
             openCopy: { copyingItem = item },
-            breakDown: ai.isReady && !archived
-                ? { replaces in breakdownRoute = PlanBreakdownRoute(item: item, replacesOriginal: replaces) }
+            breakDown: ai.showsEntries && !archived
+                ? { replaces in openBreakdown(item, replacesOriginal: replaces) }
                 : nil
         )
         VStack(spacing: 0) {
@@ -628,6 +942,18 @@ struct DashboardView: View {
                         .padding(.leading, 58)
                         .padding(.bottom, 8)
                         .transition(.opacity)
+                }
+
+                if let days = carryNoteDays(for: item) {
+                    CarryOverNoteLine(
+                        daysLate: days,
+                        open: { openBreakdown(item, replacesOriginal: true) },
+                        dismiss: { withAnimation(.easeOut(duration: 0.2)) { daily.dismissCarryNote(item.id) } }
+                    )
+                    .padding(.leading, 46)
+                    .padding(.trailing, 4)
+                    .padding(.bottom, 4)
+                    .transition(.opacity)
                 }
             }
 
@@ -708,8 +1034,25 @@ struct DashboardView: View {
     }
 
 #if DEBUG
+    /// Moves a sample plan to the same time a few days back.
+    private func moveQAPlan(_ title: String, daysBack: Int) {
+        let calendar = Calendar.mojiISO
+        guard var item = store.checkInItems.first(where: { $0.title == title }),
+              let day = calendar.date(byAdding: .day, value: -daysBack, to: calendar.startOfDay(for: Date())) else { return }
+        let time = calendar.dateComponents([.hour, .minute], from: item.scheduledStart)
+        item.scheduledStart = calendar.date(bySettingHour: time.hour ?? 0, minute: time.minute ?? 0,
+                                            second: 0, of: day) ?? day
+        store.saveCheckIn(item)
+    }
+
     private func runEditorQAScenarioIfNeeded() {
         guard !didRunQAScenario else { return }
+        // Each screenshot starts with an empty share inbox unless it is about
+        // sharing: an item kept by ai-share-off would otherwise open drafts here.
+        if let route = ProcessInfo.processInfo.environment["MOJI_QA_SCENARIO"],
+           !["ai-share", "ai-share-off"].contains(route) {
+            ShareInbox.removeAll()
+        }
         if let route = ProcessInfo.processInfo.environment["MOJI_QA_SCENARIO"], route.hasPrefix("workflow-") {
             didRunQAScenario = true
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
@@ -810,11 +1153,96 @@ struct DashboardView: View {
         case "ai-import", "ai-import-drafts":
             didRunQAScenario = true
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { showsImport = true }
+        case "ai-brief", "ai-brief-off", "ai-carry-note":
+            didRunQAScenario = true
+            // The fixture's plan from yesterday, carried for three days instead.
+            moveQAPlan("归纳昨日待办", daysBack: 3)
+        case "ai-entry-chips":
+            didRunQAScenario = true
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                let text = "周三下午三点交周报 45分钟"
+                quickTitle = text
+                isQuickEntryFocused = false
+                adoptedChipIDs = Set(QuickEntryParser.tokens(
+                    in: text, categories: AIAssistant.categories(), defaultCategory: quickEntryCategory
+                ).filter { $0.kind == .day || $0.kind == .time }.map(\.id))
+            }
+        case "ai-intro", "ai-demo", "ai-demo-bottom":
+            didRunQAScenario = true
+            introStartsWithDemo = ProcessInfo.processInfo.environment["MOJI_QA_SCENARIO"] != "ai-intro"
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { showsAIIntro = true }
+        case "ai-wrap", "ai-wrap-edit", "ai-wrap-off", "ai-writes":
+            didRunQAScenario = true
+            let scenario = AIQAFixture.scenario
+            // 归纳昨日待办 carried three days, as for 今日提要; three writes from earlier today.
+            moveQAPlan("归纳昨日待办", daysBack: 3)
+            writes.seedForQA(plans: store.checkInItems.filter { $0.kind == .planned }, now: AIClock.now())
+            if scenario == "ai-writes" {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { showsWrites = true }
+            } else if scenario == "ai-wrap-edit" {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 2.4) { isEditingWrap = true }
+            }
+        case "ai-origin":
+            didRunQAScenario = true
+            let calendar = Calendar.current
+            let today = calendar.startOfDay(for: Date())
+            for (index, step) in [("列出汇报的三个要点", 15), ("找齐三个月的数据", 30)].enumerated() {
+                var item = CheckInItem(
+                    title: step.0,
+                    category: .work,
+                    scheduledStart: calendar.date(bySettingHour: 16 + index, minute: 0, second: 0, of: today) ?? today,
+                    plannedMinutes: step.1,
+                    scheduleKind: .exactTime,
+                    detailsConfigured: true,
+                    plannedDurationEnabled: true
+                )
+                item.aiOrigin = AIWriteText.splitOrigin("准备季度汇报")
+                store.saveCheckIn(item)
+            }
+        case "ai-share", "ai-share-off":
+            didRunQAScenario = true
+            ShareInbox.removeAll()
+            _ = try? ShareInbox.add(text: "周五前交季度报告，周三下午和小王对一下数据，明天上午订会议室", image: nil)
+            takeSharedItemIfNeeded()
+        case "ai-share-image":
+            // Only a picture, as when a screenshot is shared: the drafts can
+            // come only from reading it on the device.
+            didRunQAScenario = true
+            ShareInbox.removeAll()
+            _ = try? ShareInbox.add(text: nil, image: Self.qaSharedScreenshot())
+            takeSharedItemIfNeeded()
+        case "ai-say":
+            didRunQAScenario = true
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { startSaying() }
+        case "ai-breakdown-button":
+            didRunQAScenario = true
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                expandedItemID = store.checkInItems.first(where: { $0.title == "整理 1.6.0 发布说明" })?.id
+            }
         case "ai-library-filter", "ai-library-filter-applied":
             didRunQAScenario = true
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { showsLibrary = true }
         default:
             break
+        }
+    }
+
+    /// ai-share-image: black text on white, the sentence the ai-share item carries.
+    private static func qaSharedScreenshot() -> UIImage {
+        let lines = ["周五前交季度报告", "周三下午和小王对一下数据", "明天上午订会议室"]
+        let size = CGSize(width: 1_080, height: 600)
+        let format = UIGraphicsImageRendererFormat.default()
+        format.scale = 1
+        let attributes: [NSAttributedString.Key: Any] = [
+            .font: UIFont.systemFont(ofSize: 60),
+            .foregroundColor: UIColor.black
+        ]
+        return UIGraphicsImageRenderer(size: size, format: format).image { context in
+            UIColor.white.setFill()
+            context.fill(CGRect(origin: .zero, size: size))
+            for (index, line) in lines.enumerated() {
+                (line as NSString).draw(at: CGPoint(x: 72, y: 90 + CGFloat(index) * 150), withAttributes: attributes)
+            }
         }
     }
 #endif
@@ -918,37 +1346,58 @@ struct DashboardView: View {
 
     private func addQuickPlan() {
         guard !cleanQuickTitle.isEmpty else { return }
+        speech.stop()
+        let text = cleanQuickTitle
         let today = Calendar.current.startOfDay(for: Date())
-        let plan = CheckInItem(
-            title: cleanQuickTitle,
+        var plan = CheckInItem(
+            title: text,
             category: quickEntryCategory,
             scheduledStart: today,
             plannedMinutes: 25,
             scheduleKind: .allDay,
             detailsConfigured: false
         )
+        // The chips the user tapped go on in the same save; the rest are ignored.
+        let tokens = quickTokens
+        let adopted = adoptedChipIDs.intersection(tokens.map(\.id))
+        var movedTo: Date?
+        if !adopted.isEmpty,
+           let chosen = QuickEntryParser.suggestion(text: quickTitle, tokens: tokens, adopted: adopted),
+           let updated = chosen.applied(to: plan) {
+            plan = updated
+            if let day = chosen.day, !Calendar.current.isDate(day, inSameDayAs: today) { movedTo = day }
+        }
         withAnimation(.spring(response: 0.42, dampingFraction: 0.82)) {
             store.saveCheckIn(plan)
         }
         quickTitle = ""
+        adoptedChipIDs = []
         isQuickEntryFocused = true
-        readQuickEntry(plan)
+        if let movedTo {
+            store.workflowNotice = "已加到\(AIDrafting.dayText(movedTo))，可在日历查看"
+        }
+        // A plan moved off today has no row here to hang a suggestion under.
+        if plan.isVisibleInChecklist(on: checklistDate) {
+            readQuickEntry(plan, text: text)
+        }
     }
 
-    /// The plan is already saved as typed. If the sentence carries a time, a
-    /// length or several things, ask what it says and offer it under the row.
-    private func readQuickEntry(_ plan: CheckInItem) {
-        guard ai.isReady, ai.settings.readsQuickEntry, AIDrafting.isWorthReading(plan.title) else { return }
+    /// The plan is already saved. If the sentence carries a time, a length or
+    /// several things, ask what the words say and offer under the row only
+    /// what would still change.
+    private func readQuickEntry(_ plan: CheckInItem, text: String) {
+        guard ai.isReady, ai.settings.readsQuickEntry, AIDrafting.isWorthReading(text) else { return }
         readingEntryIDs.insert(plan.id)
         Task { @MainActor in
             // A failed reading is not worth a message: the plan is there either way.
-            let suggestion = try? await AIAssistant.shared.readEntry(plan.title)
+            let reading = try? await AIAssistant.shared.readEntry(text)
             withAnimation(.easeOut(duration: 0.25)) {
                 readingEntryIDs.remove(plan.id)
-                guard let suggestion, !suggestion.isEmpty,
-                      store.checkInItems.contains(where: {
+                guard let current = store.checkInItems.first(where: {
                           $0.id == plan.id && $0.title == plan.title && $0.status == .planned
-                      }) else { return }
+                      }),
+                      let suggestion = reading?.removingMatches(of: current), !suggestion.isEmpty
+                else { return }
                 entrySuggestions[plan.id] = suggestion
             }
         }
@@ -959,8 +1408,10 @@ struct DashboardView: View {
         guard let plan = store.checkInItems.first(where: { $0.id == id }),
               let updated = suggestion.applied(to: plan) else { return }
         let notice = suggestion.day.map { "已移到\(AIDrafting.dayText($0))，可在日历查看" } ?? "已按建议调整"
+        let fields = AIWriteText.changedFields(from: plan, to: updated)
         withAnimation(.spring(response: 0.42, dampingFraction: 0.84)) {
-            store.commitDrafts(changing: [updated], notice: notice)
+            _ = store.commitDrafts(changing: [updated], notice: notice,
+                               summary: fields.isEmpty ? nil : AIWriteText.entryChange(title: plan.title, fields: fields))
         }
     }
 
@@ -971,7 +1422,7 @@ struct DashboardView: View {
         var first = plan
         first.title = suggestion.parts[0]
         let rest = suggestion.parts.dropFirst().map { part in
-            CheckInItem(
+            var item = CheckInItem(
                 title: part,
                 category: plan.category,
                 scheduledStart: plan.scheduledStart,
@@ -980,9 +1431,12 @@ struct DashboardView: View {
                 detailsConfigured: plan.hasConfiguredDetails,
                 plannedDurationEnabled: plan.plannedDurationEnabled
             )
+            item.aiOrigin = AIWriteText.splitOrigin(plan.title)
+            return item
         }
         withAnimation(.spring(response: 0.42, dampingFraction: 0.84)) {
-            store.commitDrafts(adding: Array(rest), changing: [first], notice: "已拆成 \(suggestion.parts.count) 条")
+            _ = store.commitDrafts(adding: Array(rest), changing: [first], notice: "已拆成 \(suggestion.parts.count) 条",
+                               summary: AIWriteText.entrySplit(count: suggestion.parts.count, original: plan.title))
         }
     }
 
@@ -1006,8 +1460,9 @@ private struct MinimalPlanRow: View {
     let toggleExpansion: () -> Void
     let openEditor: () -> Void
     let openCopy: () -> Void
-    /// Present only while a model is set up; the argument says whether the
-    /// steps are meant to replace this plan.
+    /// Present while the AI entry points are shown (when AI 整理 is not set up,
+    /// calling it opens the introduction); the argument says whether the steps
+    /// are meant to replace this plan.
     var breakDown: ((Bool) -> Void)? = nil
 
     @State private var completionInkProgress = 0.0
@@ -1163,11 +1618,10 @@ private struct MinimalPlanRow: View {
             }
 
             HStack(spacing: 8) {
+                let isOpen = item.status == .planned || item.status == .inProgress
+                let showsBreakDown = breakDown != nil && isOpen
                 Menu {
                     Button("完整编辑", action: openEditor)
-                    if let breakDown, item.status == .planned || item.status == .inProgress {
-                        Button("拆成步骤") { breakDown(false) }
-                    }
                     Button("复制到今天") { store.copyPlan(item.id, to: Date()) }
                     Button("复制到指定日期", action: openCopy)
                     Button("保存为模板") { store.saveTemplate(from: item.id) }
@@ -1179,12 +1633,24 @@ private struct MinimalPlanRow: View {
                     }
                     Button("删除", role: .destructive) { confirmsDelete = true }
                 } label: {
-                    Label("更多操作", systemImage: "ellipsis")
-                        .font(.system(size: 13, weight: .medium))
-                        .frame(maxWidth: .infinity, minHeight: 44)
+                    if showsBreakDown {
+                        Image(systemName: "ellipsis")
+                            .font(.system(size: 13, weight: .medium))
+                            .frame(width: 44, height: 44)
+                    } else {
+                        Label("更多操作", systemImage: "ellipsis")
+                            .font(.system(size: 13, weight: .medium))
+                            .frame(maxWidth: .infinity, minHeight: 44)
+                    }
                 }
                     .background(Color.planPrimary.opacity(0.045), in: RoundedRectangle(cornerRadius: 11))
-                if item.status == .planned || item.status == .inProgress {
+                    .accessibilityLabel("更多操作")
+                if showsBreakDown {
+                    expandedAction(title: "拆成步骤", message: "先出草稿再加入", symbol: "list.bullet.indent",
+                        emphasized: false, symbolTint: .planVermilion) { breakDown?(false) }
+                        .accessibilityIdentifier("plan.expanded.breakdown")
+                }
+                if isOpen {
                     expandedAction(title: pomodoro.hasActiveSession ? "继续专注" : "去专注",
                         message: pomodoro.hasActiveSession ? "前往当前会话" : "选择时长后开始",
                         symbol: "timer", emphasized: true, action: startPomodoro)
@@ -1278,6 +1744,15 @@ private struct MinimalPlanRow: View {
                 .foregroundStyle(Color.planSecondary)
             Text(item.category.displayName)
                 .foregroundStyle(Color.planSecondary)
+
+            if let origin = item.aiOrigin, !origin.isEmpty {
+                Text("·")
+                    .foregroundStyle(Color.planSecondary)
+                Text(AIWriteText.mark(origin))
+                    .foregroundStyle(Color.planVermilion)
+                    .layoutPriority(-1)
+                    .accessibilityIdentifier("plan.origin")
+            }
         }
         .font(.caption2)
         .foregroundStyle(.secondary)
@@ -1290,19 +1765,23 @@ private struct MinimalPlanRow: View {
         message: String,
         symbol: String,
         emphasized: Bool,
+        symbolTint: Color? = nil,
         action: @escaping () -> Void
     ) -> some View {
         Button(action: action) {
             HStack(spacing: 8) {
                 Image(systemName: symbol)
                     .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(symbolTint ?? (emphasized ? Color.planBackground : Color.planPrimary))
                 VStack(alignment: .leading, spacing: 1) {
                     Text(title)
                         .font(.caption.weight(.semibold))
                         .lineLimit(1)
+                        .minimumScaleFactor(0.8)
                     Text(message)
                         .font(.caption2)
                         .lineLimit(1)
+                        .minimumScaleFactor(0.8)
                         .opacity(0.72)
                 }
                 Spacer(minLength: 0)

@@ -329,6 +329,9 @@ struct CheckInItem: Codable, Identifiable, Equatable {
     var isArchived: Bool?
     var sourceMemoID: UUID?
     var sourceMemoChecklistItemID: UUID?
+    /// Where Moji's drafting wrote this plan from, e.g. 拆自「准备季度汇报」.
+    /// Only plans Moji created carry it; shown after 墨记 in vermilion.
+    var aiOrigin: String?
 
     init(
         id: UUID = UUID(),
@@ -355,7 +358,8 @@ struct CheckInItem: Codable, Identifiable, Equatable {
         plannedDurationEnabled: Bool? = nil,
         isArchived: Bool? = false,
         sourceMemoID: UUID? = nil,
-        sourceMemoChecklistItemID: UUID? = nil
+        sourceMemoChecklistItemID: UUID? = nil,
+        aiOrigin: String? = nil
     ) {
         self.id = id
         self.title = title
@@ -382,6 +386,7 @@ struct CheckInItem: Codable, Identifiable, Equatable {
         self.isArchived = isArchived
         self.sourceMemoID = sourceMemoID
         self.sourceMemoChecklistItemID = sourceMemoChecklistItemID
+        self.aiOrigin = aiOrigin
     }
 
     var scheduledEnd: Date {

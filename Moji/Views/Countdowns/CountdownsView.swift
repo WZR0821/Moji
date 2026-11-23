@@ -182,6 +182,8 @@ struct CountdownsView: View {
             .sheet(item: $preparing) { event in
                 PlanDraftSheet(store: store, title: "准备计划", subject: "为“\(event.title)”做准备，还有 \(daysUntil(event)) 天",
                                waitingText: "正在拟准备计划", planNote: "为“\(event.title)”做准备",
+                               origin: AIWriteText.preparationOrigin(event.title),
+                               summary: { count, _ in AIWriteText.preparation(count: count, title: event.title) },
                                load: { try await AIAssistant.shared.draftPreparation(for: event) })
             }
             .onChange(of: mode) { _, _ in

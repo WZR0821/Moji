@@ -214,7 +214,10 @@ private extension View {
 // MARK: - AI 模型
 
 struct AIModelSettingsView: View {
+    /// Where 今天的整理 takes its writes back; the row is left out without it.
+    var store: PlanStore? = nil
     @ObservedObject private var ai = AISettingsStore.shared
+    @ObservedObject private var writes = AIWriteLog.shared
     @State private var showsSwitcher = false
     @State private var showsAddProvider = false
     @State private var showsHelp = false
@@ -228,20 +231,73 @@ struct AIModelSettingsView: View {
             Section {
                 Toggle("使用 AI 整理", isOn: Binding(
                     get: { ai.settings.isEnabled },
-                    set: { value in notice = ai.tryChange { $0.isEnabled = value } }
+                    set: { value in
+                        notice = ai.tryChange { $0.isEnabled = value }
+                        AIWeeklyLetterNotifier.reschedule()
+                    }
                 ))
                 .accessibilityIdentifier("ai.enabled")
-
-                if ai.settings.isEnabled {
-                    Toggle("识别首页写下的计划", isOn: Binding(
-                        get: { ai.settings.readsQuickEntry },
-                        set: { value in notice = ai.tryChange { $0.readsQuickEntry = value } }
-                    ))
-                }
             } footer: {
                 Text(ai.settings.isEnabled
                      ? "开启后，“拆成步骤”“起草复盘”这些操作会把相关的计划或备忘文字发给下面选的模型，结果先以草稿出现，确认后才写入。"
                      : "关闭时墨记不联网，界面和原来一样。")
+            }
+
+            Section {
+                Toggle("识别首页写下的计划", isOn: Binding(
+                    get: { ai.settings.readsQuickEntry },
+                    set: { value in notice = ai.tryChange { $0.readsQuickEntry = value } }
+                ))
+                .accessibilityIdentifier("ai.readsQuickEntry")
+                Toggle("今日提要", isOn: Binding(
+                    get: { ai.settings.dailyBrief },
+                    set: { value in notice = ai.tryChange { $0.dailyBrief = value } }
+                ))
+                .accessibilityIdentifier("ai.dailyBrief")
+                Toggle("晚间收尾", isOn: Binding(
+                    get: { ai.settings.eveningWrap },
+                    set: { value in notice = ai.tryChange { $0.eveningWrap = value } }
+                ))
+                .accessibilityIdentifier("ai.eveningWrap")
+                Toggle("顺延旁批", isOn: Binding(
+                    get: { ai.settings.carryOverNotes },
+                    set: { value in notice = ai.tryChange { $0.carryOverNotes = value } }
+                ))
+                .accessibilityIdentifier("ai.carryOverNotes")
+                Toggle("本周来信", isOn: Binding(
+                    get: { ai.settings.weeklyLetter },
+                    set: { value in
+                        notice = ai.tryChange { $0.weeklyLetter = value }
+                        AIWeeklyLetterNotifier.reschedule()
+                    }
+                ))
+                .accessibilityIdentifier("ai.weeklyLetter")
+                Toggle("没开启时也显示入口", isOn: Binding(
+                    get: { ai.settings.showsEntriesWhenOff },
+                    set: { value in notice = ai.tryChange { $0.showsEntriesWhenOff = value } }
+                ))
+                .accessibilityIdentifier("ai.showsEntriesWhenOff")
+            } header: {
+                Text("在哪里出现")
+            } footer: {
+                Text("日期、钟点和时长在本机识别。开着今日提要或晚间收尾时，当天第一次显示会把今天计划的标题、时间和最近的倒数日发给模型；本周来信每周把这一周的计划记录发一次。没开启 AI 整理时，点入口会先介绍怎么开启。")
+            }
+
+            if let store {
+                Section {
+                    NavigationLink {
+                        AIWritesView(store: store)
+                    } label: {
+                        HStack {
+                            Text("今天的整理")
+                            Spacer()
+                            Text(writes.activeCount(on: AIClock.now()) > 0
+                                 ? "\(writes.activeCount(on: AIClock.now())) 处" : "没有")
+                                .foregroundStyle(Color.planSecondary)
+                        }
+                    }
+                    .accessibilityIdentifier("ai.writes")
+                }
             }
 
             Section {
@@ -1168,12 +1224,19 @@ private struct AIHelpView: View {
 
     private let places: [(String, String, String)] = [
         ("square.and.pencil", "首页写下计划", "带有“明天下午”“30 分钟”这类线索时，在那一行下面给出建议，点了才应用。"),
-        ("list.bullet.indent", "计划 › 更多操作 › 拆成步骤", "把一件大的计划拆成几步；点顺延印也能“拆小一点”。"),
+        ("list.bullet.indent", "计划 › 展开 › 拆成步骤", "把一件大的计划拆成几步；点顺延印也能“拆小一点”。"),
+        ("sunrise", "今日提要", "今日计划上方，每天一张：今天几件、离最近的日子还有几天、哪件顺延了，并建议先做哪件。"),
+        ("moon.stars", "晚间收尾", "21 点以后在今日计划上方：今天完成几件、专注多久；剩下的每件给一个安排（顺延到明天、明早先做、拆小、放下），照此处理前可以逐条改。"),
+        ("text.append", "顺延旁批", "同一条计划顺延满 3 天，行下出一行朱字，点开就是拆小的草稿；点过“不用”就不再提。"),
+        ("envelope", "本周来信", "周日 20:00 起在回顾页：一个题签、几句这一周的情况和依据；可以放进复盘、拟下周计划，往期来信都留在本机。"),
         ("doc.text.magnifyingglass", "回顾 › 周复盘 › 起草复盘", "按这一周的记录起草两栏文字，并注明依据的计划；还可以拟下周草稿。"),
         ("checklist", "备忘 › 备忘操作 › 整理成清单", "把正文里要做的事整理成清单；转为计划时预填日期和类型。"),
         ("timer", "时刻 › 新建后 › 准备计划", "为一个重要的日子拟几条提前要做的事。"),
         ("line.3.horizontal.decrease", "计划库 › 搜索框", "写一句“上周没做完的学习计划”，替你设好筛选。"),
-        ("text.viewfinder", "首页 ＋ › 从文字或截图添加", "从粘贴的文字或一张截图里找出要做的事。截图的文字在本机识别。")
+        ("text.viewfinder", "首页 ＋ › 从文字或截图添加", "从粘贴的文字或一张截图里找出要做的事。截图的文字在本机识别。"),
+        ("signature", "留痕", "墨记写入的计划，小字里带朱色的来源；当天写入的都能在「今天的整理」里逐条撤销。"),
+        ("square.and.arrow.up", "分享", "在别的 App 里把文字或截图分享给墨记，打开墨记时先出计划草稿。"),
+        ("mic", "说一句添加", "锁屏小组件、控制中心（iOS 18 起）或快捷指令里点一下，打开墨记直接说。")
     ]
 
     var body: some View {
@@ -1202,6 +1265,10 @@ private struct AIHelpView: View {
                     Text("只在你点了上面这些操作时，把那一处用到的文字（计划标题、备忘正文、一周的计划记录）发给你选的供应商。请求从手机直接发出，不经过墨记的服务器。")
                         .font(.footnote)
                     Text("首页识别是例外：开着“识别首页写下的计划”时，带时间线索的新计划会在添加后自动发去识别。可以单独关掉。")
+                        .font(.footnote)
+                    Text("今日提要也是：开着时，每天第一次打开首页会把今天计划的标题、时间和最近的倒数日发去排先后。可以单独关掉。")
+                        .font(.footnote)
+                    Text("晚间收尾和今日提要一样，只发今天计划的标题和时间；本周来信每周发一次这一周的计划记录。都可以单独关掉。")
                         .font(.footnote)
                 }
 

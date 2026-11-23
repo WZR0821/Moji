@@ -32,6 +32,36 @@ class AIAssistant(val store: AISettingsStore, val client: AIClient = AIClient())
         return AIDrafting.entrySuggestion(answer, text, now, categories)
     }
 
+    /**
+     * 今日提要: the order of today's pending plans and why the first goes
+     * first. Only titles, times, lengths, types and the nearest days are sent.
+     */
+    suspend fun dailyBrief(plans: List<CheckInItem>, events: List<CountdownEvent>, now: ZonedDateTime = ZonedDateTime.now()): AIDailyBrief.Answer {
+        val request = AIDailyBrief.request(plans, events, now)
+        if (request.plans.isEmpty()) throw AIRequestError.emptyText
+        val answer = ask(AIDailyBrief.instructions(now), request.input, timeout = 25.0)
+        return AIDailyBrief.parse(answer, request.plans)
+    }
+
+    /**
+     * 晚间收尾: what to do with each plan left. Only what was done today (titles
+     * and types), the plans left and the nearest days are sent.
+     */
+    suspend fun eveningWrap(done: List<CheckInItem>, pending: List<CheckInItem>, events: List<CountdownEvent>,
+                            now: ZonedDateTime): Map<Int, WrapArrangement> {
+        val plans = pending.take(AIEveningWrap.maximumPlans)
+        if (plans.isEmpty()) throw AIRequestError.emptyText
+        val answer = ask(AIEveningWrap.instructions(now), AIEveningWrap.input(done, plans, events, now), timeout = 25.0)
+        return AIEveningWrap.arrangement(answer, plans.size)
+    }
+
+    /** 本周来信: the week's record, as for 周复盘. `week` is any day of the week. */
+    suspend fun weeklyLetter(snapshot: PlanSnapshot, week: LocalDate, now: ZonedDateTime): AIWeeklyLetter.Draft {
+        val record = AIDrafting.weekRecord(snapshot, week, now)
+        if (record.plans.isEmpty()) throw AIRequestError.emptyText
+        return AIWeeklyLetter.letter(ask(AIWeeklyLetter.instructions, record.text), record.plans)
+    }
+
     suspend fun breakDown(item: CheckInItem, categories: List<String>, now: ZonedDateTime = ZonedDateTime.now()): List<PlanDraft> {
         // `categories` is unused, as on iOS: steps keep the plan's own type.
         val answer = ask(AIDrafting.breakdownInstructions, AIDrafting.breakdownInput(item))

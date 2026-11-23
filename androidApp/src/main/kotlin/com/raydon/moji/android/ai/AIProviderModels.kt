@@ -332,9 +332,23 @@ data class AISettings(
     val isEnabled: Boolean = false,
     /**
      * Whether a plan typed into the home page's quick field is read for a
-     * time, a length or a type. Only applies while `isEnabled` is on.
+     * time, a length or a type: the chips under the field on the device, and
+     * the model's reading after adding while AI is ready.
      */
     val readsQuickEntry: Boolean = true,
+    /**
+     * Whether the entry points (拆成步骤, 今日提要, the mic…) stay visible while
+     * AI is not ready; tapping one then opens the intro sheet first.
+     */
+    val showsEntriesWhenOff: Boolean = true,
+    /** The 今日提要 card above today's plans. */
+    val dailyBrief: Boolean = true,
+    /** The vermilion note under a plan carried over three days or more. */
+    val carryOverNotes: Boolean = true,
+    /** The 收尾 card that takes the 今日提要 slot after 21:00. */
+    val eveningWrap: Boolean = true,
+    /** The 本周来信 card on the review page and its Sunday 20:00 reminder. */
+    val weeklyLetter: Boolean = true,
     val activeID: String = AIProvider.deepSeek.rawValue,
     /** Entries under 供应商, in order. `null` until the list is first edited. */
     val providerList: List<String>? = null,
@@ -427,6 +441,11 @@ data class AISettings(
     fun encode(): String = buildJsonObject {
         put("isEnabled", isEnabled)
         put("readsQuickEntry", readsQuickEntry)
+        put("showsEntriesWhenOff", showsEntriesWhenOff)
+        put("dailyBrief", dailyBrief)
+        put("carryOverNotes", carryOverNotes)
+        put("eveningWrap", eveningWrap)
+        put("weeklyLetter", weeklyLetter)
         put("activeID", activeID)
         providerList?.let { list -> put("providerList", buildJsonArray { list.forEach { add(JsonPrimitive(it)) } }) }
         put("configurations", buildJsonObject { configurations.forEach { (id, value) -> put(id, value.toJson()) } })
@@ -449,6 +468,11 @@ data class AISettings(
             return AISettings(
                 isEnabled = values["isEnabled"].aiBool() ?: false,
                 readsQuickEntry = values["readsQuickEntry"].aiBool() ?: true,
+                showsEntriesWhenOff = values["showsEntriesWhenOff"].aiBool() ?: true,
+                dailyBrief = values["dailyBrief"].aiBool() ?: true,
+                carryOverNotes = values["carryOverNotes"].aiBool() ?: true,
+                eveningWrap = values["eveningWrap"].aiBool() ?: true,
+                weeklyLetter = values["weeklyLetter"].aiBool() ?: true,
                 activeID = activeID,
                 providerList = providerList,
                 configurations = configurations,

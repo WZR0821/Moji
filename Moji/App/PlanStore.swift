@@ -310,6 +310,8 @@ final class PlanStore: ObservableObject {
     /// The last accepted draft, kept until its notice goes away.
     @Published private(set) var draftUndo: PlanDraftUndo?
     @Published private(set) var draftNotice: String?
+    /// The 今天的整理 entry of that draft, so taking it back marks the entry too.
+    private var draftWriteID: UUID?
     private var planNotificationSyncTask: Task<Void, Never>?
 
     init(snapshot: PlanSnapshot? = nil) {
@@ -410,7 +412,10 @@ final class PlanStore: ObservableObject {
 
     /// Writes accepted drafts in one step and remembers how to take them back.
     /// `changing` replaces plans that already exist; `adding` appends new ones.
-    func commitDrafts(adding added: [CheckInItem] = [], changing changed: [CheckInItem] = [], notice: String) {
+    /// Every write is also kept in 今天的整理 under `summary` (the notice when none is given).
+    @discardableResult
+    func commitDrafts(adding added: [CheckInItem] = [], changing changed: [CheckInItem] = [], notice: String,
+                      summary: String? = nil) -> UUID? {
         var before: [CheckInItem] = []
         var after: [CheckInItem] = []
         var inserted: [CheckInItem] = []
@@ -426,9 +431,12 @@ final class PlanStore: ObservableObject {
                 state.checkInItems.append(item); inserted.append(item)
             }
         }
-        guard !inserted.isEmpty || !before.isEmpty else { return }
+        guard !inserted.isEmpty || !before.isEmpty else { return nil }
         draftUndo = PlanDraftUndo(added: inserted, changed: PlanWorkflowUndo(before: before, after: after))
         draftNotice = notice
+        let id = AIWriteLog.shared.record(summary: summary ?? notice, added: inserted, before: before, after: after)
+        draftWriteID = id
+        return id
     }
 
     func undoDrafts() {
@@ -437,15 +445,32 @@ final class PlanStore: ObservableObject {
         let blocked = isPomodoroFocusActive ? UUID(uuidString: SharedPersistence.sharedDefaults.string(forKey: PomodoroStorageKeys.linkedPlanID) ?? "") : nil
         mutateWorkflow { count = undo.apply(to: &$0, blockedID: blocked) }
         draftUndo = nil
-        let total = undo.added.count + undo.changed.before.count
-        if count == total { draftNotice = "已撤销" }
-        else if count > 0 { draftNotice = "已撤销 \(count) 条；之后改过的保持不变" }
-        else { draftNotice = "这些计划之后都改过，保持不变" }
+        if let id = draftWriteID { AIWriteLog.shared.markUndone(id) }
+        draftWriteID = nil
+        draftNotice = AIWriteText.undoResult(undone: count, total: undo.added.count + undo.changed.before.count)
+    }
+
+    /// Takes back one write from 今天的整理, by the same rule as the undo bar:
+    /// plans changed since stay as they are. Returns the sentence to show.
+    @discardableResult
+    func undoWrite(_ id: UUID) -> String? {
+        guard let entry = AIWriteLog.shared.entry(id), !entry.undone else { return nil }
+        var count = 0
+        let blocked = isPomodoroFocusActive ? UUID(uuidString: SharedPersistence.sharedDefaults.string(forKey: PomodoroStorageKeys.linkedPlanID) ?? "") : nil
+        mutateWorkflow { count = entry.undo.apply(to: &$0, blockedID: blocked) }
+        AIWriteLog.shared.markUndone(id)
+        if draftWriteID == id {
+            draftUndo = nil
+            draftNotice = nil
+            draftWriteID = nil
+        }
+        return AIWriteText.undoResult(undone: count, total: entry.total)
     }
 
     func clearDraftNotice() {
         draftNotice = nil
         draftUndo = nil
+        draftWriteID = nil
     }
 
     func saveWeeklyGoal(_ goal: WeeklyGoal) {

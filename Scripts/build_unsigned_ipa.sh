@@ -66,20 +66,28 @@ ditto "$app_path" "$payload_dir/Moji.app"
 
 # SideStore and AltStore decide which App Groups to register from the
 # entitlements in each binary's code signature. A build with signing turned
-# off carries none, so the re-signed app and widget would get no group and the
-# widget could never see the app's data. An ad-hoc signature carries the
-# declared group; the installer replaces the signature and renames the group
-# to group.com.raydon.minuteplan.<TEAMID>, which the app reads at runtime.
+# off carries none, so the re-signed app and its extensions would get no group
+# and the widget and the share sheet could never reach the app's data. An
+# ad-hoc signature carries the declared group; the installer replaces the
+# signature and renames the group to group.com.raydon.minuteplan.<TEAMID>,
+# which the app reads at runtime. Extensions are signed before the app that
+# contains them.
 widget_path="$payload_dir/Moji.app/PlugIns/MojiWidget.appex"
-if [[ ! -d "$widget_path" ]]; then
-  print -u2 "未找到小组件扩展：$widget_path"
-  exit 1
-fi
+share_path="$payload_dir/Moji.app/PlugIns/MojiShare.appex"
+for extension_path in "$widget_path" "$share_path"; do
+  if [[ ! -d "$extension_path" ]]; then
+    print -u2 "未找到扩展：$extension_path"
+    exit 1
+  fi
+done
 expected_group="group.com.raydon.minuteplan"
-for target in widget app; do
+for target in widget share app; do
   if [[ "$target" == widget ]]; then
     bundle_path="$widget_path"
     entitlements_path="$project_root/MojiWidget/MojiWidget.entitlements"
+  elif [[ "$target" == share ]]; then
+    bundle_path="$share_path"
+    entitlements_path="$project_root/MojiShare/MojiShare.entitlements"
   else
     bundle_path="$payload_dir/Moji.app"
     entitlements_path="$project_root/Moji/Moji.entitlements"
@@ -107,9 +115,12 @@ rm -f "$versioned_ipa_path" "$latest_ipa_path"
 print "已输出版本化 IPA：$versioned_ipa_path"
 print "最新版快捷文件：$latest_ipa_path"
 /usr/bin/file "$payload_dir/Moji.app/Moji"
+# Read the whole report before matching: with pipefail, `grep -q` quitting
+# early can kill codesign with SIGPIPE and fail the check at random.
+signature_info="$(/usr/bin/codesign -dv "$payload_dir/Moji.app" 2>&1 || true)"
 if [[ -e "$payload_dir/Moji.app/embedded.mobileprovision" ]]; then
   print -u2 "警告：App 带有描述文件，不是给 SideStore 重签用的原始包。"
-elif /usr/bin/codesign -dv "$payload_dir/Moji.app" 2>&1 | grep -q '^Signature=adhoc$'; then
+elif [[ "$signature_info" == *$'\n'"Signature=adhoc"$'\n'* ]]; then
   print "签名检查：临时签名，只用来带上 App Group 声明，安装时由 SideStore 重签（符合预期）"
 else
   print -u2 "警告：App 不是临时签名。"

@@ -9,6 +9,13 @@
     <!-- AI 整理: requests go straight from the phone to the provider the user chose. -->
     <uses-permission android:name="android.permission.INTERNET" />
 
+    <!-- 首页话筒: the system speech recognizer is opened by intent; no recording permission. -->
+    <queries>
+        <intent>
+            <action android:name="android.speech.action.RECOGNIZE_SPEECH" />
+        </intent>
+    </queries>
+
     <application
         android:name=".MojiApplication"
         android:allowBackup="false"
@@ -33,9 +40,48 @@
                 <category android:name="android.intent.category.BROWSABLE" />
                 <data android:scheme="moji" />
             </intent-filter>
+            <!-- 说一句添加: the long-press shortcut on the launcher icon. -->
+            <meta-data android:name="android.app.shortcuts" android:resource="@xml/shortcuts" />
         </activity>
 
+        <!-- 分享: text or a picture from another app's share sheet goes into the inbox, then into 墨记. -->
+        <activity
+            android:name=".ShareReceiverActivity"
+            android:exported="true"
+            android:excludeFromRecents="true"
+            android:noHistory="true"
+            android:theme="@style/Theme.Moji.Translucent">
+            <intent-filter>
+                <action android:name="android.intent.action.SEND" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="text/plain" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.SEND" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="image/*" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.SEND_MULTIPLE" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="image/*" />
+            </intent-filter>
+        </activity>
+
+        <!-- 说一句添加: a quick-settings tile. -->
+        <service
+            android:name=".platform.MojiSayTileService"
+            android:exported="true"
+            android:icon="@drawable/ic_mic"
+            android:label="@string/say_shortcut"
+            android:permission="android.permission.BIND_QUICK_SETTINGS_TILE">
+            <intent-filter>
+                <action android:name="android.service.quicksettings.action.QS_TILE" />
+            </intent-filter>
+        </service>
+
         <receiver android:name=".platform.MojiAlarmReceiver" android:exported="false" />
+        <receiver android:name=".platform.WeeklyLetterReceiver" android:exported="false" />
         <receiver android:name=".platform.BootReceiver" android:exported="true">
             <intent-filter>
                 <action android:name="android.intent.action.BOOT_COMPLETED" />

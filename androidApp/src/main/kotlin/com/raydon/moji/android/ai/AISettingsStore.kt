@@ -10,6 +10,8 @@ interface AIPreferences {
     fun getString(key: String): String?
     /** False when the value could not be written. */
     fun putString(key: String, value: String): Boolean
+    /** Forgets the value; an empty string reads as nothing saved. */
+    fun remove(key: String): Boolean = putString(key, "")
 }
 
 /**
@@ -20,6 +22,7 @@ class AISharedPreferences(context: Context, name: String = "moji.ai") : AIPrefer
     private val prefs = context.applicationContext.getSharedPreferences(name, Context.MODE_PRIVATE)
     override fun getString(key: String): String? = prefs.getString(key, null)
     override fun putString(key: String, value: String): Boolean = prefs.edit().putString(key, value).commit()
+    override fun remove(key: String): Boolean = prefs.edit().remove(key).commit()
 }
 
 class AIMemoryPreferences : AIPreferences {
@@ -27,6 +30,10 @@ class AIMemoryPreferences : AIPreferences {
     override fun getString(key: String): String? = synchronized(values) { values[key] }
     override fun putString(key: String, value: String): Boolean {
         synchronized(values) { values[key] = value }
+        return true
+    }
+    override fun remove(key: String): Boolean {
+        synchronized(values) { values.remove(key) }
         return true
     }
 }
@@ -47,6 +54,7 @@ class AISettingsStore(private val defaults: AIPreferences, private val keys: AIK
     )
     private val keyedState = MutableStateFlow<Set<String>>(emptySet())
     private val readyState = MutableStateFlow(false)
+    private val showsEntriesState = MutableStateFlow(false)
 
     val settings: StateFlow<AISettings> = settingsState.asStateFlow()
 
@@ -56,12 +64,21 @@ class AISettingsStore(private val defaults: AIPreferences, private val keys: AIK
     /** `isReady` as a flow, for screens that show or hide AI entry points. */
     val readyFlow: StateFlow<Boolean> = readyState.asStateFlow()
 
+    /** `showsEntries` as a flow: ready, or not ready with the entries kept on. */
+    val showsEntriesFlow: StateFlow<Boolean> = showsEntriesState.asStateFlow()
+
     init {
         refreshKeys()
     }
 
     /** On, with a key and a model: the only state in which anything is sent. */
     val isReady: Boolean get() = ready(settingsState.value, keyedState.value)
+
+    /**
+     * Whether entry points are shown: always when ready, and while not ready
+     * unless the user hid them. Tapping one while not ready opens the intro.
+     */
+    val showsEntries: Boolean get() = isReady || settingsState.value.showsEntriesWhenOff
 
     val listedProviderIDs: List<String> get() = settingsState.value.listedProviderIDs(keyedState.value)
 
@@ -75,6 +92,7 @@ class AISettingsStore(private val defaults: AIPreferences, private val keys: AIK
         }
         keyedState.value = found
         readyState.value = ready(value, found)
+        showsEntriesState.value = readyState.value || value.showsEntriesWhenOff
     }
 
     /** Saves settings, and the keys given for some entries (an empty key deletes it). Throws [AIRequestError]. */
@@ -85,6 +103,8 @@ class AISettingsStore(private val defaults: AIPreferences, private val keys: AIK
         if (!defaults.putString(defaultsKey, text)) throw AIRequestError.persistence
         settingsState.value = value
         refreshKeys()
+        // 本周来信's Sunday notification follows the switches and the key.
+        AIWeeklyLetterState.reschedule()
     }
 
     /** Swift's `change(keys:_:)`: the block returns the changed copy. */
@@ -152,6 +172,11 @@ class AISettingsStore(private val defaults: AIPreferences, private val keys: AIK
                 if (installed != null) return
                 val app = context.applicationContext
                 installed = AISettingsStore(AISharedPreferences(app), AIKeystoreStore(app))
+                AIProactiveStore.install(AISharedPreferences(app))
+                AIWriteLog.install(AISharedPreferences(app))
+                AIEveningWrapState.install(AISharedPreferences(app))
+                AIWeeklyLetterState.install(AISharedPreferences(app))
+                AIWeeklyLetterState.rescheduler = { com.raydon.moji.android.platform.AIWeeklyLetterNotifier.reschedule(app) }
                 AIAssistant.installDefaultCategory(app)
             }
         }

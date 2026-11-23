@@ -6,4 +6,13 @@
         <item name="android:statusBarColor">@color/paper</item>
         <item name="android:windowLightStatusBar">true</item>
     </style>
+
+    <!-- 分享 receiver: nothing of its own on screen while it hands the item to 墨记. -->
+    <style name="Theme.Moji.Translucent" parent="android:style/Theme.Translucent.NoTitleBar">
+        <item name="android:windowNoTitle">true</item>
+        <item name="android:windowIsTranslucent">true</item>
+        <item name="android:windowBackground">@android:color/transparent</item>
+        <item name="android:backgroundDimEnabled">false</item>
+        <item name="android:windowAnimationStyle">@null</item>
+    </style>
 </resources>

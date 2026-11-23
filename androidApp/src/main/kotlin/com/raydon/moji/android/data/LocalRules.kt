@@ -56,7 +56,7 @@ object LocalRules {
         return item.copy(id = UUID.randomUUID().toString(), scheduledStart = candidate.toInstant().toString(),
             status = "planned", completedAt = null, actualStartDate = null, actualEndDate = null,
             createdAt = now.toString(), seriesID = item.seriesID ?: item.id,
-            generatedFromOccurrenceID = item.id, calendarEventIdentifier = null)
+            generatedFromOccurrenceID = item.id, calendarEventIdentifier = null, aiOrigin = null)
     }
 
     /** The record that completed [item], matched on its actual start/end like

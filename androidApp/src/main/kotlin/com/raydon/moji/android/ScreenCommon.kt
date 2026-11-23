@@ -52,6 +52,7 @@ import androidx.compose.ui.graphics.BlendMode
 import androidx.compose.ui.graphics.CompositingStrategy
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.drawscope.clipPath
+import androidx.compose.ui.graphics.drawscope.scale
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ColorFilter
 import androidx.compose.ui.graphics.Path
@@ -89,6 +90,8 @@ enum class MojiIcon {
     Pencil, RepeatLoop, BellPlain, TimerSF, Folder, FolderPlus, ShareUp, FolderGear, ShareDown, CalendarPlus, ArrowUpRight,
     Cpu, CheckCircleFill, Circle, Xmark, Photo, Clipboard,
     BookSF, ArrowSquare, DocMagnify, FilterLines, TextViewfinder,
+    Mic, ListIndent, Sunrise, TextAppend,
+    Envelope, MoonStars, Signature,
 }
 
 @Composable
@@ -616,8 +619,82 @@ private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawSfGlyph(kind: M
             poly(1.6f, 4f, 18.5f, 4f, 21.5f, 4.5f, 23.5f, 6.5f, 24f, 9.5f, 24f); poly(1.6f, 18.5f, 24f, 21.5f, 24f, 23.5f, 23.5f, 24f, 21.5f, 24f, 18.5f)
             line(9f, 10.5f, 19f, 10.5f, 1.5f); line(9f, 14f, 19f, 14f, 1.5f); line(9f, 17.5f, 15f, 17.5f, 1.5f)
         }
+        // Material "mic", for 说一句话 in the quick field.
+        MojiIcon.Mic -> drawMaterialGlyph(MATERIAL_MIC, color, u)
+        // Material "format_indent_increase", for 拆成步骤.
+        MojiIcon.ListIndent -> drawMaterialGlyph(MATERIAL_INDENT_INCREASE, color, u)
+        // "sunrise": half a sun on the horizon, rays, and an arrow rising above it.
+        MojiIcon.Sunrise -> {
+            line(14f, 3.4f, 14f, 9.6f, 1.6f); poly(1.6f, 11.2f, 6.2f, 14f, 3.4f, 16.8f, 6.2f)
+            drawArc(color, 180f, 180f, false, o(8.6f, 15.4f), androidx.compose.ui.geometry.Size(10.8f * u, 10.8f * u), style = stroke(1.6f))
+            listOf(200.0, 235.0, 305.0, 340.0).forEach { degrees ->
+                val angle = Math.toRadians(degrees)
+                val cx = kotlin.math.cos(angle).toFloat(); val cy = kotlin.math.sin(angle).toFloat()
+                line(14f + cx * 7.9f, 20.8f + cy * 7.9f, 14f + cx * 10.1f, 20.8f + cy * 10.1f, 1.5f)
+            }
+            line(2.8f, 20.8f, 25.2f, 20.8f, 1.6f); line(9f, 24.6f, 19f, 24.6f, 1.5f)
+        }
+        // "text.append": two lines of text and a hooked arrow leading into a third.
+        MojiIcon.TextAppend -> {
+            line(4f, 6.5f, 24f, 6.5f, 1.6f); line(4f, 12f, 24f, 12f, 1.6f)
+            poly(1.6f, 5.5f, 15.5f, 5.5f, 20.5f, 11.5f, 20.5f); poly(1.6f, 9.2f, 17.8f, 11.9f, 20.5f, 9.2f, 23.2f)
+            line(15f, 20.5f, 24f, 20.5f, 1.6f)
+        }
+        // "envelope": a letter seen from the front, its flap folded down to the middle.
+        MojiIcon.Envelope -> {
+            outline(3f, 6.5f, 25f, 21.5f, 2.6f, 1.6f)
+            poly(1.6f, 3.9f, 7.6f, 14f, 15.2f, 24.1f, 7.6f)
+        }
+        // "moon.stars": a crescent with two small four-pointed stars above it.
+        MojiIcon.MoonStars -> {
+            val moon = Path().apply {
+                op(
+                    Path().apply { addOval(androidx.compose.ui.geometry.Rect(o(3.6f, 7.4f), androidx.compose.ui.geometry.Size(17.2f * u, 17.2f * u))) },
+                    Path().apply { addOval(androidx.compose.ui.geometry.Rect(o(9.8f, 3.6f), androidx.compose.ui.geometry.Size(15.4f * u, 15.4f * u))) },
+                    androidx.compose.ui.graphics.PathOperation.Difference,
+                )
+            }
+            drawPath(moon, color, style = stroke(1.6f))
+            fun sparkle(cx: Float, cy: Float, r: Float) {
+                val p = Path()
+                p.moveTo(cx * u, (cy - r) * u)
+                p.quadraticTo(cx * u, cy * u, (cx + r) * u, cy * u)
+                p.quadraticTo(cx * u, cy * u, cx * u, (cy + r) * u)
+                p.quadraticTo(cx * u, cy * u, (cx - r) * u, cy * u)
+                p.quadraticTo(cx * u, cy * u, cx * u, (cy - r) * u)
+                p.close()
+                drawPath(p, color)
+            }
+            sparkle(21.2f, 5.2f, 2.9f)
+            sparkle(24.4f, 11.6f, 2.1f)
+        }
+        // "signature": a looped hand-written stroke over a line to sign on.
+        MojiIcon.Signature -> {
+            val p = Path()
+            p.moveTo(3.6f * u, 18.6f * u)
+            p.cubicTo(6.2f * u, 10.2f * u, 9.6f * u, 5.6f * u, 10.8f * u, 8.6f * u)
+            p.cubicTo(11.9f * u, 11.6f * u, 7.4f * u, 19.8f * u, 9.3f * u, 20.3f * u)
+            p.cubicTo(11.2f * u, 20.8f * u, 13.1f * u, 14.2f * u, 15.0f * u, 14.6f * u)
+            p.cubicTo(16.6f * u, 15.0f * u, 15.6f * u, 19.4f * u, 17.6f * u, 19.4f * u)
+            p.cubicTo(19.6f * u, 19.4f * u, 21.2f * u, 16.6f * u, 24.4f * u, 16.4f * u)
+            drawPath(p, color, style = stroke(1.6f))
+            line(3.6f, 24f, 24.4f, 24f, 1.4f)
+        }
         else -> Unit
     }
+}
+
+private const val MATERIAL_MIC = "M12,14c1.66,0 2.99,-1.34 2.99,-3L15,5c0,-1.66 -1.34,-3 -3,-3S9,3.34 9,5v6c0,1.66 1.34,3 3,3z" +
+    "M17.3,11c0,3 -2.54,5.1 -5.3,5.1S6.7,14 6.7,11H5c0,3.41 2.72,6.23 6,6.72V21h2v-3.28c3.28,-0.48 6,-3.3 6,-6.72h-1.7z"
+private const val MATERIAL_INDENT_INCREASE = "M3,21h18v-2H3v2zM3,8v8l4,-4 -4,-4zM11,17h10v-2H11v2zM3,3v2h18V3H3z" +
+    "M11,9h10V7H11v2zM11,13h10v-2H11v2z"
+private val materialGlyphPaths = mutableMapOf<String, Path>()
+
+/** A Material icon's 24-unit path, filled, over the same box the SF look-alikes use. */
+private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawMaterialGlyph(data: String, color: Color, u: Float) {
+    val path = materialGlyphPaths.getOrPut(data) { androidx.compose.ui.graphics.vector.PathParser().parsePathString(data).toPath() }
+    val factor = 28f * u / 24f
+    scale(factor, factor, pivot = androidx.compose.ui.geometry.Offset.Zero) { drawPath(path, color) }
 }
 
 @Composable

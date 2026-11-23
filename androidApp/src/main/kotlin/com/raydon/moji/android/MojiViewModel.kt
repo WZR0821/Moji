@@ -65,6 +65,15 @@ class MojiViewModel(application: Application) : AndroidViewModel(application) {
 
     fun openFocus() { showFocus.value = true; selectedTab.value = 2 }
     fun openPlans() { selectedTab.value = 0 }
+    fun openReview() { selectedTab.value = 3 }
+
+    /** 说一句添加 (`moji://say`): waiting for the plan page to focus the field and start the microphone. */
+    val sayRequested = MutableStateFlow(false)
+    /** 分享 (`moji://share`): bumped so the plan page looks into the inbox even if it stayed on screen. */
+    val shareRequests = MutableStateFlow(0)
+
+    fun startSaying() { selectedTab.value = 0; sayRequested.value = true }
+    fun checkShareInbox() { selectedTab.value = 0; shareRequests.value += 1 }
     val customCategories: List<String> get() = app.settings.customCategories
     fun addCategory(name: String) {
         val normalized = name.trim().take(24)
@@ -129,6 +138,8 @@ class MojiViewModel(application: Application) : AndroidViewModel(application) {
         actualStart: java.time.LocalDateTime? = null,
         actualEnd: java.time.LocalDateTime? = null,
         plannedDurationEnabled: Boolean = true,
+        /** Applied to the plan before it is written, in the same save (the quick-entry chips). */
+        transform: ((CheckInItem) -> CheckInItem)? = null,
         onSaved: (() -> Unit)? = null,
     ) {
         if (title.isBlank()) return
@@ -166,7 +177,9 @@ class MojiViewModel(application: Application) : AndroidViewModel(application) {
                 isArchived = old?.isArchived ?: false,
                 sourceMemoID = old?.sourceMemoID,
                 sourceMemoChecklistItemID = old?.sourceMemoChecklistItemID,
+                aiOrigin = old?.aiOrigin,
             )
+            transform?.let { item = it(item) }
             if (calendarSync && item.calendarEventIdentifier == null) {
                 val eventId = withContext(Dispatchers.IO) { AndroidCalendarIntegration.addPlan(app, item) }
                 item = item.copy(calendarEventIdentifier = eventId)
@@ -289,7 +302,11 @@ class MojiViewModel(application: Application) : AndroidViewModel(application) {
      * Writes accepted drafts in one step and remembers how to take them back.
      * [changed] replaces plans that already exist; [added] appends new ones.
      */
-    fun commitDrafts(added: List<CheckInItem> = emptyList(), changed: List<CheckInItem> = emptyList(), notice: String, onSaved: (() -> Unit)? = null) = launchMutation {
+    /** The 今天的整理 entry of the write the undo bar can still take back. */
+    private var draftWriteId: String? = null
+
+    fun commitDrafts(added: List<CheckInItem> = emptyList(), changed: List<CheckInItem> = emptyList(), notice: String,
+                     summary: String? = null, onSaved: (() -> Unit)? = null) = launchMutation {
         val changedIds = mutableListOf<String>()
         val before = mutableListOf<CheckInItem>()
         val insertedIds = mutableListOf<String>()
@@ -307,11 +324,12 @@ class MojiViewModel(application: Application) : AndroidViewModel(application) {
         if (insertedIds.isEmpty() && changedIds.isEmpty()) return@launchMutation
         // Remember the plans as they were stored, so a later edit is told apart from the draft itself.
         val stored = app.repository.freshSnapshot().checkInItems.associateBy { it.id }
-        draftUndo.value = com.raydon.moji.android.ai.PlanDraftUndo(
-            added = insertedIds.mapNotNull { stored[it] },
-            changed = PlanWorkflowUndo(before.toList(), changedIds.mapNotNull { stored[it] }),
-        )
+        val addedPlans = insertedIds.mapNotNull { stored[it] }
+        val afterPlans = changedIds.mapNotNull { stored[it] }
+        draftUndo.value = com.raydon.moji.android.ai.PlanDraftUndo(added = addedPlans, changed = PlanWorkflowUndo(before.toList(), afterPlans))
         draftNotice.value = notice
+        // 今天的整理 keeps every write, so it can be taken back later in the day too.
+        draftWriteId = com.raydon.moji.android.ai.AIWriteLog.shared.record(summary ?: notice, addedPlans, before.toList(), afterPlans)
         onSaved?.invoke()
     }
 
@@ -320,15 +338,30 @@ class MojiViewModel(application: Application) : AndroidViewModel(application) {
         var count = 0
         app.repository.mutate { state -> undo.apply(state, focusBlockedPlanId).let { (next, undone) -> count = undone; next } }
         draftUndo.value = null
-        val total = undo.added.size + undo.changed.before.size
-        draftNotice.value = when {
-            count == total -> "已撤销"
-            count > 0 -> "已撤销 $count 条；之后改过的保持不变"
-            else -> "这些计划之后都改过，保持不变"
-        }
+        draftWriteId?.let { com.raydon.moji.android.ai.AIWriteLog.shared.markUndone(it) }
+        draftWriteId = null
+        draftNotice.value = com.raydon.moji.android.ai.AIWriteText.undoResult(count, undo.added.size + undo.changed.before.size)
     }
 
-    fun clearDraftNotice() { draftNotice.value = null; draftUndo.value = null }
+    /**
+     * Takes back one write from 今天的整理, by the same rule as the undo bar:
+     * plans changed since stay as they are. [onResult] gets the sentence to show.
+     */
+    fun undoWrite(id: String, onResult: (String) -> Unit) = launchMutation {
+        val log = com.raydon.moji.android.ai.AIWriteLog.shared
+        val entry = log.entry(id)?.takeIf { !it.undone } ?: return@launchMutation
+        var count = 0
+        app.repository.mutate { state -> entry.undo.apply(state, focusBlockedPlanId).let { (next, undone) -> count = undone; next } }
+        log.markUndone(id)
+        if (draftWriteId == id) {
+            draftUndo.value = null
+            draftNotice.value = null
+            draftWriteId = null
+        }
+        onResult(com.raydon.moji.android.ai.AIWriteText.undoResult(count, entry.total))
+    }
+
+    fun clearDraftNotice() { draftNotice.value = null; draftUndo.value = null; draftWriteId = null }
 
     fun saveWeeklyGoal(goal: WeeklyGoal, onSaved: (() -> Unit)? = null) = saveOperation(goal.id) {
         if ((goal.targetCount == null && goal.targetMinutes == null) || goal.targetCount?.let { it < 1 } == true || goal.targetMinutes?.let { it < 1 } == true) return@saveOperation
@@ -713,7 +746,43 @@ class MojiViewModel(application: Application) : AndroidViewModel(application) {
         if (!BuildConfig.DEBUG) return
         viewModelScope.launch(mutationErrors) {
             val json = app.assets.open("workflow-1.6.json").bufferedReader(Charsets.UTF_8).use { it.readText() }
-            app.repository.replace(MojiJson.decodeBackupOrSnapshot(json).first)
+            var seeded = MojiJson.decodeBackupOrSnapshot(json).first
+            val zone = ZoneId.systemDefault()
+            if (route in listOf("ai-brief", "ai-brief-off", "ai-carry-note", "ai-wrap", "ai-wrap-edit", "ai-wrap-off", "ai-writes")) {
+                // 今日提要, 顺延旁批 and 晚间收尾 need a plan carried over for three days.
+                seeded = seeded.copy(checkInItems = seeded.checkInItems.map { item ->
+                    if (item.title != "归纳昨日待办") item else runCatching {
+                        val start = Instant.parse(item.scheduledStart).atZone(zone)
+                        item.copy(scheduledStart = start.with(LocalDate.now(zone).minusDays(3)).toInstant().toString())
+                    }.getOrDefault(item)
+                })
+            }
+            // 晚间收尾 and 今天的整理: three writes from earlier today, one of them taken back.
+            // The changed plan is 「归纳昨日待办」, the first plan in the iOS store.
+            if (route in listOf("ai-wrap", "ai-wrap-edit", "ai-wrap-off", "ai-writes")) {
+                val plans = seeded.checkInItems.filter { it.kind == "planned" }.sortedBy { it.title != "归纳昨日待办" }
+                com.raydon.moji.android.ai.AIWriteLog.shared.seedForQA(plans, com.raydon.moji.android.ai.AIClock.now())
+            }
+            if (route == "ai-origin") {
+                // Two steps 墨记 split off 「准备季度汇报」, today at 16:00 and 17:00.
+                val today = LocalDate.now(zone)
+                val created = Instant.now().toString()
+                val steps = listOf("列出汇报的三个要点" to 15, "找齐三个月的数据" to 30).mapIndexed { index, (title, minutes) ->
+                    CheckInItem(id = UUID.randomUUID().toString(), title = title, category = "work",
+                        scheduledStart = today.atTime(16 + index, 0).atZone(zone).toInstant().toString(), plannedMinutes = minutes,
+                        createdAt = created, scheduleKind = "exactTime", detailsConfigured = true, plannedDurationEnabled = true,
+                        aiOrigin = com.raydon.moji.android.ai.AIWriteText.splitOrigin("准备季度汇报"))
+                }
+                seeded = seeded.copy(checkInItems = seeded.checkInItems + steps)
+            }
+            // 本周来信: the sample week moved so it ends on this week's Sunday, where the clock stands.
+            if (route.startsWith("ai-letter")) seeded = com.raydon.moji.android.ai.AIQAFixture.shifted(seeded, com.raydon.moji.android.ai.AIQAFixture.letterShiftDays, zone)
+            // 分享: one shared sentence waiting in the inbox (a scratch folder while the fixture is on).
+            if (route == "ai-share" || route == "ai-share-off") com.raydon.moji.android.ai.ShareInbox.of(app).let { inbox ->
+                inbox.clear()
+                inbox.add("周五前交季度报告，周三下午和小王对一下数据，明天上午订会议室", null)
+            }
+            app.repository.replace(seeded)
             app.settings.customCategories = listOf("生活")
             app.settings.appearance = "system"
             appearanceMode.value = "system"
@@ -722,7 +791,8 @@ class MojiViewModel(application: Application) : AndroidViewModel(application) {
             selectedTab.value = when {
                 route.startsWith("ai-memo") -> 1
                 route.startsWith("ai-preparation") -> 2
-                route == "ai" || route.startsWith("ai:") || route.startsWith("ai-reflection") || route == "ai-next-week" -> 3
+                route == "ai" || route.startsWith("ai:") || route.startsWith("ai-reflection") || route == "ai-next-week" || route.startsWith("ai-letter") ||
+                    route == "ai-settings-help" -> 3
                 route.startsWith("ai-") -> 0
                 route.startsWith("memo") -> 1
                 route.startsWith("moment") || route.startsWith("focus") -> 2

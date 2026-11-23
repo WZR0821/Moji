@@ -94,7 +94,7 @@ fun PlanLibraryDialog(viewModel: MojiViewModel, onDismiss: () -> Unit) {
     val pickFrom = rememberDatePicker { from = it; if (to < it) to = it }
     val pickTo = rememberDatePicker { to = maxOf(from, it) }
     val pickTemplate = rememberDatePicker { templateDay = it }
-    val aiReady = rememberAIReady()
+    val showsAI = rememberAIShowsEntries()
     val scope = rememberCoroutineScope()
     var isReadingFilter by remember { mutableStateOf(false) }
     var filterFailure by remember { mutableStateOf<String?>(null) }
@@ -166,10 +166,10 @@ fun PlanLibraryDialog(viewModel: MojiViewModel, onDismiss: () -> Unit) {
                                 Spacer(Modifier.width(4.dp))
                                 Text("还原", fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.primary, modifier = Modifier.clickable { restoreFilterBeforeSentence() }.padding(vertical = 4.dp))
                             }
-                        } else if (aiReady && AIDrafting.looksLikeFilterSentence(query)) {
+                        } else if (showsAI && AIDrafting.looksLikeFilterSentence(query)) {
                             FormSeparator()
                             // iOS: a borderless button in .subheadline, medium weight.
-                            Box(Modifier.fillMaxWidth().heightIn(min = 44.dp).clickable { applySentenceFilter() }.padding(horizontal = 20.dp), contentAlignment = Alignment.CenterStart) {
+                            Box(Modifier.fillMaxWidth().heightIn(min = 44.dp).clickable { aiEntry { applySentenceFilter() } }.padding(horizontal = 20.dp), contentAlignment = Alignment.CenterStart) {
                                 Text("按这句话筛选", fontSize = 15.sp, fontWeight = FontWeight.Medium, color = MaterialTheme.colorScheme.primary)
                             }
                             filterFailure?.let { FormSeparator(); Text(it, fontSize = 13.sp, color = iosSecondaryLabel, modifier = Modifier.padding(horizontal = 20.dp, vertical = 11.dp)) }
@@ -223,7 +223,7 @@ fun PlanLibraryDialog(viewModel: MojiViewModel, onDismiss: () -> Unit) {
                                     Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(5.dp)) {
                                         Text(item.title, fontSize = 17.sp)
                                         val date = Instant.parse(item.scheduledStart).atZone(ZoneId.systemDefault()).format(DateTimeFormatter.ofPattern("M月d日"))
-                                        Text("$date · ${categoryName(item.category)} · ${if (item.isArchived == true) "已归档" else planStatusName(item.status)}", fontSize = 12.sp, color = iosSecondaryLabel)
+                                        Text(withOriginMark("$date · ${categoryName(item.category)} · ${if (item.isArchived == true) "已归档" else planStatusName(item.status)}", item.aiOrigin), fontSize = 12.sp, color = iosSecondaryLabel)
                                     }
                                 }
                                 DropdownMenu(menuId == item.id, { menuId = null }) {
@@ -320,7 +320,7 @@ fun MemoConversionDialog(memo: MemoItem, viewModel: MojiViewModel, onDismiss: ()
     var category by remember { mutableStateOf("study") }
     var editing by remember { mutableStateOf<CheckInItem?>(null) }
     val pick = rememberDatePicker { day = it }
-    val aiReady = rememberAIReady()
+    val showsAI = rememberAIShowsEntries()
     val scope = rememberCoroutineScope()
     // A date and a type read out of each row, keyed by checklist item (null for the whole memo).
     var hints by remember { mutableStateOf<Map<String?, ConversionHint>>(emptyMap()) }
@@ -352,11 +352,11 @@ fun MemoConversionDialog(memo: MemoItem, viewModel: MojiViewModel, onDismiss: ()
         LazyColumn(contentPadding = PaddingValues(top = 34.dp, bottom = 20.dp), verticalArrangement = Arrangement.spacedBy(24.dp)) {
             item { FormSection {
                 FormDateRow("计划日期", day) { pick(day) }; FormSeparator(); FormChoiceRow("计划类型", category, categoryChoices(viewModel, category)) { category = it }
-                if (aiReady) {
+                if (showsAI) {
                     FormSeparator()
                     if (isReadingHints) Box(Modifier.fillMaxWidth().heightIn(min = 44.dp).padding(horizontal = 20.dp), contentAlignment = Alignment.CenterStart) { InkDraftWaiting("正在看每一行") }
                     else if (hints.isEmpty()) {
-                        FormRow("按内容预填每一行", onClick = { readHints() }, titleColor = MaterialTheme.colorScheme.primary)
+                        FormRow("按内容预填每一行", onClick = { aiEntry { readHints() } }, titleColor = MaterialTheme.colorScheme.primary)
                         hintFailure?.let { FormSeparator(); Text(it, fontSize = 13.sp, color = iosSecondaryLabel, modifier = Modifier.padding(horizontal = 20.dp, vertical = 11.dp)) }
                     } else Row(Modifier.fillMaxWidth().heightIn(min = 44.dp).padding(horizontal = 20.dp), verticalAlignment = Alignment.CenterVertically) {
                         Text("带浅色标注的行会用它自己的日期和类型", fontSize = 13.sp, color = iosSecondaryLabel, modifier = Modifier.weight(1f))
@@ -401,7 +401,7 @@ fun WorkflowWeekSection(viewModel: MojiViewModel, week: LocalDate) {
     var editingGoal by remember { mutableStateOf<WeeklyGoal?>(null) }
     var reflectionEditor by remember { mutableStateOf(false) }
     var carryEditor by remember { mutableStateOf(false) }
-    val aiReady = rememberAIReady()
+    val showsAI = rememberAIShowsEntries()
     var nextWeekDrafts by remember { mutableStateOf(false) }
     Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
         InkCard {
@@ -445,7 +445,7 @@ fun WorkflowWeekSection(viewModel: MojiViewModel, week: LocalDate) {
                 Text("下周关注", fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
                 Text(reflection?.nextFocus?.takeIf { it.isNotEmpty() } ?: "给下周留下一句提醒。", fontSize = 15.sp, color = iosSecondaryLabel)
                 Text("选择待办移至下周", fontSize = 15.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.clickable { carryEditor = true }.padding(vertical = 5.dp))
-                if (aiReady) Text("拟下周草稿", fontSize = 15.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.clickable { nextWeekDrafts = true }.padding(vertical = 5.dp))
+                if (showsAI) Text("拟下周草稿", fontSize = 15.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.clickable { aiEntry { nextWeekDrafts = true } }.padding(vertical = 5.dp))
             }
         }
     }
@@ -453,6 +453,7 @@ fun WorkflowWeekSection(viewModel: MojiViewModel, week: LocalDate) {
     if (reflectionEditor) WeeklyReflectionDialog(viewModel, week, reflection) { reflectionEditor = false }
     if (carryEditor) NextWeekPlansDialog(viewModel, week) { carryEditor = false }
     if (nextWeekDrafts) PlanDraftSheet(viewModel, "下周草稿", "按这一周的记录和“下周关注”拟的", waitingText = "正在拟下周",
+        origin = com.raydon.moji.android.ai.AIWriteText.nextWeekOrigin, summary = { count, _ -> com.raydon.moji.android.ai.AIWriteText.nextWeek(count) },
         load = { AIAssistant.shared.draftNextWeek(viewModel.snapshot.value, workflowWeek(week), aiCategories(viewModel)) }) { nextWeekDrafts = false }
 }
 
@@ -501,14 +502,15 @@ fun WeeklyGoalDialog(viewModel: MojiViewModel, week: LocalDate, goal: WeeklyGoal
 }
 
 @Composable
-fun WeeklyReflectionDialog(viewModel: MojiViewModel, week: LocalDate, reflection: WeeklyReflection?, onDismiss: () -> Unit) {
+fun WeeklyReflectionDialog(viewModel: MojiViewModel, week: LocalDate, reflection: WeeklyReflection?, initialDraft: ReflectionDraft? = null, onDismiss: () -> Unit) {
     var note by remember { mutableStateOf(reflection?.note ?: "") }
     var nextFocus by remember { mutableStateOf(reflection?.nextFocus ?: "") }
     val draftId = remember { reflection?.id ?: UUID.randomUUID().toString() }
     val requestDismiss = rememberEditorDismiss(note != (reflection?.note ?: "") || nextFocus != (reflection?.nextFocus ?: ""), onDismiss)
-    val aiReady = rememberAIReady()
+    val showsAI = rememberAIShowsEntries()
     val scope = rememberCoroutineScope()
-    var draft by remember { mutableStateOf<ReflectionDraft?>(null) }
+    // 本周来信's 放进复盘 opens with the letter already in the draft area; 放进两栏 still puts it in.
+    var draft by remember { mutableStateOf(initialDraft) }
     var isDrafting by remember { mutableStateOf(false) }
     var draftFailure by remember { mutableStateOf<String?>(null) }
     // What the two fields held before a draft was put into them.
@@ -538,7 +540,7 @@ fun WeeklyReflectionDialog(viewModel: MojiViewModel, week: LocalDate, reflection
     WorkflowDialog("周复盘", requestDismiss, trailing = "保存", onSave = { viewModel.saveWeeklyReflection(WeeklyReflection(draftId, workflowWeek(week).toString(), note, nextFocus, Instant.now().toString()), onSaved = onDismiss) }) {
         LazyColumn(contentPadding = PaddingValues(top = 15.dp, bottom = 20.dp), verticalArrangement = Arrangement.spacedBy(30.6.dp)) {
             // The draft sits above the two fields, dashed and stamped, until it is put in. Saving is still 保存.
-            if (aiReady) item {
+            if (showsAI) item {
                 val current = draft
                 if (current != null && !isDrafting) Spacer(Modifier.height(20.dp))
                 if (isDrafting) FormSection { Box(Modifier.fillMaxWidth().heightIn(min = 44.dp).padding(horizontal = 20.dp), contentAlignment = Alignment.CenterStart) { InkDraftWaiting("正在起草") } }
@@ -566,7 +568,7 @@ fun WeeklyReflectionDialog(viewModel: MojiViewModel, week: LocalDate, reflection
                     }
                 }
                 else FormSection(footer = "按这一周的计划记录起草，并注明依据的是哪几条计划。") {
-                    FormRow("起草复盘", onClick = { runDraft() }, titleColor = MaterialTheme.colorScheme.primary)
+                    FormRow("起草复盘", onClick = { aiEntry { runDraft() } }, titleColor = MaterialTheme.colorScheme.primary)
                     draftFailure?.let { FormSeparator(); Text(it, fontSize = 13.sp, color = iosSecondaryLabel, modifier = Modifier.padding(horizontal = 20.dp, vertical = 11.dp)) }
                 }
             }

@@ -34,7 +34,8 @@ struct MojiApp: App {
            let directory = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first,
            let data = try? Data(contentsOf: directory.appendingPathComponent("MojiVisualQA.json")),
            let fixture = try? SharedPersistence.previewBackup(data) {
-            SharedPersistence.replace(with: fixture)
+            // The letter screens move the sample into the week being written about.
+            SharedPersistence.replace(with: AIQAFixture.shifted(fixture, byDays: AIQAFixture.letterShiftDays))
             SharedPersistence.sharedDefaults.set("[\"生活\"]", forKey: PlanSettingsKeys.customCategories)
             let defaults = SharedPersistence.sharedDefaults
             defaults.set(AppAppearanceMode.system.rawValue, forKey: PlanSettingsKeys.appearanceMode)

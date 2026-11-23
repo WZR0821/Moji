@@ -1,6 +1,11 @@
 package com.raydon.moji.android.ai
 
+import com.raydon.moji.core.PlanSnapshot
 import java.net.URI
+import java.time.LocalDate
+import java.time.ZoneId
+import java.time.ZonedDateTime
+import java.time.temporal.ChronoUnit
 import kotlinx.coroutines.delay
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
@@ -31,17 +36,72 @@ object AIQAFixture {
 
     val isActive: Boolean get() = mode != null
 
+    /** The photographed scenario (`moji_qa_route`), like MOJI_QA_SCENARIO; empty outside QA. */
+    @Volatile var scenario: String = ""
+        private set
+
     @Volatile private var fixtureStore: AISettingsStore? = null
 
-    /** Called from MainActivity with the `moji_qa_ai*` extras, only when BuildConfig.DEBUG. */
-    fun activate(mode: String?, delaySeconds: Double?, page: String?) {
+    /** Called from MainActivity with the `moji_qa_ai*` extras and the route, only when BuildConfig.DEBUG. */
+    fun activate(mode: String?, delaySeconds: Double?, page: String?, scenario: String? = null) {
         val clean = mode?.trim()?.takeIf { it.isNotEmpty() }
         synchronized(this) {
             this.mode = clean
             this.delaySeconds = delaySeconds?.takeIf { it.isFinite() && it >= 0 } ?: 0.5
             this.page = page?.trim()?.takeIf { it.isNotEmpty() }
+            this.scenario = scenario?.trim().orEmpty()
             fixtureStore = if (clean == null) null else makeStore(clean)
         }
+        // The brief's cache, dismissals and order start empty at each launch,
+        // and so do the evening wrap, the write log and the letters.
+        AIProactiveStore.resetFixture()
+        AIWriteLog.resetFixture()
+        AIEveningWrapState.resetFixture()
+        AIWeeklyLetterState.resetFixture()
+    }
+
+    /**
+     * 21:30 today for the evening screens, this week's Sunday 20:30 for the
+     * letter, otherwise null (the real clock).
+     */
+    val clock: ZonedDateTime?
+        get() {
+            if (!isActive) return null
+            val current = scenario
+            val today = LocalDate.now()
+            val zone = ZoneId.systemDefault()
+            if (current.startsWith("ai-wrap") || current == "ai-writes") return today.atTime(21, 30).atZone(zone)
+            if (current.startsWith("ai-letter")) return AIDrafting.weekStart(today).plusDays(6).atTime(20, 30).atZone(zone)
+            return null
+        }
+
+    /**
+     * Whole days from today to this week's Sunday: the letter screens move the
+     * sample data that far so it falls inside the week being written about.
+     */
+    val letterShiftDays: Int
+        get() {
+            if (!isActive || !scenario.startsWith("ai-letter")) return 0
+            val today = LocalDate.now()
+            return ChronoUnit.DAYS.between(today, AIDrafting.weekStart(today).plusDays(6)).toInt()
+        }
+
+    /** The sample data moved by whole days, in the device zone. */
+    fun shifted(snapshot: PlanSnapshot, days: Int, zone: ZoneId = ZoneId.systemDefault()): PlanSnapshot {
+        if (days == 0) return snapshot
+        fun move(text: String): String = AIDrafting.instant(text)?.atZone(zone)?.plusDays(days.toLong())?.toInstant()?.toString() ?: text
+        return snapshot.copy(
+            checkInItems = snapshot.checkInItems.map { item ->
+                item.copy(
+                    scheduledStart = move(item.scheduledStart),
+                    createdAt = move(item.createdAt),
+                    completedAt = item.completedAt?.let(::move),
+                    actualStartDate = item.actualStartDate?.let(::move),
+                    actualEndDate = item.actualEndDate?.let(::move),
+                )
+            },
+            records = snapshot.records.map { record -> record.copy(startDate = move(record.startDate), endDate = move(record.endDate)) },
+        )
     }
 
     /** The in-memory settings store while the fixture is on. */
@@ -73,6 +133,32 @@ object AIQAFixture {
 
     /** The answer a model would give, picked by the task named in the instructions. */
     fun answer(instructions: String, input: String): String {
+        if (instructions.contains("收尾今天")) {
+            val items = mutableListOf<String>()
+            var inPending = false
+            for (line in input.split("\n")) {
+                if (line.startsWith("没做完的")) { inPending = true; continue }
+                if (line.startsWith("最近的日子")) inPending = false
+                val number = if (inPending) numbered(line) else null
+                if (number == null) continue
+                items.add(if (line.contains("已顺延")) """{"index":$number,"action":"split","note":"已经顺延三天"}"""
+                    else """{"index":$number,"action":"tomorrow","note":""}""")
+            }
+            return """{"items":[${items.joinToString(",")}]}"""
+        }
+        if (instructions.contains("本周来信")) {
+            val numbers = input.split("\n").mapNotNull { line -> numbered(line)?.let { it to line } }
+            val a = numbers.firstOrNull { it.second.contains("待办") }?.first ?: 1
+            var b = numbers.firstOrNull { it.second.contains("汇报") || it.second.contains("发布") }?.first ?: 2
+            if (b == a) b = if (numbers.any { it.first == a + 1 }) a + 1 else 1
+            return """{"title":"卡在第一步的一周","body":"前半周很稳；周四起两件大事一直顺延，都卡在没拆开的第一步。","next_focus":"先把大事拆出能马上开始的第一步。","evidence":[{"point":"「归纳昨日待办」一直顺延","plans":[$a]},{"point":"大事还没开始","plans":[$b]}]}"""
+        }
+        if (instructions.contains("排今天计划的先后")) {
+            // The release notes plan goes first, whatever its number is today.
+            val line = input.lines().firstOrNull { it.contains("发布说明") }
+            val number = line?.let { Regex("""^\[(\d+)\]""").find(it.trim())?.groupValues?.get(1)?.toIntOrNull() } ?: 1
+            return """{"order":[$number],"reason":"离项目交付只剩两天，先把说明定稿"}"""
+        }
         if (instructions.contains("拆出结构")) {
             val parts = input.split('、', '，', ',').map { it.trim { c -> c == ' ' || c == '\t' } }.filter { it.isNotEmpty() }
             if (parts.size >= 2) {
@@ -102,11 +188,23 @@ object AIQAFixture {
         if (instructions.contains("计划库的筛选条件")) {
             return """{"keyword":null,"category":"学习","status":"planned","period":"last_week","from":null,"to":null}"""
         }
+        if (instructions.contains("粘贴的一段文字") && input.contains("季度报告")) {
+            // ai-share: the shared sentence, so the drafts match what was shared.
+            return """{"plans":[{"title":"交季度报告","date":null,"offset_days":null,"weekday":5,"week_offset":0,"part":null,"time":null,"minutes":null,"category":"工作"},{"title":"和小王对一下数据","date":null,"offset_days":null,"weekday":3,"week_offset":0,"part":"afternoon","time":null,"minutes":30,"category":"工作"},{"title":"订会议室","date":null,"offset_days":1,"weekday":null,"week_offset":null,"part":"morning","time":null,"minutes":10,"category":"工作"}]}"""
+        }
         if (instructions.contains("粘贴的一段文字")) {
             return """{"plans":[{"title":"交志望理由書终稿","date":null,"offset_days":2,"weekday":null,"week_offset":null,"part":"exact","time":"17:00","minutes":null,"category":"学习"},{"title":"预约体检","date":null,"offset_days":null,"weekday":5,"week_offset":0,"part":"morning","time":null,"minutes":20,"category":null},{"title":"给老师回邮件确认面谈时间","date":null,"offset_days":0,"weekday":null,"week_offset":null,"part":null,"time":null,"minutes":10,"category":"学习"}]}"""
         }
         return """{"ok":true}"""
     }
+}
+
+/** The number of a line that starts with `[n]`. */
+private fun numbered(line: String): Int? {
+    if (!line.startsWith("[")) return null
+    val close = line.indexOf(']')
+    if (close < 0) return null
+    return line.substring(1, close).toIntOrNull()
 }
 
 /** The stub's replies, by request path; Swift's AIQAStubProtocol. */

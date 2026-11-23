@@ -98,7 +98,7 @@ fun Modifier.inkDraftSurface(cornerRadius: Dp = 14.dp): Modifier = composed {
 
 /** The paper the rest of the app writes on, for parts of a draft page that are not drafts. */
 @Composable
-private fun Modifier.inkPaperSurface(cornerRadius: Dp = 14.dp): Modifier {
+internal fun Modifier.inkPaperSurface(cornerRadius: Dp = 14.dp): Modifier {
     val paper = MaterialTheme.colorScheme.surface.copy(alpha = 0.88f)
     val edge = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.095f)
     return this.background(paper, RoundedCornerShape(cornerRadius)).drawBehind {
@@ -113,7 +113,7 @@ fun DraftSeal(size: Int = 20) {
 }
 
 @Composable
-private fun inkMotionMoves(): Boolean {
+internal fun inkMotionMoves(): Boolean {
     val app = LocalContext.current.applicationContext as? MojiApplication
     return app?.settings?.inkMotionLevel != "off"
 }
@@ -163,9 +163,9 @@ fun DraftCapsuleButton(title: String, modifier: Modifier = Modifier, enabled: Bo
 }
 
 @Composable
-private fun DraftDismissButton(label: String, onClick: () -> Unit) {
+internal fun DraftDismissButton(label: String, onClick: () -> Unit) {
     Box(Modifier.size(30.dp, 34.dp).clickable(onClick = onClick).semantics { contentDescription = label }, contentAlignment = Alignment.Center) {
-        MojiLineIcon(MojiIcon.Xmark, 11.dp, MaterialTheme.colorScheme.secondary.copy(alpha = 0.7f))
+        MojiLineIcon(MojiIcon.Xmark, 17.dp, MaterialTheme.colorScheme.secondary.copy(alpha = 0.7f))
     }
 }
 
@@ -195,11 +195,26 @@ private fun <T> rememberDraftLoad(load: suspend () -> T, onLoaded: (T) -> Unit =
 /** The plan types a draft may use, as raw values: study, work and "custom:<name>". */
 fun aiCategories(viewModel: MojiViewModel): List<String> = listOf("study", "work") + viewModel.customCategories.map { "custom:$it" }
 
-/** Whether a model is set up; every AI entry point hides when it is not. */
+/** Whether a model is set up: the only state in which anything is sent. */
 @Composable
 fun rememberAIReady(): Boolean {
     val ready by com.raydon.moji.android.ai.AISettingsStore.shared.readyFlow.collectAsStateWithLifecycle()
     return ready
+}
+
+/**
+ * Whether entry points show: always when ready, and while not ready unless
+ * the user hid them in the intro or in 「AI 模型」.
+ */
+@Composable
+fun rememberAIShowsEntries(): Boolean {
+    val shows by com.raydon.moji.android.ai.AISettingsStore.shared.showsEntriesFlow.collectAsStateWithLifecycle()
+    return shows
+}
+
+/** Runs [action] when a model is ready; otherwise opens the intro sheet first. */
+fun aiEntry(action: () -> Unit) {
+    if (com.raydon.moji.android.ai.AISettingsStore.shared.isReady) action() else AIIntro.open()
 }
 
 // MARK: - Plan drafts
@@ -218,13 +233,15 @@ fun PlanDraftSheet(
     showsDates: Boolean = true,
     source: CheckInItem? = null,
     archivesSourceByDefault: Boolean = false,
+    origin: String? = null,
+    summary: ((count: Int, archivedSource: Boolean) -> String)? = null,
     load: suspend () -> List<PlanDraft>,
     onDismiss: () -> Unit,
 ) {
     var large by remember { mutableStateOf(false) }
     Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false)) {
         MojiScreen(sheetFraction = if (large) null else 0.532f) {
-            PlanDraftPage(viewModel, title, subject, waitingText, planNote, showsDates, source, archivesSourceByDefault, load,
+            PlanDraftPage(viewModel, title, subject, waitingText, planNote, showsDates, source, archivesSourceByDefault, origin, summary, load,
                 leading = "取消", onLeading = onDismiss, needsRoom = { large = true }, close = onDismiss)
         }
     }
@@ -241,6 +258,10 @@ fun PlanDraftPage(
     showsDates: Boolean = true,
     source: CheckInItem? = null,
     archivesSourceByDefault: Boolean = false,
+    /** Written into every accepted plan as 墨记's mark, e.g. 拆自「准备季度汇报」. */
+    origin: String? = null,
+    /** The line kept in 今天的整理: plans added, and whether the source was archived. */
+    summary: ((count: Int, archivedSource: Boolean) -> String)? = null,
     load: suspend () -> List<PlanDraft>,
     leading: String,
     onLeading: () -> Unit,
@@ -256,10 +277,12 @@ fun PlanDraftPage(
         if (!state.loading && state.failure == null && scroll.maxValue > 4) needsRoom?.invoke()
     }
     fun accept() {
-        val plans = selected.map { it.copy(title = it.title.trim()).plan(planNote) }
+        val mark = origin?.let { AIDrafting.prefix(it, 40) }
+        val plans = selected.map { it.copy(title = it.title.trim()).plan(planNote).copy(aiOrigin = mark) }
         val original = source?.let { s -> viewModel.snapshot.value.checkInItems.firstOrNull { it.id == s.id } }
         val changed = if (archivesSource && original != null) listOf(original.copy(isArchived = true)) else emptyList()
-        viewModel.commitDrafts(plans, changed, if (changed.isEmpty()) "已加入 ${plans.size} 条计划" else "已加入 ${plans.size} 条计划，原计划已归档")
+        viewModel.commitDrafts(plans, changed, if (changed.isEmpty()) "已加入 ${plans.size} 条计划" else "已加入 ${plans.size} 条计划，原计划已归档",
+            summary?.invoke(plans.size, changed.isNotEmpty()))
         close()
     }
     Column(Modifier.fillMaxSize()) {

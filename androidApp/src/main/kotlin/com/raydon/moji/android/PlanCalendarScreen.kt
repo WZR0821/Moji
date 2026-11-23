@@ -313,7 +313,8 @@ private fun CalendarEntryRow(entry: LocalCalendarEntry, open: (LocalCalendarEntr
             }
             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
                 Text(entry.title, fontSize = 17.sp, lineHeight = 20.sp, fontWeight = FontWeight.Medium, maxLines = 2, color = if (entry.status == "completed") iosSecondaryLabel else MaterialTheme.colorScheme.onSurface, textDecoration = if (entry.status == "skipped") TextDecoration.LineThrough else null)
-                Text("${calendarTiming(entry)} · ${if (entry.countdown != null) "倒数日" else categoryName(entry.category)}", fontSize = 12.sp, lineHeight = 14.sp, maxLines = 1, color = iosSecondaryLabel)
+                Text(withOriginMark("${calendarTiming(entry)} · ${if (entry.countdown != null) "倒数日" else categoryName(entry.category)}", entry.plan?.aiOrigin),
+                    fontSize = 12.sp, lineHeight = 14.sp, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis, color = iosSecondaryLabel)
             }
             Text(if (entry.countdown != null) "倒数日" else planStatusName(entry.status), fontSize = 11.sp, fontWeight = FontWeight.SemiBold, color = tint)
         }

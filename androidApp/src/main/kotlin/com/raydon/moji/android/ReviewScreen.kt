@@ -1,5 +1,13 @@
 package com.raydon.moji.android
 
+import android.Manifest
+import android.content.pm.PackageManager
+import androidx.activity.compose.BackHandler
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.core.EaseOut
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
@@ -29,20 +37,33 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
+import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.raydon.moji.android.ai.AIClock
+import com.raydon.moji.android.ai.AIQAFixture
+import com.raydon.moji.android.ai.AIWeeklyLetter
+import com.raydon.moji.android.ai.AIWeeklyLetterState
+import com.raydon.moji.android.ai.WeeklyLetter
+import com.raydon.moji.android.platform.AIWeeklyLetterNotifier
 import com.raydon.moji.core.CheckInItem
 import com.raydon.moji.ui.InkCard
 import java.time.DayOfWeek
@@ -69,19 +90,64 @@ fun ReviewScreen(
     val qaRoute by viewModel.visualQaRoute.collectAsStateWithLifecycle()
     var didQA by remember { mutableStateOf(false) }
     var qaEditor by remember { mutableStateOf("") }
-    androidx.compose.runtime.LaunchedEffect(qaRoute, snapshot.records.size) { if (!didQA && qaRoute.isNotEmpty() && snapshot.records.isNotEmpty()) {
+    // 本周来信: the switches, the letters kept on this device, the letter tapped for
+    // 放进复盘 or 拟下周计划, and the pages pushed from the card (往期来信, one letter).
+    val aiReady = rememberAIReady()
+    val showsEntries = rememberAIShowsEntries()
+    val aiSettings by com.raydon.moji.android.ai.AISettingsStore.shared.settings.collectAsStateWithLifecycle()
+    val letterState = AIWeeklyLetterState.shared
+    val letters by letterState.letters.collectAsStateWithLifecycle()
+    val letterLoadingWeek by letterState.loadingWeek.collectAsStateWithLifecycle()
+    val letterDismissedWeek by letterState.dismissedWeek.collectAsStateWithLifecycle()
+    val notifyAsked by letterState.notifyAsked.collectAsStateWithLifecycle()
+    var letterReflection by remember { mutableStateOf<WeeklyLetter?>(null) }
+    var letterNextWeek by remember { mutableStateOf<WeeklyLetter?>(null) }
+    var showsLetterArchive by remember { mutableStateOf(false) }
+    var shownLetter by remember { mutableStateOf<WeeklyLetter?>(null) }
+    var letterQA by remember { mutableStateOf("") }
+    val context = LocalContext.current
+    val lifecycle = androidx.lifecycle.compose.LocalLifecycleOwner.current.lifecycle
+    val lifecycleState by lifecycle.currentStateFlow.collectAsState()
+    val resumed = lifecycleState.isAtLeast(androidx.lifecycle.Lifecycle.State.RESUMED)
+    // 开启提醒: asked once from the card; the row stays away afterwards, granted or not.
+    val notificationPermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) {
+        letterState.markNotifyAsked()
+        AIWeeklyLetterNotifier.reschedule(context)
+    }
+    LaunchedEffect(qaRoute, snapshot.records.size) { if (!didQA && qaRoute.isNotEmpty() && snapshot.records.isNotEmpty()) {
         didQA = true
-        if (qaRoute.startsWith("settings")) showSettings = true
-        else when (qaRoute) { "review-week" -> secondaryRoute = "weekly"; "review-month" -> secondaryRoute = "monthly"; "review-records" -> secondaryRoute = "records"; "goal", "reflection", "next-week", "record-editor", "record-untimed", "ai-reflection", "ai-reflection-applied", "ai-next-week" -> qaEditor = qaRoute }
+        if (qaRoute.startsWith("settings") || qaRoute == "ai-settings-help") showSettings = true
+        else when (qaRoute) { "review-week" -> secondaryRoute = "weekly"; "review-month" -> secondaryRoute = "monthly"; "review-records" -> secondaryRoute = "records"; "goal", "reflection", "next-week", "record-editor", "record-untimed", "ai-reflection", "ai-reflection-applied", "ai-next-week" -> qaEditor = qaRoute
+            "ai-letter-archive", "ai-letter-detail" -> letterQA = qaRoute }
     } }
+    // ai-letter-archive / ai-letter-detail: three earlier letters, then their list or one of them.
+    LaunchedEffect(letterQA) {
+        if (!BuildConfig.DEBUG || letterQA.isEmpty()) return@LaunchedEffect
+        letterState.seedArchiveForQA(AIClock.now())
+        kotlinx.coroutines.delay(500)
+        if (letterQA == "ai-letter-archive") showsLetterArchive = true
+        else shownLetter = letterState.newestFirst.firstOrNull { it.title == "顺延集中在周四" }
+    }
     if (qaEditor == "goal") WeeklyGoalDialog(viewModel, workflowWeek(LocalDate.now()), snapshot.weeklyGoals.firstOrNull()) { qaEditor = "" }
     if (qaEditor == "reflection") WeeklyReflectionDialog(viewModel, workflowWeek(LocalDate.now()), snapshot.weeklyReflections.firstOrNull()) { qaEditor = "" }
     if (qaEditor == "next-week") NextWeekPlansDialog(viewModel, workflowWeek(LocalDate.now())) { qaEditor = "" }
     if (qaEditor.startsWith("ai-reflection")) WeeklyReflectionDialog(viewModel, workflowWeek(LocalDate.now()), null) { qaEditor = "" }
     if (qaEditor == "ai-next-week") PlanDraftSheet(viewModel, "下周草稿", "按这一周的记录和“下周关注”拟的", waitingText = "正在拟下周",
+        origin = com.raydon.moji.android.ai.AIWriteText.nextWeekOrigin, summary = { count, _ -> com.raydon.moji.android.ai.AIWriteText.nextWeek(count) },
         load = { com.raydon.moji.android.ai.AIAssistant.shared.draftNextWeek(viewModel.snapshot.value, workflowWeek(LocalDate.now()), aiCategories(viewModel)) }) { qaEditor = "" }
     if (qaEditor == "record-editor") RecordEditorScreenDialog(snapshot.records.firstOrNull { it.scheduleKind == "exactTime" }, viewModel) { qaEditor = "" }
     if (qaEditor == "record-untimed") RecordEditorScreenDialog(snapshot.records.firstOrNull { it.scheduleKind == "allDay" }, viewModel) { qaEditor = "" }
+    // The letter pages are pushed in place of the page, as on iOS.
+    shownLetter?.let { letter ->
+        BackHandler { shownLetter = null }
+        WeeklyLetterDetailPage(letter, if (showsLetterArchive) "往期来信" else "回顾") { shownLetter = null }
+        return
+    }
+    if (showsLetterArchive) {
+        BackHandler { showsLetterArchive = false }
+        WeeklyLetterArchivePage("回顾", { showsLetterArchive = false }) { shownLetter = it }
+        return
+    }
     val zone = ZoneId.systemDefault()
     val today = LocalDate.now()
     val weekStart = today.with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY))
@@ -98,9 +164,57 @@ fun ReviewScreen(
     val minutes = LocalRules.minutes(snapshot.records, weekStart, weekEnd)
     val streak = calculateStreak(snapshot.checkInItems.mapNotNull { if (it.status == "completed") it.completedAt?.let(Instant::parse)?.atZone(zone)?.toLocalDate() else null }.toSet())
     val pending = snapshot.checkInItems.count { it.kind == "planned" && it.isArchived != true && it.status in listOf("planned", "inProgress") && com.raydon.moji.core.ChecklistPolicy.isVisible(it.scheduledStart, it.status, Instant.now().toString(), viewModel.carriesOver, zone.id) }
+    // 本周来信 above 本周回顾: the letter for the week that has just ended, the wait for it, or
+    // the teaser; then the letters kept so far. The facts are worked out now, as on the card.
+    val letterNow = AIClock.now()
+    val letterMonday = AIWeeklyLetter.letterWeek(letterNow)
+    val letterKey = AIWeeklyLetter.weekKey(letterMonday)
+    val letterOn = aiSettings.weeklyLetter && showsEntries
+    val letterFacts = AIWeeklyLetter.facts(snapshot.checkInItems, snapshot.records, letterMonday, letterNow.zone)
+    val letterEnough = letterFacts.planned >= AIWeeklyLetter.minimumPlans
+    val currentLetter = letters.firstOrNull { it.week == letterKey }
+    val letterContent: WeeklyLetterContent? = when {
+        !letterOn || letterDismissedWeek == letterKey -> null
+        currentLetter != null -> WeeklyLetterContent.Letter(currentLetter, AIWeeklyLetter.factsLine(letterFacts))
+        aiReady && letterEnough && letterLoadingWeek == letterKey -> WeeklyLetterContent.Loading
+        !aiReady && letterEnough && AIWeeklyLetter.isTeaserTime(letterNow) -> WeeklyLetterContent.Teaser
+        else -> null
+    }
+    val showsLetterArchiveRow = letterOn && letters.isNotEmpty()
+    // Like iOS's “not determined”: notifications not allowed yet and 开启提醒 not tapped before.
+    val showsReminder = android.os.Build.VERSION.SDK_INT >= 33 && !notifyAsked &&
+        ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
+    // Asked for when the page shows or comes back; the store keeps the rest of the rules.
+    // A photographed run waits for its sample data, which lands just after the first frame.
+    val letterSnapshot by rememberUpdatedState(snapshot)
+    val waitsForQaSeed = BuildConfig.DEBUG && AIQAFixture.scenario.isNotEmpty() && qaRoute.isEmpty()
+    LaunchedEffect(resumed, letterOn, letterEnough, waitsForQaSeed) {
+        if (resumed && letterOn && !waitsForQaSeed) AIClock.now().let { now -> letterState.refreshIfNeeded(AIWeeklyLetter.letterWeek(now), letterSnapshot, now) }
+    }
     MojiScreen {
         LazyColumn(Modifier.fillMaxSize()) {
             item { MojiLargeTitle("回顾", actions = listOf(MojiIcon.Gear to { showSettings = true }), bottomPadding = 18.5.dp) }
+            if (letterContent != null || showsLetterArchiveRow) item(key = "weekly-letter") {
+                Column(
+                    Modifier.fillMaxWidth().padding(start = 18.dp, end = 18.dp, bottom = 18.dp).animateContentSize(tween(250, easing = EaseOut)),
+                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                ) {
+                    if (letterContent != null) WeeklyLetterCard(
+                        range = AIWeeklyLetter.rangeText(letterMonday),
+                        content = letterContent,
+                        showsReminder = showsReminder,
+                        putIntoReflection = { currentLetter?.let { letterReflection = it } },
+                        draftNextWeek = { currentLetter?.let { letter -> aiEntry { letterNextWeek = letter } } },
+                        enableReminder = {
+                            if (android.os.Build.VERSION.SDK_INT >= 33) notificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
+                            else { letterState.markNotifyAsked(); AIWeeklyLetterNotifier.reschedule(context) }
+                        },
+                        openIntro = { AIIntro.open() },
+                        dismiss = { letterState.dismiss(letterMonday) },
+                    )
+                    if (showsLetterArchiveRow) LetterArchiveRow(letters.size) { showsLetterArchive = true }
+                }
+            }
             item {
                 InkCard(Modifier.padding(horizontal = 18.dp)) {
                     Column(verticalArrangement = Arrangement.spacedBy(15.dp)) {
@@ -149,6 +263,33 @@ fun ReviewScreen(
     }
     if (showSettings) SettingsDialog(viewModel, onExportBackup, onImportBackup, onChooseBackupFolder, onRestoreBackupFolder, onRequestPermissions) { showSettings = false }
     secondaryRoute?.let { route -> ReviewSecondaryDialog(route, viewModel) { secondaryRoute = null } }
+    // 放进复盘: that week's 周复盘 with the letter already in the draft area; nothing is saved until 放进两栏 and 保存.
+    letterReflection?.let { letter ->
+        WeeklyReflectionDialog(viewModel, AIWeeklyLetter.monday(letter.week) ?: letterMonday,
+            snapshot.weeklyReflections.firstOrNull { it.weekStart == letter.week }, AIWeeklyLetter.reflectionDraft(letter)) { letterReflection = null }
+    }
+    // 拟下周计划: the existing 下周草稿, for the week after the letter's.
+    letterNextWeek?.let { letter ->
+        val monday = AIWeeklyLetter.monday(letter.week) ?: letterMonday
+        PlanDraftSheet(viewModel, "下周草稿", "按这一周的记录和“下周关注”拟的", waitingText = "正在拟下周",
+            origin = com.raydon.moji.android.ai.AIWriteText.nextWeekOrigin, summary = { count, _ -> com.raydon.moji.android.ai.AIWriteText.nextWeek(count) },
+            load = { com.raydon.moji.android.ai.AIAssistant.shared.draftNextWeek(viewModel.snapshot.value, monday, aiCategories(viewModel)) }) { letterNextWeek = null }
+    }
+}
+
+/** 往期来信 under the letter card (or alone once it is put away): the count kept, then the list. */
+@Composable
+private fun LetterArchiveRow(count: Int, onOpen: () -> Unit) {
+    Row(
+        Modifier.fillMaxWidth().heightIn(min = 40.dp).clickable(role = Role.Button, onClick = onOpen).padding(horizontal = 14.dp)
+            .semantics(mergeDescendants = true) {},
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Text("往期来信", fontSize = 15.sp, fontWeight = FontWeight.Medium, color = MaterialTheme.colorScheme.primary)
+        Spacer(Modifier.weight(1f))
+        Text("已存 $count 封 ›", fontSize = 13.sp, color = MaterialTheme.colorScheme.secondary)
+    }
 }
 
 @Composable
@@ -230,8 +371,10 @@ private fun SettingsDialog(
     onRequestPermissions: () -> Unit,
     onDismiss: () -> Unit,
 ) {
-    var page by remember { mutableStateOf(if (BuildConfig.DEBUG) viewModel.visualQaRoute.value.removePrefix("settings-").takeIf { viewModel.visualQaRoute.value.startsWith("settings-") }
-        ?.let { if (it == "ai") com.raydon.moji.android.ai.aiQaInitialPage() ?: "ai" else it } else null) }
+    // ai-settings-help opens 「用在哪里」 straight away, like settings-ai with the help page.
+    var page by remember { mutableStateOf(if (!BuildConfig.DEBUG) null else if (viewModel.visualQaRoute.value == "ai-settings-help") "ai:help"
+        else viewModel.visualQaRoute.value.removePrefix("settings-").takeIf { viewModel.visualQaRoute.value.startsWith("settings-") }
+            ?.let { if (it == "ai") com.raydon.moji.android.ai.aiQaInitialPage() ?: "ai" else it }) }
     // Sub-pages are named "<page>:<sub>"; going back drops the last part.
     // The AI pages carry IDs in their routes, so they ask for their own parent.
     val goBack: () -> Unit = {
@@ -253,7 +396,7 @@ private fun SettingsDialog(
                     leadingIsBack = page != null,
                 )
                 if (page == null) SettingsIndex(viewModel) { page = it }
-                else if (page == "ai" || page!!.startsWith("ai:")) com.raydon.moji.android.ai.AISettingsScreen(page!!) { page = it }
+                else if (page == "ai" || page!!.startsWith("ai:")) com.raydon.moji.android.ai.AISettingsScreen(page!!, viewModel = viewModel) { page = it }
                 else SettingsPageContent(page!!, viewModel, { page = it }, onExportBackup, onImportBackup, onChooseBackupFolder, onRestoreBackupFolder, onRequestPermissions)
             }
         }

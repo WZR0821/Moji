@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<shortcuts xmlns:android="http://schemas.android.com/apk/res/android">
+    <shortcut
+        android:shortcutId="moji.say"
+        android:enabled="true"
+        android:icon="@mipmap/ic_shortcut_say"
+        android:shortcutShortLabel="@string/say_shortcut"
+        android:shortcutLongLabel="@string/say_shortcut">
+        <intent
+            android:action="android.intent.action.VIEW"
+            android:data="moji://say"
+            android:targetPackage="com.raydon.moji.android"
+            android:targetClass="com.raydon.moji.android.MainActivity" />
+    </shortcut>
+</shortcuts>

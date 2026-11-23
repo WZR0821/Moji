@@ -40,7 +40,9 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         handleNavigationIntent(intent)
         if (BuildConfig.DEBUG) com.raydon.moji.android.ai.AIQAFixture.activate(
-            intent.getStringExtra("moji_qa_ai"), intent.getStringExtra("moji_qa_ai_delay")?.toDoubleOrNull(), intent.getStringExtra("moji_qa_ai_page"))
+            intent.getStringExtra("moji_qa_ai"), intent.getStringExtra("moji_qa_ai_delay")?.toDoubleOrNull(), intent.getStringExtra("moji_qa_ai_page"),
+            intent.getStringExtra("moji_qa_route"))
+        if (BuildConfig.DEBUG) clearShareInboxForQa(intent.getStringExtra("moji_qa_route"))
         if (BuildConfig.DEBUG && intent.getBooleanExtra("moji_qa_seed", false)) viewModel.seedVisualQa(intent.getStringExtra("moji_qa_route").orEmpty())
         enableEdgeToEdge(
             statusBarStyle = SystemBarStyle.auto(0xFFF7F4ED.toInt(), 0xFF11100E.toInt()),
@@ -93,7 +95,47 @@ class MainActivity : ComponentActivity() {
         handleNavigationIntent(intent)
     }
 
+    override fun onStart() {
+        super.onStart()
+        weeklyLetterCheck()
+    }
+
+    override fun onStop() {
+        weeklyLetterCheck()
+        super.onStop()
+    }
+
+    /**
+     * 本周来信 on coming back and on going to the background: Sunday afternoon the
+     * letter is written ahead so the 20:00 notification can carry its title, and
+     * the notification follows the switches and the permission.
+     */
+    private fun weeklyLetterCheck() {
+        com.raydon.moji.android.ai.AIWeeklyLetterState.shared.prepareIfNeeded(viewModel.snapshot.value, com.raydon.moji.android.ai.AIClock.now())
+        com.raydon.moji.android.platform.AIWeeklyLetterNotifier.reschedule(this)
+    }
+
+    /**
+     * The share inbox outlives a launch, so what ai-share-off left behind would be picked
+     * up by the next scenario's plan page. Every debug scenario other than the two share
+     * ones starts with it empty (the fixture's scratch folder and files/share_inbox).
+     */
+    private fun clearShareInboxForQa(route: String?) {
+        if (route.isNullOrBlank() || route == "ai-share" || route == "ai-share-off") return
+        com.raydon.moji.android.ai.ShareInbox.of(this).clear()
+        com.raydon.moji.android.ai.ShareInbox(java.io.File(filesDir, com.raydon.moji.android.ai.ShareInbox.folderName)).clear()
+    }
+
     private fun handleNavigationIntent(intent: android.content.Intent) {
-        when (intent.data?.host) { "pomodoro" -> viewModel.openFocus(); "plans" -> viewModel.openPlans() }
+        when (intent.data?.host) {
+            "pomodoro" -> viewModel.openFocus()
+            "plans" -> viewModel.openPlans()
+            // 说一句添加: the quick-settings tile, the launcher shortcut and the link itself.
+            "say" -> viewModel.startSaying()
+            // 分享: ShareReceiverActivity has put something into the inbox.
+            "share" -> viewModel.checkShareInbox()
+            // The 本周来信 notification.
+            "review" -> viewModel.openReview()
+        }
     }
 }
