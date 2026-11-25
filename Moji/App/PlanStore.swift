@@ -310,6 +310,8 @@ final class PlanStore: ObservableObject {
     /// The last accepted draft, kept until its notice goes away.
     @Published private(set) var draftUndo: PlanDraftUndo?
     @Published private(set) var draftNotice: String?
+    /// New for every notice, so the same words twice still restart its timer.
+    @Published private(set) var draftNoticeID = UUID()
     /// The 今天的整理 entry of that draft, so taking it back marks the entry too.
     private var draftWriteID: UUID?
     private var planNotificationSyncTask: Task<Void, Never>?
@@ -397,7 +399,12 @@ final class PlanStore: ObservableObject {
             result = PlanWorkflow.batch(in: &state, ids: ids, day: day, category: category,
                 archived: archived, nextWeekOf: nextWeekOf, blockedID: isPomodoroFocusActive ? blocked : nil)
         }
-        workflowUndo = result?.before.isEmpty == false ? result : nil
+        if let undo = result, !undo.before.isEmpty {
+            workflowUndo = PlanWorkflowUndo(before: undo.before.map(SharedPersistence.roundTrip),
+                                            after: persistedPlans(undo.after))
+        } else {
+            workflowUndo = nil
+        }
         workflowNotice = result?.before.isEmpty == false ? "已整理 \(result?.before.count ?? 0) 个计划，可撤销" : "没有可整理的计划，专注中的计划不会移动"
     }
 
@@ -414,11 +421,13 @@ final class PlanStore: ObservableObject {
     /// `changing` replaces plans that already exist; `adding` appends new ones.
     /// Every write is also kept in 今天的整理 under `summary` (the notice when none is given).
     @discardableResult
-    func commitDrafts(adding added: [CheckInItem] = [], changing changed: [CheckInItem] = [], notice: String,
+    func commitDrafts(adding added: [CheckInItem] = [], changing changed: [CheckInItem] = [],
+                      addingMemos memos: [MemoItem] = [], notice: String,
                       summary: String? = nil) -> UUID? {
         var before: [CheckInItem] = []
         var after: [CheckInItem] = []
         var inserted: [CheckInItem] = []
+        var insertedMemos: [MemoItem] = []
         mutateWorkflow { state in
             for item in changed {
                 guard let index = state.checkInItems.firstIndex(where: { $0.id == item.id }),
@@ -430,13 +439,44 @@ final class PlanStore: ObservableObject {
             for item in added where !state.checkInItems.contains(where: { $0.id == item.id }) {
                 state.checkInItems.append(item); inserted.append(item)
             }
+            for memo in memos where !state.memos.contains(where: { $0.id == memo.id }) {
+                state.memos.append(memo); insertedMemos.append(memo)
+            }
         }
-        guard !inserted.isEmpty || !before.isEmpty else { return nil }
-        draftUndo = PlanDraftUndo(added: inserted, changed: PlanWorkflowUndo(before: before, after: after))
-        draftNotice = notice
-        let id = AIWriteLog.shared.record(summary: summary ?? notice, added: inserted, before: before, after: after)
+        guard !inserted.isEmpty || !before.isEmpty || !insertedMemos.isEmpty else { return nil }
+        // What an undo compares with is what was saved: normalized, and read
+        // back the way storage reads it (whole seconds), not the values in memory.
+        inserted = persistedPlans(inserted)
+        after = persistedPlans(after)
+        before = before.map(SharedPersistence.roundTrip)
+        insertedMemos = insertedMemos.map { memo in
+            SharedPersistence.roundTrip(snapshot.memos.first { $0.id == memo.id } ?? memo)
+        }
+        draftUndo = PlanDraftUndo(added: inserted, changed: PlanWorkflowUndo(before: before, after: after),
+                                  addedMemos: insertedMemos)
+        showDraftNotice(notice)
+        let id = AIWriteLog.shared.record(summary: summary ?? notice, added: inserted, before: before, after: after,
+                                          addedMemos: insertedMemos)
         draftWriteID = id
         return id
+    }
+
+    /// The plans as the last save stored them.
+    private func persistedPlans(_ plans: [CheckInItem]) -> [CheckInItem] {
+        plans.map { plan in SharedPersistence.roundTrip(snapshot.checkInItems.first { $0.id == plan.id } ?? plan) }
+    }
+
+    private func showDraftNotice(_ notice: String?) {
+        draftNotice = notice
+        draftNoticeID = UUID()
+    }
+
+    /// Being timed right now, by the plan's own session or by the pomodoro:
+    /// a draft does not archive or rewrite such a plan.
+    func isBeingFocused(_ id: UUID) -> Bool {
+        if snapshot.activeSession?.checkInItemID == id { return true }
+        return isPomodoroFocusActive
+            && SharedPersistence.sharedDefaults.string(forKey: PomodoroStorageKeys.linkedPlanID) == id.uuidString
     }
 
     func undoDrafts() {
@@ -447,7 +487,7 @@ final class PlanStore: ObservableObject {
         draftUndo = nil
         if let id = draftWriteID { AIWriteLog.shared.markUndone(id) }
         draftWriteID = nil
-        draftNotice = AIWriteText.undoResult(undone: count, total: undo.added.count + undo.changed.before.count)
+        showDraftNotice(AIWriteText.undoResult(undone: count, total: undo.total))
     }
 
     /// Takes back one write from 今天的整理, by the same rule as the undo bar:

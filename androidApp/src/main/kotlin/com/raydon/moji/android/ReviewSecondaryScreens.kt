@@ -1,6 +1,7 @@
 package com.raydon.moji.android
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.gestures.scrollBy
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
@@ -101,7 +102,16 @@ private fun WeeklySummaryContent(plans: List<com.raydon.moji.core.CheckInItem>, 
     var week by remember { mutableStateOf(current) }
     val weekPlans = plans.filter { it.kind == "planned" && Instant.parse(it.scheduledStart).atZone(ZoneId.systemDefault()).toLocalDate() in week..week.plusDays(6) }
     val minutes = com.raydon.moji.android.data.LocalRules.minutes(records, week, week.plusDays(7))
-    LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(horizontal = 18.dp, vertical = 16.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+    val listState = androidx.compose.foundation.lazy.rememberLazyListState()
+    // ai-nextweek-offer: down to the 周复盘 card, where the 下周 offer sits.
+    androidx.compose.runtime.LaunchedEffect(Unit) {
+        if (BuildConfig.DEBUG && viewModel.visualQaRoute.value == "ai-nextweek-offer") {
+            kotlinx.coroutines.delay(700)
+            listState.animateScrollToItem(1)
+            listState.scrollBy(100_000f)
+        }
+    }
+    LazyColumn(Modifier.fillMaxSize(), state = listState, contentPadding = PaddingValues(horizontal = 18.dp, vertical = 16.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
         item {
             com.raydon.moji.ui.InkCard {
                 Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {

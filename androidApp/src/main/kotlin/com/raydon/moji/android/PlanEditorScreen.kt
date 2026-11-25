@@ -46,6 +46,8 @@ fun PlanEditorScreenDialog(
     initialDate: LocalDate,
     viewModel: MojiViewModel,
     initialKind: String = "planned",
+    /** Only the plan page offers 存为模板 under a new plan (N3); the calendar and the other ways in do not. */
+    offersTemplateHint: Boolean = false,
     onDismiss: () -> Unit,
 ) {
     val zone = ZoneId.systemDefault()
@@ -60,7 +62,13 @@ fun PlanEditorScreenDialog(
     var time by remember(existing?.id) { mutableStateOf(oldDate?.toLocalTime()?.withSecond(0)?.withNano(0) ?: now.toLocalTime()) }
     var schedule by remember(existing?.id) { mutableStateOf(existing?.scheduleKind ?: viewModel.defaultScheduleKind) }
     var plannedDurationEnabled by remember(existing?.id) { mutableStateOf(existing?.let { it.plannedDurationEnabled ?: (it.detailsConfigured != false && (it.scheduleKind ?: "exactTime") == "exactTime") } ?: viewModel.defaultPlannedDurationEnabled) }
-    var plannedMinutes by remember(existing?.id) { mutableStateOf(existing?.plannedMinutes ?: viewModel.defaultPlannedMinutes) }
+    // A new plan starts from the usual length of its type when there is enough history (N1),
+    // and follows the type until the length is changed by hand.
+    val historyDefault = remember(existing?.id) { if (existing == null && kind == "planned") viewModel.historyMinutes(category) else null }
+    var plannedMinutes by remember(existing?.id) { mutableStateOf(existing?.plannedMinutes ?: historyDefault ?: viewModel.defaultPlannedMinutes) }
+    var historyMinutes by remember(existing?.id) { mutableStateOf(historyDefault) }
+    var durationTouched by remember(existing?.id) { mutableStateOf(false) }
+    fun setPlannedMinutes(value: Int) { plannedMinutes = value; durationTouched = true; historyMinutes = null }
     var actualStart by remember(existing?.id) {
         mutableStateOf(existing?.actualStartDate?.let { Instant.parse(it).atZone(zone).toLocalTime() } ?: now.minusMinutes(plannedMinutes.toLong()).toLocalTime())
     }
@@ -127,6 +135,8 @@ fun PlanEditorScreenDialog(
                             actualEnd = if (kind == "completed") if (schedule == "exactTime") endDate.atTime(actualEnd) else date.atTime(LocalTime.of(when (schedule) { "morning" -> 9; "afternoon" -> 14; "evening" -> 19; else -> 0 }, 0)) else null,
                             plannedDurationEnabled = plannedDurationEnabled,
                             onSaved = onDismiss,
+                            // A plan written by hand whose title keeps coming back is offered as a template (N3).
+                            onSavedPlan = if (offersTemplateHint && existing == null && kind == "planned") { plan -> viewModel.offerTemplate(plan) } else null,
                         )
                     },
                 )
@@ -149,7 +159,13 @@ fun PlanEditorScreenDialog(
                         }
                     }
                     item {
-                        FormSection("类型", topPadding = 12) { CategoryFields(category, viewModel) { category = it } }
+                        FormSection("类型", topPadding = 12) { CategoryFields(category, viewModel) {
+                            category = it
+                            if (existing == null && kind == "planned" && !durationTouched) {
+                                historyMinutes = viewModel.historyMinutes(it)
+                                plannedMinutes = historyMinutes ?: viewModel.defaultPlannedMinutes
+                            }
+                        } }
                     }
                     if (kind == "planned") {
                         item {
@@ -205,8 +221,10 @@ fun PlanEditorScreenDialog(
                                     DenseEditorCaption("投入估算（可选）", true)
                                     FormToggle("添加预计投入", plannedDurationEnabled, { plannedDurationEnabled = it }, minHeight = 31)
                                     if (plannedDurationEnabled) {
-                                        FormStepper("预计投入", editorDuration(plannedMinutes.toLong()), { plannedMinutes = (plannedMinutes - 1).coerceAtLeast(1) }, { plannedMinutes = (plannedMinutes + 1).coerceAtMost(1440) }, valueStyle = MaterialTheme.typography.bodyLarge.copy(color = MaterialTheme.colorScheme.onSurface, fontWeight = FontWeight.SemiBold), minHeight = 32)
-                                        DurationPills(verticalPadding = 0) { plannedMinutes = it }
+                                        FormStepper("预计投入", editorDuration(plannedMinutes.toLong()), { setPlannedMinutes((plannedMinutes - 1).coerceAtLeast(1)) }, { setPlannedMinutes((plannedMinutes + 1).coerceAtMost(1440)) }, valueStyle = MaterialTheme.typography.bodyLarge.copy(color = MaterialTheme.colorScheme.onSurface, fontWeight = FontWeight.SemiBold), minHeight = 32)
+                                        // Where the default came from, until the length is changed by hand.
+                                        historyMinutes?.takeIf { existing == null && plannedMinutes == it }?.let { DenseEditorCaption(com.raydon.moji.android.ai.PlanDurationHistory.footnote(category, it)) }
+                                        DurationPills(verticalPadding = 0) { setPlannedMinutes(it) }
                                     }
                                     DenseEditorCaption("预计投入用于番茄钟和周总结，与全天或具体时间相互独立。")
                                     }

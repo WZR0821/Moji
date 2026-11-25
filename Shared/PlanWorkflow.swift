@@ -148,7 +148,17 @@ enum PlanWorkflow {
         if let existing = state.checkInItems.first(where: {
             $0.sourceMemoID == memoID && $0.sourceMemoChecklistItemID == itemID
         }) { return existing.id }
-        guard let memo = state.memos.first(where: { $0.id == memoID }) else { return nil }
+        guard let plan = memoPlan(in: state, memoID: memoID, itemID: itemID, day: day, category: category) else { return nil }
+        state.checkInItems.append(plan)
+        return plan.id
+    }
+
+    /// The plan a memo, or one of its checklist items, turns into; nil when it
+    /// was converted already or has no words. Nothing is written.
+    static func memoPlan(in state: PlanSnapshot, memoID: UUID, itemID: UUID? = nil,
+                         day: Date, category: RecordCategory = .study) -> CheckInItem? {
+        guard !state.checkInItems.contains(where: { $0.sourceMemoID == memoID && $0.sourceMemoChecklistItemID == itemID }),
+              let memo = state.memos.first(where: { $0.id == memoID }) else { return nil }
         let body = memo.mode == .checklist
             ? memo.checklistItems.map { "\($0.isCompleted ? "☑" : "☐") \($0.text)" }.joined(separator: "\n")
             : memo.content
@@ -163,12 +173,10 @@ enum PlanWorkflow {
                 : memo.title.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return nil }
         }
-        let plan = CheckInItem(title: title, category: category,
+        return CheckInItem(title: title, category: category,
             scheduledStart: Calendar.current.startOfDay(for: day), plannedMinutes: 25,
             note: body, scheduleKind: .allDay, plannedDurationEnabled: false,
             sourceMemoID: memoID, sourceMemoChecklistItemID: itemID)
-        state.checkInItems.append(plan)
-        return plan.id
     }
 
     static func copied(_ source: CheckInItem, to day: Date, calendar: Calendar = .current) -> CheckInItem {

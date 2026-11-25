@@ -49,12 +49,15 @@ fun MemoScreen(viewModel: MojiViewModel) {
     var converting by remember { mutableStateOf<MemoItem?>(null) }
     val qaRoute by viewModel.visualQaRoute.collectAsStateWithLifecycle()
     var didQA by remember { mutableStateOf(false) }
-    LaunchedEffect(qaRoute, snapshot.memos.size) { if (!didQA && qaRoute.isNotEmpty() && snapshot.memos.isNotEmpty()) {
+    LaunchedEffect(qaRoute, snapshot.memos.size) { if (!didQA && qaRoute.isNotEmpty() && snapshot.memos.isNotEmpty() &&
+        // ai-memo-original waits for its own memo, seeded with the rest.
+        (qaRoute != "ai-memo-original" || snapshot.memos.any { it.id == viewModel.qaOriginalMemoId })) {
         didQA = true
         when (qaRoute) {
             "memo-note" -> { editing = snapshot.memos.firstOrNull { it.mode == "note" }; showEditor = true }
             "memo-checklist" -> { editing = snapshot.memos.firstOrNull { it.mode == "checklist" }; showEditor = true }
-            "memo-convert", "ai-memo-convert" -> converting = snapshot.memos.firstOrNull { it.mode == "checklist" }
+            "memo-convert", "ai-memo-convert", "ai-memo-convert-edit" -> converting = snapshot.memos.firstOrNull { it.mode == "checklist" }
+            "ai-memo-original" -> { editing = snapshot.memos.firstOrNull { it.id == viewModel.qaOriginalMemoId }; showEditor = true }
             "ai-memo-checklist", "ai-memo-checklist-applied" -> { editing = snapshot.memos.firstOrNull { it.mode == "note" && it.content.isNotEmpty() }; showEditor = true }
         }
     } }
@@ -169,12 +172,15 @@ fun MemoEditorDialog(existing: MemoItem?, viewModel: MojiViewModel, onDismiss: (
     var showsChecklistDraft by remember { mutableStateOf(false) }
     // The text a drafted checklist replaced, kept until the memo is saved or the mode is switched by hand.
     var textBeforeChecklistDraft by remember(existing?.id) { mutableStateOf<String?>(null) }
+    var confirmBackToText by remember { mutableStateOf(false) }
+    var showsWholeOriginal by remember { mutableStateOf(false) }
+    fun editState() = com.raydon.moji.android.ai.MemoEditState(checklist, content, entries)
+    fun take(state: com.raydon.moji.android.ai.MemoEditState) { checklist = state.checklist; content = state.content; entries = state.items }
+    // 用这份清单: the items become the draft's and the text stays with the memo as 原文 (A1).
     fun useChecklistDraft(items: List<String>) {
         if (items.isEmpty()) return
         textBeforeChecklistDraft = content
-        entries = items.map { MemoChecklistItem(UUID.randomUUID().toString(), it) }
-        content = ""
-        checklist = true
+        take(editState().usingChecklistDraft(items))
     }
     fun restoreTextBeforeChecklistDraft() {
         val text = textBeforeChecklistDraft ?: return
@@ -263,6 +269,12 @@ fun MemoEditorDialog(existing: MemoItem?, viewModel: MojiViewModel, onDismiss: (
                                     } else false
                                 })
                             }
+                            // 原文: the text this checklist was drafted from, read-only, until 转回正文 or 删去原文.
+                            val original = editState().original
+                            if (original != null) item(key = "memo-original") {
+                                MemoOriginalSection(original, showsWholeOriginal, { showsWholeOriginal = !showsWholeOriginal },
+                                    backToText = { confirmBackToText = true }, drop = { take(editState().droppingOriginal()) })
+                            }
                         } else BasicTextField(content, { content = it }, Modifier.fillMaxSize().padding(start = 14.dp, end = 14.dp, top = 5.7.dp, bottom = 8.dp),
                             cursorBrush = SolidColor(MaterialTheme.colorScheme.onSurface), textStyle = MaterialTheme.typography.bodyLarge.copy(color = labelInk, lineHeight = 27.sp),
                             decorationBox = { inner -> if (content.isEmpty()) Text("开始记录……", fontSize = 17.sp, color = iosTertiaryLabel); inner() })
@@ -278,7 +290,8 @@ fun MemoEditorDialog(existing: MemoItem?, viewModel: MojiViewModel, onDismiss: (
                 Row(Modifier.fillMaxWidth().height(49.dp).padding(horizontal = 18.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = toolbarArrangement) {
                     Row(Modifier.heightIn(min = 44.dp).semantics { contentDescription = if (checklist) "转为正文" else "转为清单" }.clickable {
                         textBeforeChecklistDraft = null
-                        if (checklist) content = entries.filter { it.text.isNotBlank() }.joinToString("\n") { "${if (it.isCompleted) "✓" else "•"} ${it.text.trim()}" }
+                        // From a checklist the lines come first, then any 原文 after an empty line.
+                        if (checklist) { focusedId = null; take(editState().checklistAsText()); return@clickable }
                         else {
                             entries = content.lines().map { it.trim() }.filter { it.isNotBlank() }.map { line ->
                                 val completedPrefix = listOf("- [x] ", "- [X] ", "☑︎ ", "☑ ", "✓ ", "✔ ").firstOrNull { line.startsWith(it) }
@@ -315,9 +328,41 @@ fun MemoEditorDialog(existing: MemoItem?, viewModel: MojiViewModel, onDismiss: (
                 load = { com.raydon.moji.android.ai.AIAssistant.shared.checklist(memoTitle, text) },
                 accept = { useChecklistDraft(it) }, onDismiss = { showsChecklistDraft = false })
         }
+        if (confirmBackToText) AlertDialog(onDismissRequest = { confirmBackToText = false }, title = { Text("转回正文？") },
+            text = { Text("清单会去掉，原文放回正文。") },
+            confirmButton = { TextButton(onClick = {
+                confirmBackToText = false; focusedId = null; textBeforeChecklistDraft = null
+                take(editState().turnedBackToText())
+            }) { Text("转回正文") } },
+            dismissButton = { TextButton(onClick = { confirmBackToText = false }) { Text("取消") } })
         if (deleteConfirm) AlertDialog(onDismissRequest = { deleteConfirm = false }, title = { Text("删除备忘？") },
             confirmButton = { TextButton(onClick = { existing?.let { viewModel.deleteMemo(it.id) }; onDismiss() }) { Text("删除") } },
             dismissButton = { TextButton(onClick = { deleteConfirm = false }) { Text("取消") } })
+    }
+}
+
+/**
+ * 原文 under a drafted checklist, as on iOS: an ink rule, the text in four lines, then one row with
+ * 展开 on the left and 转回正文 and 删去原文 on the right.
+ */
+@Composable
+private fun MemoOriginalSection(text: String, expanded: Boolean, toggle: () -> Unit, backToText: () -> Unit, drop: () -> Unit) {
+    var overflows by remember(text) { mutableStateOf(false) }
+    // 6dp inside the list's own 8dp: 14 from the card's edge, as on iOS, so the text breaks at the same places.
+    Column(Modifier.fillMaxWidth().padding(start = 6.dp, end = 6.dp, top = 14.dp, bottom = 18.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        InkDivider(opacity = 0.30f, seed = 23)
+        Text("原文", fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = iosSecondaryLabel)
+        Text(text, fontSize = 15.sp, lineHeight = 21.sp, color = iosSecondaryLabel, maxLines = if (expanded) Int.MAX_VALUE else 4,
+            overflow = TextOverflow.Ellipsis, onTextLayout = { if (!expanded) overflows = it.hasVisualOverflow })
+        Row(Modifier.fillMaxWidth().heightIn(min = 32.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(18.dp)) {
+            if (overflows || expanded) Text(if (expanded) "收起" else "展开", fontSize = 13.sp, fontWeight = FontWeight.SemiBold,
+                color = MaterialTheme.colorScheme.primary, modifier = Modifier.heightIn(min = 32.dp).wrapContentHeight().clickable(onClick = toggle))
+            Spacer(Modifier.weight(1f))
+            Text("转回正文", fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.heightIn(min = 32.dp).wrapContentHeight().clickable(onClick = backToText))
+            Text("删去原文", fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = iosSecondaryLabel,
+                modifier = Modifier.heightIn(min = 32.dp).wrapContentHeight().clickable(onClick = drop))
+        }
     }
 }
 

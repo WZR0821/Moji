@@ -177,7 +177,7 @@ object AIQAFixture {
             return """{"rows":[{"index":0,"date":null,"offset_days":1,"weekday":null,"week_offset":null,"category":"学习"},{"index":1,"date":null,"offset_days":null,"weekday":5,"week_offset":0,"category":"工作"}]}"""
         }
         if (instructions.contains("起草周复盘")) {
-            return """{"note":"这周把复习按天排开后，前半周完成得比较稳；周四起两件大的计划一直顺延，卡在开头那一步没有拆开。","next_focus":"大的计划先拆出十分钟能开始的第一步。","evidence":[{"point":"前半周的计划都按时完成","plans":[1,2]},{"point":"顺延的计划都偏大","plans":[3]}]}"""
+            return """{"note":"这周把复习按天排开后，前半周完成得比较稳；周四起两件大的计划一直顺延，卡在开头那一步没有拆开。","next_focus":"大的计划先拆出马上能开始的第一步。","evidence":[{"point":"前半周的计划都按时完成","plans":[1,2]},{"point":"顺延的计划都偏大","plans":[3]}]}"""
         }
         if (instructions.contains("拟下周的计划草稿")) {
             return """{"plans":[{"title":"把顺延的计划拆出第一步","weekday":1,"part":"morning","minutes":25,"category":"学习","reason":"顺延最久"},{"title":"补完第三节论据","weekday":2,"part":"afternoon","minutes":60,"category":"学习","reason":"本周没做完"},{"title":"通读全文并核对字数","weekday":4,"part":"evening","minutes":30,"category":"学习","reason":"收尾"},{"title":"写下周复盘","weekday":7,"part":"evening","minutes":15,"category":null,"reason":"下周关注里提到"}]}"""

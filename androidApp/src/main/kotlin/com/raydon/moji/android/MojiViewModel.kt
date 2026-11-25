@@ -4,6 +4,7 @@ import android.app.Application
 import android.net.Uri
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.raydon.moji.android.ai.split
 import com.raydon.moji.android.data.PomodoroState
 import com.raydon.moji.android.platform.AlarmScheduler
 import com.raydon.moji.android.platform.AndroidCalendarIntegration
@@ -141,6 +142,8 @@ class MojiViewModel(application: Application) : AndroidViewModel(application) {
         /** Applied to the plan before it is written, in the same save (the quick-entry chips). */
         transform: ((CheckInItem) -> CheckInItem)? = null,
         onSaved: (() -> Unit)? = null,
+        /** The plan as written, after [onSaved]. */
+        onSavedPlan: ((CheckInItem) -> Unit)? = null,
     ) {
         if (title.isBlank()) return
         if (kind == "completed" && (actualStart == null || actualEnd == null || (scheduleKind == "exactTime" && !actualEnd.isAfter(actualStart)) || actualEnd.isBefore(actualStart))) {
@@ -201,6 +204,7 @@ class MojiViewModel(application: Application) : AndroidViewModel(application) {
             } else app.repository.savePlan(item)
             afterMutation()
             onSaved?.invoke()
+            onSavedPlan?.invoke(item)
         }
     }
 
@@ -297,6 +301,9 @@ class MojiViewModel(application: Application) : AndroidViewModel(application) {
 
     val draftUndo = MutableStateFlow<com.raydon.moji.android.ai.PlanDraftUndo?>(null)
     val draftNotice = MutableStateFlow<String?>(null)
+    /** A new number for every notice, so the same words twice still get their full time on screen. */
+    val draftNoticeSerial = MutableStateFlow(0L)
+    private fun showDraftNotice(text: String?) { draftNotice.value = text; draftNoticeSerial.value += 1 }
 
     /**
      * Writes accepted drafts in one step and remembers how to take them back.
@@ -306,12 +313,22 @@ class MojiViewModel(application: Application) : AndroidViewModel(application) {
     private var draftWriteId: String? = null
 
     fun commitDrafts(added: List<CheckInItem> = emptyList(), changed: List<CheckInItem> = emptyList(), notice: String,
-                     summary: String? = null, onSaved: (() -> Unit)? = null) = launchMutation {
+                     summary: String? = null, addedMemos: List<MemoItem> = emptyList(),
+                     /** The notice and summary from how many plans were really changed (a plan being timed is not). */
+                     describe: ((changedCount: Int) -> Pair<String, String?>)? = null,
+                     onSaved: (() -> Unit)? = null) = launchMutation {
+        commitDraftsNow(added, changed, notice, summary, addedMemos, describe, onSaved)
+    }
+
+    private suspend fun commitDraftsNow(added: List<CheckInItem>, changed: List<CheckInItem>, notice: String, summary: String?,
+                                        addedMemos: List<MemoItem> = emptyList(),
+                                        describe: ((Int) -> Pair<String, String?>)? = null, onSaved: (() -> Unit)? = null) {
         val changedIds = mutableListOf<String>()
         val before = mutableListOf<CheckInItem>()
         val insertedIds = mutableListOf<String>()
+        val insertedMemoIds = mutableListOf<String>()
         app.repository.mutate { state ->
-            changedIds.clear(); before.clear(); insertedIds.clear()
+            changedIds.clear(); before.clear(); insertedIds.clear(); insertedMemoIds.clear()
             val items = state.checkInItems.toMutableList()
             for (item in changed) {
                 val index = items.indexOfFirst { it.id == item.id }
@@ -319,17 +336,23 @@ class MojiViewModel(application: Application) : AndroidViewModel(application) {
                 before += items[index]; changedIds += item.id; items[index] = item
             }
             for (item in added) if (items.none { it.id == item.id }) { items += item; insertedIds += item.id }
-            state.copy(checkInItems = items)
+            val memos = state.memos.toMutableList()
+            for (memo in addedMemos) if (memos.none { it.id == memo.id }) { memos += memo; insertedMemoIds += memo.id }
+            state.copy(checkInItems = items, memos = memos)
         }
-        if (insertedIds.isEmpty() && changedIds.isEmpty()) return@launchMutation
+        if (insertedIds.isEmpty() && changedIds.isEmpty() && insertedMemoIds.isEmpty()) return
         // Remember the plans as they were stored, so a later edit is told apart from the draft itself.
-        val stored = app.repository.freshSnapshot().checkInItems.associateBy { it.id }
+        val fresh = app.repository.freshSnapshot()
+        val stored = fresh.checkInItems.associateBy { it.id }
+        val storedMemos = fresh.memos.associateBy { it.id }
         val addedPlans = insertedIds.mapNotNull { stored[it] }
         val afterPlans = changedIds.mapNotNull { stored[it] }
-        draftUndo.value = com.raydon.moji.android.ai.PlanDraftUndo(added = addedPlans, changed = PlanWorkflowUndo(before.toList(), afterPlans))
-        draftNotice.value = notice
+        val memos = insertedMemoIds.mapNotNull { storedMemos[it] }
+        val (text, line) = describe?.invoke(changedIds.size) ?: (notice to summary)
+        draftUndo.value = com.raydon.moji.android.ai.PlanDraftUndo(added = addedPlans, changed = PlanWorkflowUndo(before.toList(), afterPlans), addedMemos = memos)
+        showDraftNotice(text)
         // 今天的整理 keeps every write, so it can be taken back later in the day too.
-        draftWriteId = com.raydon.moji.android.ai.AIWriteLog.shared.record(summary ?: notice, addedPlans, before.toList(), afterPlans)
+        draftWriteId = com.raydon.moji.android.ai.AIWriteLog.shared.record(line ?: text, addedPlans, before.toList(), afterPlans, addedMemos = memos)
         onSaved?.invoke()
     }
 
@@ -340,7 +363,7 @@ class MojiViewModel(application: Application) : AndroidViewModel(application) {
         draftUndo.value = null
         draftWriteId?.let { com.raydon.moji.android.ai.AIWriteLog.shared.markUndone(it) }
         draftWriteId = null
-        draftNotice.value = com.raydon.moji.android.ai.AIWriteText.undoResult(count, undo.added.size + undo.changed.before.size)
+        showDraftNotice(com.raydon.moji.android.ai.AIWriteText.undoResult(count, undo.total))
     }
 
     /**
@@ -362,6 +385,196 @@ class MojiViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun clearDraftNotice() { draftNotice.value = null; draftUndo.value = null; draftWriteId = null }
+
+    // MARK: - 1.10.0: what the plan and moments pages show for a while, kept here so a tab switch
+    // or a rotation does not lose it (spec A10). Nothing of it is saved; a killed process forgets it.
+
+    /** What was read out of plans typed a moment ago, by plan id, with what each plan said then. */
+    val entrySuggestions = MutableStateFlow<Map<String, com.raydon.moji.android.ai.EntrySuggestionRecord>>(emptyMap())
+    /** Plans whose sentence the model is reading. */
+    val readingEntryIds = MutableStateFlow<Set<String>>(emptySet())
+    /** Plans that were given a strip read on the device; once it is gone the model's reading is not shown either. */
+    private val localEntryIds = mutableSetOf<String>()
+    /** 存为模板 offered under plans just written by hand: how many times each one's title was written, by plan id. */
+    val templateHints = MutableStateFlow<Map<String, Int>>(emptyMap())
+    /** 时刻: a day just added, offered a preparation plan. */
+    val preparationOffer = MutableStateFlow<CountdownEvent?>(null)
+    /** Photographed QA screens start from nothing every launch, as iOS's QA suite does. */
+    private val qaTemplateHintDismissed = mutableSetOf<String>()
+    private val templateHintDismissed: Set<String>
+        get() = if (com.raydon.moji.android.ai.AIQAFixture.scenario.isNotEmpty()) qaTemplateHintDismissed
+            else app.settings.templateHintDismissed.toSet()
+
+    init {
+        // A suggestion for a plan deleted or changed since (date, time, length, type, repeat, title, status) is dropped.
+        viewModelScope.launch {
+            snapshot.collect { state ->
+                val records = entrySuggestions.value
+                val stale = records.filter { (id, record) -> state.checkInItems.firstOrNull { it.id == id }?.let { !record.isCurrent(it) } ?: true }.keys
+                // A changed plan's reading would be dropped when it comes back: no wait shown for it either.
+                if (stale.isNotEmpty()) {
+                    entrySuggestions.value = records - stale
+                    readingEntryIds.value = readingEntryIds.value - stale
+                    localEntryIds -= stale
+                }
+                // A hint goes with its plan once that is deleted or archived.
+                val hints = templateHints.value
+                val gone = hints.keys.filter { id -> state.checkInItems.firstOrNull { it.id == id }?.isArchived != false }
+                if (gone.isNotEmpty()) templateHints.value = hints - gone.toSet()
+            }
+        }
+    }
+
+    /** The strip goes; if it was read on the device, so does the wait for the model's reading, and its answer. */
+    fun dropEntrySuggestion(id: String) {
+        entrySuggestions.value = entrySuggestions.value - id
+        if (id in localEntryIds) readingEntryIds.value = readingEntryIds.value - id
+    }
+
+    /** The usual length of a [category] plan from its history (N1), or null. */
+    fun historyMinutes(category: String): Int? = com.raydon.moji.android.ai.PlanDurationHistory.minutes(category, snapshot.value)
+
+    /**
+     * 首页输入框 › 回车: the plan is saved with the chips tapped ([chosen]). When none was
+     * tapped but the device read something, [local] goes under the new row at once; the
+     * model reads the sentence too when it is set up. [onSaved] runs after the save.
+     */
+    fun addQuickPlan(id: String, text: String, today: LocalDate, chosen: com.raydon.moji.android.ai.EntrySuggestion?,
+                     local: com.raydon.moji.android.ai.EntrySuggestion?, categories: List<String>, onSaved: () -> Unit) {
+        val movedTo = chosen?.day?.takeIf { it != today }
+        savePlan(existingId = id, title = text, note = "", date = today, time = LocalTime.MIDNIGHT,
+            scheduleKind = "allDay", category = defaultCategory, plannedMinutes = 25,
+            repeatRule = "never", weekdays = emptyList(), reminderMinutes = null, calendarSync = false, plannedDurationEnabled = false,
+            transform = { plan ->
+                var item = chosen?.applied(plan) ?: plan
+                // No length given: the usual one for its type, when there is one (N1).
+                if (com.raydon.moji.android.ai.AIDrafting.plannedDurationMinutes(item) == null) historyMinutes(item.category)?.let { item = item.copy(plannedMinutes = it) }
+                item
+            },
+            onSaved = onSaved,
+            onSavedPlan = { plan ->
+                movedTo?.let { message.value = "已加到${com.raydon.moji.android.ai.AIDrafting.dayText(it, LocalDate.now())}，可在日历查看" }
+                // A plan moved off today has no row here to hang a suggestion under.
+                if (movedTo == null) {
+                    local?.removingMatches(plan)?.takeIf { !it.isEmpty }?.let { suggestion ->
+                        localEntryIds += plan.id
+                        entrySuggestions.value = entrySuggestions.value + (plan.id to com.raydon.moji.android.ai.EntrySuggestionRecord(
+                            suggestion, com.raydon.moji.android.ai.EntryStamp.of(plan), isLocal = true))
+                    }
+                    readQuickEntry(plan, text, categories)
+                    // The hint hangs under the new row too, so not for a plan moved off today (N3).
+                    offerTemplate(plan)
+                }
+            })
+    }
+
+    /**
+     * If the sentence carries a time, a length or several things and a model is set up,
+     * ask what it says and offer what would still change the plan. The answer replaces
+     * the device's strip while that is still there; a failure leaves it.
+     */
+    private fun readQuickEntry(plan: CheckInItem, text: String, categories: List<String>) {
+        val store = com.raydon.moji.android.ai.AISettingsStore.shared
+        if (!store.isReady || !store.settings.value.readsQuickEntry || !com.raydon.moji.android.ai.AIDrafting.isWorthReading(text)) return
+        val id = plan.id
+        val asAdded = com.raydon.moji.android.ai.EntryStamp.of(plan)
+        readingEntryIds.value = readingEntryIds.value + id
+        viewModelScope.launch {
+            // A failed reading is not worth a message: the plan is there either way.
+            val reading = try { com.raydon.moji.android.ai.AIAssistant.shared.readEntry(text, categories) }
+                catch (cancelled: CancellationException) { throw cancelled } catch (error: Throwable) { null }
+            readingEntryIds.value = readingEntryIds.value - id
+            if (id in localEntryIds && id !in entrySuggestions.value) return@launch
+            val current = snapshot.value.checkInItems.firstOrNull { it.id == id } ?: return@launch
+            val stamp = com.raydon.moji.android.ai.EntryStamp.of(current)
+            if (stamp != asAdded) { dropEntrySuggestion(id); return@launch }
+            val suggestion = reading?.removingMatches(current) ?: return@launch
+            if (suggestion.isEmpty) return@launch
+            entrySuggestions.value = entrySuggestions.value + (id to com.raydon.moji.android.ai.EntrySuggestionRecord(suggestion, stamp, isLocal = false))
+        }
+    }
+
+    fun applyEntrySuggestion(id: String) {
+        val record = entrySuggestions.value[id] ?: return
+        dropEntrySuggestion(id)
+        val plan = snapshot.value.checkInItems.firstOrNull { it.id == id } ?: return
+        val suggestion = record.suggestion
+        val updated = suggestion.applied(plan) ?: return
+        val notice = suggestion.day?.let { "已移到${com.raydon.moji.android.ai.AIDrafting.dayText(it, LocalDate.now())}，可在日历查看" } ?: "已按建议调整"
+        val fields = com.raydon.moji.android.ai.AIWriteText.changedFields(plan, updated)
+        commitDrafts(changed = listOf(updated), notice = notice,
+            summary = if (fields.isEmpty()) null else com.raydon.moji.android.ai.AIWriteText.entryChange(plan.title, fields))
+    }
+
+    /** 拆成 N 条: one write, undoable; the fields read go on every part (A2). */
+    fun splitEntry(id: String) {
+        val record = entrySuggestions.value[id] ?: return
+        dropEntrySuggestion(id)
+        val plan = snapshot.value.checkInItems.firstOrNull { it.id == id && it.kind == "planned" } ?: return
+        val parts = record.suggestion.parts
+        val (renamed, rest) = record.suggestion.split(plan) ?: return
+        commitDrafts(added = rest, changed = listOf(renamed), notice = "已拆成 ${parts.size} 条",
+            summary = com.raydon.moji.android.ai.AIWriteText.entrySplit(parts.size, plan.title))
+    }
+
+    /** 存为模板 under a plan written by hand whose title keeps coming back (N3). */
+    fun offerTemplate(plan: CheckInItem) = viewModelScope.launch(mutationErrors) {
+        val state = app.repository.freshSnapshot()
+        val count = com.raydon.moji.android.ai.TemplateHint.count(plan, state, templateHintDismissed, handWritten = true) ?: return@launch
+        templateHints.value = templateHints.value + (plan.id to count)
+    }
+
+    fun saveHintTemplate(id: String) {
+        templateHints.value = templateHints.value - id
+        saveTemplate(id)
+    }
+
+    fun dismissTemplateHint(id: String) {
+        templateHints.value = templateHints.value - id
+        val title = snapshot.value.checkInItems.firstOrNull { it.id == id }?.title ?: return
+        if (com.raydon.moji.android.ai.AIQAFixture.scenario.isNotEmpty()) qaTemplateHintDismissed += com.raydon.moji.android.ai.TemplateHint.normalized(title)
+        else app.settings.dismissTemplateHint(title)
+    }
+
+    /** Offered once, a moment after a day is added, and only when there is time to prepare. */
+    fun offerPreparation(event: CountdownEvent, daysLeft: Long) {
+        if (!com.raydon.moji.android.ai.AISettingsStore.shared.isReady || daysLeft < 2) return
+        viewModelScope.launch { delay(450); preparationOffer.value = event }
+    }
+
+    /** Being timed right now, by its own session or by the pomodoro: a draft does not archive or rewrite it. */
+    fun isBeingFocused(id: String): Boolean = snapshot.value.activeSession?.checkInItemID == id || focusBlockedPlanId == id
+
+    /** 顺延印 › 放下: archived in one write, undoable and kept in 今天的整理, as 晚间收尾 does (A7). */
+    fun dropPlan(id: String) {
+        // Only a plan still waiting; one being timed stays as it is, and says why.
+        val plan = snapshot.value.checkInItems.firstOrNull { it.id == id && it.kind == "planned" && it.status == "planned" } ?: return
+        if (isBeingFocused(id)) { message.value = "这条计划正在专注，先结束再放下。"; return }
+        commitDrafts(changed = listOf(plan.copy(isArchived = true)), notice = "已放下，可撤销",
+            summary = com.raydon.moji.android.ai.AIWriteText.dropped(plan.title))
+    }
+
+    /** The pomodoro with [plan], the way a row's 去专注 opens it. */
+    fun focusOn(plan: CheckInItem) {
+        if (!pomodoro.value.hasActiveFocus()) { selectPomodoroPhase("focus"); linkPomodoro(plan) }
+        openFocus()
+    }
+
+    /**
+     * 备忘转计划 with a row's own (or edited) date and type: one write, undoable, marked
+     * 按备忘预填 (B5). The same row is never turned into a plan twice.
+     */
+    fun convertMemoWithHint(memoId: String, itemId: String?, day: LocalDate, category: String) = saveOperation("convert:$memoId:$itemId") {
+        val state = app.repository.freshSnapshot()
+        val converted = PlanWorkflow.convertMemo(state, memoId, itemId, UUID.randomUUID().toString(),
+            day.atStartOfDay(ZoneId.systemDefault()).toInstant().toString(), Instant.now().toString(), category)
+        val plan = converted.checkInItems.lastOrNull()?.takeIf {
+            converted.checkInItems.size > state.checkInItems.size && it.sourceMemoID == memoId && it.sourceMemoChecklistItemID == itemId
+        } ?: return@saveOperation
+        commitDraftsNow(listOf(plan.copy(aiOrigin = com.raydon.moji.android.ai.AIWriteText.memoHintOrigin)), emptyList(),
+            "已转成计划，可撤销", com.raydon.moji.android.ai.AIWriteText.memoHinted(plan.title))
+        afterMutation()
+    }
 
     fun saveWeeklyGoal(goal: WeeklyGoal, onSaved: (() -> Unit)? = null) = saveOperation(goal.id) {
         if ((goal.targetCount == null && goal.targetMinutes == null) || goal.targetCount?.let { it < 1 } == true || goal.targetMinutes?.let { it < 1 } == true) return@saveOperation
@@ -398,7 +611,8 @@ class MojiViewModel(application: Application) : AndroidViewModel(application) {
                 MemoItem(
                     id = existingId ?: UUID.randomUUID().toString(),
                     title = title,
-                    content = if (checklist) "" else content,
+                    // A checklist drafted from the text keeps that text as 原文 (1.10.0); one built from lines here has none.
+                    content = if (!checklist) content else if (checklistItems == null) "" else com.raydon.moji.android.ai.MemoTextRules.checklistContent(content),
                     mode = if (checklist) "checklist" else "note",
                     checklistItems = items,
                     isPinned = isPinned ?: old?.isPinned ?: false,
@@ -742,13 +956,15 @@ class MojiViewModel(application: Application) : AndroidViewModel(application) {
     fun clearMessage() { message.value = null }
 
     val visualQaRoute = MutableStateFlow("")
+    /** ai-memo-original's memo, the same id as on iOS. */
+    val qaOriginalMemoId = "00000309-0000-4000-8000-000000000000"
     fun seedVisualQa(route: String = "") {
         if (!BuildConfig.DEBUG) return
         viewModelScope.launch(mutationErrors) {
             val json = app.assets.open("workflow-1.6.json").bufferedReader(Charsets.UTF_8).use { it.readText() }
             var seeded = MojiJson.decodeBackupOrSnapshot(json).first
             val zone = ZoneId.systemDefault()
-            if (route in listOf("ai-brief", "ai-brief-off", "ai-carry-note", "ai-wrap", "ai-wrap-edit", "ai-wrap-off", "ai-writes")) {
+            if (route in listOf("ai-brief", "ai-brief-off", "ai-carry-note", "ai-wrap", "ai-wrap-edit", "ai-wrap-off", "ai-writes", "ai-review-next-carry")) {
                 // 今日提要, 顺延旁批 and 晚间收尾 need a plan carried over for three days.
                 seeded = seeded.copy(checkInItems = seeded.checkInItems.map { item ->
                     if (item.title != "归纳昨日待办") item else runCatching {
@@ -775,6 +991,35 @@ class MojiViewModel(application: Application) : AndroidViewModel(application) {
                 }
                 seeded = seeded.copy(checkInItems = seeded.checkInItems + steps)
             }
+            // 1.10.0 screens (spec D).
+            if (route == "ai-plan-template-hint") {
+                // 「背单词」 written by hand two and four days ago (as on iOS); the third, typed on the page, brings the hint.
+                seeded = seeded.copy(checkInItems = seeded.checkInItems + listOf(2L, 4L).map { days ->
+                    val start = LocalDate.now(zone).minusDays(days).atTime(7, 30).atZone(zone).toInstant()
+                    CheckInItem(id = UUID.randomUUID().toString(), title = "背单词", category = "study",
+                        scheduledStart = start.toString(), plannedMinutes = 30, createdAt = start.minusSeconds(3_600).toString(),
+                        status = "completed", completedAt = start.plusSeconds(1_800).toString(), scheduleKind = "exactTime",
+                        detailsConfigured = true, plannedDurationEnabled = true)
+                })
+            }
+            if (route == "ai-memo-original") {
+                // A checklist made by 整理成清单 that kept the text it came from (the same memo as iOS's QA screen).
+                val now = Instant.now()
+                val memo = com.raydon.moji.android.ai.MemoEditState(false,
+                    "下周六考试，前一天把准考证打印出来，查好去考场的路线和要多久，笔带两支黑色签字笔。\n" +
+                        "还想再过一遍损害保险的三个判例，尤其是保险利益那一个。\n考完那天晚上和室友去吃火锅。", emptyList())
+                    .usingChecklistDraft(listOf("打印准考证", "确认考场路线和到达时间", "准备黑色签字笔两支", "复习损害保险的三个判例"))
+                    .memo(qaOriginalMemoId, "考前准备", false, now.minusSeconds(3_600).toString(), now.minusSeconds(600).toString())
+                seeded = seeded.copy(memos = seeded.memos.filterNot { it.id == memo.id } + memo)
+            }
+            if (route == "ai-nextweek-offer") {
+                // This week's 周复盘 saved, so the 下周 offer sits under its card.
+                val week = LocalDate.now(zone).with(java.time.temporal.TemporalAdjusters.previousOrSame(java.time.DayOfWeek.MONDAY)).toString()
+                if (seeded.weeklyReflections.none { it.weekStart == week && it.nextFocus.isNotEmpty() }) seeded = seeded.copy(
+                    weeklyReflections = seeded.weeklyReflections.filterNot { it.weekStart == week } +
+                        WeeklyReflection(UUID.randomUUID().toString(), week, "前半周按计划完成，周四起两件大事一直顺延。",
+                            "先把大事拆出能马上开始的第一步。", Instant.now().toString()))
+            }
             // 本周来信: the sample week moved so it ends on this week's Sunday, where the clock stands.
             if (route.startsWith("ai-letter")) seeded = com.raydon.moji.android.ai.AIQAFixture.shifted(seeded, com.raydon.moji.android.ai.AIQAFixture.letterShiftDays, zone)
             // 分享: one shared sentence waiting in the inbox (a scratch folder while the fixture is on).
@@ -792,7 +1037,7 @@ class MojiViewModel(application: Application) : AndroidViewModel(application) {
                 route.startsWith("ai-memo") -> 1
                 route.startsWith("ai-preparation") -> 2
                 route == "ai" || route.startsWith("ai:") || route.startsWith("ai-reflection") || route == "ai-next-week" || route.startsWith("ai-letter") ||
-                    route == "ai-settings-help" -> 3
+                    route == "ai-settings-help" || route == "ai-nextweek-offer" || route == "ai-review-next-carry" -> 3
                 route.startsWith("ai-") -> 0
                 route.startsWith("memo") -> 1
                 route.startsWith("moment") || route.startsWith("focus") -> 2

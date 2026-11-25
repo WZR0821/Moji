@@ -3,6 +3,8 @@ import SwiftUI
 struct CheckInEditorView: View {
     @ObservedObject var store: PlanStore
     let item: CheckInItem?
+    /// Called once a plan that did not exist before has been saved.
+    var onCreated: ((CheckInItem) -> Void)? = nil
 
     @Environment(\.dismiss) private var dismiss
     @State private var isTitleFocused = false
@@ -27,15 +29,22 @@ struct CheckInEditorView: View {
     @State private var calendarError: String?
     @State private var initialEditState: [String]?
     @State private var confirmsDiscard = false
+    /// A new plan's length taken from finished plans of its type, until the user sets one.
+    @State private var typicalMinutes: Int?
+    @State private var lastAutoMinutes: Int?
+    @State private var durationSetByUser = false
+    private let settingsPlannedMinutes: Int
 
     init(
         store: PlanStore,
         item: CheckInItem? = nil,
         defaultKind: CheckInKind = .planned,
-        defaultDate: Date = Date()
+        defaultDate: Date = Date(),
+        onCreated: ((CheckInItem) -> Void)? = nil
     ) {
         self.store = store
         self.item = item
+        self.onCreated = onCreated
 
         let calendar = Calendar.current
         let now = Date().roundedDownToMinute()
@@ -57,6 +66,7 @@ struct CheckInEditorView: View {
             fallback: 25,
             defaults: defaults
         )
+        settingsPlannedMinutes = max(1, defaultPlannedMinutes)
         let defaultDurationEnabled = PlanSettingsKeys.bool(
             PlanSettingsKeys.defaultPlannedDurationEnabled,
             fallback: false,
@@ -199,13 +209,23 @@ struct CheckInEditorView: View {
                 }
             }
             .onAppear {
-                if initialEditState == nil { initialEditState = editState }
+                if initialEditState == nil {
+                    applyTypicalMinutes()
+                    initialEditState = editState
+                }
                 if item == nil { isTitleFocused = true }
 #if DEBUG
                 runEditorQAScenarioIfNeeded()
 #endif
             }
             .confirmDiscardEdits(isDirty: hasEdits || isSaving, isPresented: $confirmsDiscard)
+            .onChange(of: category) { _, _ in applyTypicalMinutes() }
+            .onChange(of: plannedMinutes) { _, minutes in
+                // Any length the user sets stays; the note under it goes.
+                guard minutes != lastAutoMinutes else { return }
+                durationSetByUser = true
+                typicalMinutes = nil
+            }
             .onChange(of: kind) { previousKind, newKind in
                 guard previousKind != newKind, newKind == .completedLog else { return }
                 if scheduleKind == .exactTime {
@@ -369,6 +389,14 @@ struct CheckInEditorView: View {
                         Text(DurationText.full(minutes: plannedMinutes))
                             .fontWeight(.semibold)
                     }
+                }
+
+                if let typicalMinutes, typicalMinutes == plannedMinutes {
+                    Text(MojiLocalRules.typicalDurationNote(category: category, minutes: typicalMinutes))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .accessibilityIdentifier("plan.editor.typicalMinutes")
                 }
 
                 durationButtons {
@@ -615,7 +643,19 @@ struct CheckInEditorView: View {
         }
 
         store.saveCheckIn(updatedItem)
+        if item == nil, updatedItem.kind == .planned { onCreated?(updatedItem) }
         dismiss()
+    }
+
+    /// A new plan starts at the usual length of its type (see
+    /// MojiLocalRules.typicalMinutes) and follows the type until the user sets one.
+    private func applyTypicalMinutes() {
+        guard item == nil, kind == .planned, !durationSetByUser else { return }
+        let typical = MojiLocalRules.typicalMinutes(for: category, snapshot: store.snapshot)
+        let minutes = typical ?? settingsPlannedMinutes
+        typicalMinutes = typical
+        lastAutoMinutes = minutes
+        plannedMinutes = minutes
     }
 
     private var weekdayOptions: [(label: String, value: Int)] {

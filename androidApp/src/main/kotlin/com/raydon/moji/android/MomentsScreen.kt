@@ -58,7 +58,6 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.raydon.moji.core.CountdownEvent
 import com.raydon.moji.core.CountdownPolicy
-import kotlinx.coroutines.launch
 import com.raydon.moji.ui.InkCard
 import com.raydon.moji.ui.MojiPalette
 import java.time.Instant
@@ -89,23 +88,20 @@ fun MomentsScreen(viewModel: MojiViewModel) {
         return java.time.temporal.ChronoUnit.DAYS.between(LocalDate.now(), next)
     }
     val aiReady = rememberAIReady()
-    val offerScope = androidx.compose.runtime.rememberCoroutineScope()
-    // A day that was just added and is far enough off to prepare for.
-    var preparationOffer by remember { mutableStateOf<CountdownEvent?>(null) }
+    // A day that was just added and is far enough off to prepare for; kept in the view model so a
+    // tab switch or a rotation does not lose it (A10).
+    val preparationOffer by viewModel.preparationOffer.collectAsStateWithLifecycle()
     var preparing by remember { mutableStateOf<CountdownEvent?>(null) }
     // Offered once, right after the day is added, and only when there is time to prepare.
     // Nothing is drafted until the strip is tapped.
-    fun offerPreparation(event: CountdownEvent) {
-        if (!com.raydon.moji.android.ai.AISettingsStore.shared.isReady || daysUntil(event) < 2) return
-        offerScope.launch { kotlinx.coroutines.delay(450); preparationOffer = event }
-    }
+    fun offerPreparation(event: CountdownEvent) = viewModel.offerPreparation(event, daysUntil(event))
     androidx.compose.runtime.LaunchedEffect(qaRoute, snapshot.countdowns.size) { if (!didQA && qaRoute.isNotEmpty() && snapshot.countdowns.isNotEmpty()) {
         didQA = true
         when (qaRoute) { "moment-editor", "moment-advanced" -> { editing = snapshot.countdowns.first(); showEditor = true }; "moment-past" -> scope = "past" }
         if (BuildConfig.DEBUG && qaRoute.startsWith("ai-preparation")) {
             snapshot.countdowns.filter { daysUntil(it) >= 2 }.minByOrNull { daysUntil(it) }?.let { upcoming ->
                 kotlinx.coroutines.delay(350)
-                if (qaRoute == "ai-preparation-drafts") preparing = upcoming else preparationOffer = upcoming
+                if (qaRoute == "ai-preparation-drafts") preparing = upcoming else viewModel.preparationOffer.value = upcoming
             }
         }
     } }
@@ -133,7 +129,7 @@ fun MomentsScreen(viewModel: MojiViewModel) {
             item { MomentsModeRow(scope) { scope = it } }
             val offer = preparationOffer
             if (scope == "upcoming" && offer != null && aiReady) item(key = "preparation-offer") {
-                PreparationOfferStrip(offer.title, daysUntil(offer), accept = { preparing = offer; preparationOffer = null }, dismiss = { preparationOffer = null },
+                PreparationOfferStrip(offer.title, daysUntil(offer), accept = { preparing = offer; viewModel.preparationOffer.value = null }, dismiss = { viewModel.preparationOffer.value = null },
                     modifier = Modifier.padding(start = 18.dp, end = 18.dp, bottom = 8.dp).animateItem())
             }
             if (sort == "date" && events.isNotEmpty()) item { Text("已按时间排序 · 离今天最近的在前", fontSize = 12.sp, modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp), textAlign = TextAlign.Center) }

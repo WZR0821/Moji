@@ -57,7 +57,7 @@ struct ContentView: View {
                 .tabItem { Label("时刻", systemImage: "timer") }
                 .tag(RootTab.countdowns)
 
-            PersonalView(store: store)
+            PersonalView(store: store, pomodoro: pomodoro)
                 .tabItem { Label("回顾", systemImage: "chart.bar.xaxis") }
                 .tag(RootTab.profile)
         }

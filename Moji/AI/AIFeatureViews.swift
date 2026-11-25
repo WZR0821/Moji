@@ -26,10 +26,12 @@ struct EntrySuggestionStrip: View {
                         .lineLimit(1)
                 }
                 if !chips.isEmpty {
+                    // Two lines, so the last chip (often the repeat) is not cut off.
                     Text(chips.joined(separator: " · "))
                         .font(.caption)
                         .foregroundStyle(Color.planSecondary)
-                        .lineLimit(1)
+                        .lineLimit(2)
+                        .fixedSize(horizontal: false, vertical: true)
                 } else if suggestion.parts.count >= 2 {
                     Text("这句话里像是 \(suggestion.parts.count) 件事")
                         .font(.caption)
@@ -240,6 +242,10 @@ struct PlanImportView: View {
                 guard let item else { return }
                 Task { await read(item) }
             }
+            // A picture that could not be read stops mattering once the words change.
+            .onChange(of: text) { _, _ in
+                if failure != nil, !isReadingPhoto { failure = nil }
+            }
             .task { await takeShare() }
             .onAppear {
 #if DEBUG
@@ -321,6 +327,7 @@ struct ChecklistDraftSheet: View {
     @State private var failure: String?
     @State private var isLoading = true
     @State private var attempt = 0
+    @State private var didAccept = false
 
     private var selected: [String] {
         rows.filter(\.isSelected).map { $0.text.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty }
@@ -396,11 +403,13 @@ struct ChecklistDraftSheet: View {
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("用这份清单") {
+                        guard !didAccept else { return }
+                        didAccept = true
                         accept(selected)
                         dismiss()
                     }
                     .fontWeight(.semibold)
-                    .disabled(isLoading || selected.isEmpty)
+                    .disabled(isLoading || selected.isEmpty || didAccept)
                     .accessibilityIdentifier("checklist.draft.accept")
                 }
             }
@@ -483,23 +492,67 @@ struct PreparationOfferStrip: View {
 // MARK: - 周复盘草稿
 
 /// The points a drafted reflection rests on, each naming the plans behind it.
+/// A point opens to its plans, one line each, when it is tapped.
 struct ReflectionEvidenceList: View {
     let evidence: [ReflectionDraft.Evidence]
+    /// 背单词 · 11月18日 周三 · 已完成, for the plans behind a point.
+    var planLines: (ReflectionDraft.Evidence) -> [String] = { _ in [] }
+    /// Opens the first point at once (photographed QA screens).
+    var expandsFirst = false
+
+    @State private var expanded: Set<UUID> = []
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             ForEach(evidence) { item in
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(item.point)
-                        .font(.footnote.weight(.medium))
-                        .foregroundStyle(Color.planPrimary)
-                    Text("依据：" + item.planTitles.joined(separator: "、"))
-                        .font(.caption)
-                        .foregroundStyle(Color.planSecondary)
-                        .fixedSize(horizontal: false, vertical: true)
+                let lines = planLines(item)
+                let isOpen = expanded.contains(item.id)
+                Button {
+                    guard !lines.isEmpty else { return }
+                    withAnimation(.easeOut(duration: 0.18)) {
+                        if isOpen { expanded.remove(item.id) } else { expanded.insert(item.id) }
+                    }
+                } label: {
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(item.point)
+                            .font(.footnote.weight(.medium))
+                            .foregroundStyle(Color.planPrimary)
+                        HStack(alignment: .firstTextBaseline, spacing: 4) {
+                            Text("依据：" + item.planTitles.joined(separator: "、"))
+                                .font(.caption)
+                                .foregroundStyle(Color.planSecondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                            if !lines.isEmpty {
+                                Image(systemName: "chevron.down")
+                                    .font(.system(size: 9, weight: .semibold))
+                                    .foregroundStyle(Color.planSecondary.opacity(0.7))
+                                    .rotationEffect(.degrees(isOpen ? 180 : 0))
+                            }
+                        }
+                        if isOpen {
+                            VStack(alignment: .leading, spacing: 2) {
+                                ForEach(Array(lines.enumerated()), id: \.offset) { _, line in
+                                    Text(line)
+                                        .font(.caption)
+                                        .foregroundStyle(Color.planSecondary)
+                                        .fixedSize(horizontal: false, vertical: true)
+                                }
+                            }
+                            .padding(.leading, 10)
+                            .padding(.top, 2)
+                            .transition(.opacity)
+                        }
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .contentShape(Rectangle())
                 }
+                .buttonStyle(.borderless)
+                .accessibilityIdentifier("reflection.evidence")
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+        .onAppear {
+            if expandsFirst, let first = evidence.first, expanded.isEmpty { expanded.insert(first.id) }
+        }
     }
 }

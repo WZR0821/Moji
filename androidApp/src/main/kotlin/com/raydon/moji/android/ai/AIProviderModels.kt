@@ -498,8 +498,12 @@ sealed class AIRequestError(override val message: String) : Exception(message) {
     object incompleteResponse : AIRequestError("模型的回答被提前截断了。请重试或换一个模型。")
     /** The model answered, but not in the shape the task asked for. */
     object unreadableAnswer : AIRequestError("模型没有按要求的格式回答，这次没有生成草稿。请重试或换一个模型。")
+    /** A drafted 周复盘 whose every sentence named numbers the week's record does not have. */
+    object reflectionMismatch : AIRequestError("这次起草的内容和本周记录对不上，再试一次。")
+    /** 下周草稿 for a week without plans: nothing is sent (spec A3). */
+    object emptyWeek : AIRequestError("这一周还没有计划记录，没有可以拟的内容。")
     data class http(val status: Int) : AIRequestError(httpMessage(status))
-    object network : AIRequestError("无法连接 AI 服务，请检查网络和 API 地址。")
+    object network : AIRequestError("无法连接模型服务，请检查网络和 API 地址。")
     object timeout : AIRequestError("等待超时。请稍后重试，或选择响应更快的模型。")
     object credentialUnavailable : AIRequestError("无法访问安全存储。请解锁手机后重试，或重新保存 API Key。")
     object persistence : AIRequestError("无法保存设置，请检查设备的可用空间。")
@@ -515,7 +519,7 @@ sealed class AIRequestError(override val message: String) : Exception(message) {
             403 -> "此账户无权使用该服务或模型。（HTTP 403）"
             404 -> "接口或模型不存在，请检查 API 地址和模型名称。（HTTP 404）"
             429 -> "请求过于频繁或额度不足，请稍后重试。（HTTP 429）"
-            in 500..599 -> "AI 服务暂时不可用，请稍后重试。（HTTP $status）"
+            in 500..599 -> "模型服务暂时不可用，请稍后重试。（HTTP $status）"
             else -> "请求被接口拒绝，请检查模型、接口格式及账户权限。（HTTP $status）"
         }
     }

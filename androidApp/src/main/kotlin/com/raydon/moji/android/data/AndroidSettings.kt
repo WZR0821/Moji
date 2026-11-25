@@ -69,6 +69,18 @@ class AndroidSettings(context: Context) {
     var defaultPlannedDurationEnabled: Boolean
         get() = prefs.getBoolean("defaultPlannedDurationEnabled", false)
         set(value) { prefs.edit().putBoolean("defaultPlannedDurationEnabled", value).apply() }
+    /**
+     * Titles (normalized) whose 存为模板 hint was put away with ×, oldest first and at most 300;
+     * this device only, never in a backup. Same key and limit as iOS TemplateHintStore.
+     */
+    val templateHintDismissed: List<String>
+        get() = prefs.getString(templateHintDismissedKey, null).orEmpty().split("\n").filter { it.isNotEmpty() }
+
+    fun dismissTemplateHint(title: String) {
+        val list = templateHintDismissed
+        val next = com.raydon.moji.android.ai.TemplateHint.dismissing(list, title)
+        if (next != list) prefs.edit().putString(templateHintDismissedKey, next.joinToString("\n")).apply()
+    }
     var defaultPlannedMinutes: Int
         get() = prefs.getInt("defaultPlannedMinutes", 25)
         set(value) { prefs.edit().putInt("defaultPlannedMinutes", value.coerceIn(5, 480)).apply() }
@@ -262,4 +274,8 @@ class AndroidSettings(context: Context) {
         pendingNextPhase = prefs.getString("pomodoro.pendingNextPhase", null),
         completedPhase = prefs.getString("pomodoro.completedPhase", null),
     )
+
+    private companion object {
+        const val templateHintDismissedKey = "moji.templateHint.dismissed.v1"
+    }
 }

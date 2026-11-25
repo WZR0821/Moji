@@ -219,10 +219,10 @@ private fun EveningWrapRowView(row: EveningWrapRow, isEditing: Boolean, choose: 
     }
 }
 
-/** The small chevron.down after an arrangement that can be changed. */
+/** The small chevron.down after an arrangement that can be changed (and after a 周复盘 point that opens). */
 @Composable
-private fun WrapMenuChevron(color: Color) {
-    Canvas(Modifier.size(8.dp, 5.dp)) {
+internal fun WrapMenuChevron(color: Color, modifier: Modifier = Modifier) {
+    Canvas(modifier.size(8.dp, 5.dp)) {
         val path = Path().apply {
             moveTo(size.width * 0.08f, size.height * 0.14f)
             lineTo(size.width * 0.5f, size.height * 0.86f)
@@ -243,7 +243,9 @@ fun AIWritesContent(viewModel: MojiViewModel, modifier: Modifier = Modifier, scr
     val zone = ZoneId.systemDefault()
     val entries = AIWriteLog.entriesOn(all, AIClock.now().toLocalDate(), zone)
     var notice by remember { mutableStateOf<String?>(null) }
-    LaunchedEffect(notice) {
+    // Each notice gets its own number, so the same words twice in a row still stay their full time.
+    var noticeSerial by remember { mutableStateOf(0) }
+    LaunchedEffect(noticeSerial) {
         if (notice != null) {
             delay(3_000)
             notice = null
@@ -262,7 +264,7 @@ fun AIWritesContent(viewModel: MojiViewModel, modifier: Modifier = Modifier, scr
                 Column(Modifier.fillMaxWidth().inkPaperSurface(14.dp).padding(horizontal = 14.dp)) {
                     entries.forEachIndexed { index, entry ->
                         if (index > 0) InkDivider(Modifier.padding(start = 60.dp), 0.22f, (40 + index).toLong())
-                        AIWriteRow(entry, zone) { viewModel.undoWrite(entry.id) { text -> notice = text } }
+                        AIWriteRow(entry, zone) { viewModel.undoWrite(entry.id) { text -> notice = text; noticeSerial += 1 } }
                     }
                 }
             }
@@ -411,7 +413,8 @@ fun WeeklyLetterCard(
                 AIWeeklyLetter.evidenceLine(content.letter.evidence)?.let { Text(it, fontSize = 12.sp, lineHeight = 16.sp, color = secondary) }
                 Row(Modifier.padding(top = 2.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     BriefCapsule("放进复盘", putIntoReflection)
-                    BriefCapsule("拟下周计划", draftNextWeek)
+                    // Gone once the week after the letter's has passed (A3); the demo shows it as a picture.
+                    if (draftNextWeek != null || !showsClose) BriefCapsule("拟下周计划", draftNextWeek)
                 }
                 if (showsReminder) Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text("每周日 20:00 提醒来信", Modifier.weight(1f), fontSize = 12.sp, color = secondary)

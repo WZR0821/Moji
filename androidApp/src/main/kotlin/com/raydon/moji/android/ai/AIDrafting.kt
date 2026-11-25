@@ -2,9 +2,11 @@ package com.raydon.moji.android.ai
 
 import com.raydon.moji.android.data.PlanQuickChange
 import com.raydon.moji.core.CheckInItem
+import com.raydon.moji.core.MemoItem
 import com.raydon.moji.core.PlanSnapshot
 import com.raydon.moji.core.PlanWorkflow
 import com.raydon.moji.core.PlanWorkflowUndo
+import com.raydon.moji.core.WeeklyReflection
 import java.text.BreakIterator
 import java.time.DayOfWeek
 import java.time.Instant
@@ -153,6 +155,8 @@ data class ReflectionDraft(
     val note: String,
     val nextFocus: String,
     val evidence: List<Evidence> = emptyList(),
+    /** The week's counts sent with the request, kept with the draft for the line under it (A8). */
+    val stats: WeekStats? = null,
 ) {
     /** Two pieces of evidence are equal when they say the same; the id is only for lists. */
     class Evidence(
@@ -160,6 +164,8 @@ data class ReflectionDraft(
         /** Titles of the plans the point rests on, looked up locally. */
         val planTitles: List<String>,
         val id: String = UUID.randomUUID().toString(),
+        /** The same plans by id, for opening a point up; empty when only titles are known (a letter). */
+        val planIds: List<String> = emptyList(),
     ) {
         override fun equals(other: Any?): Boolean =
             other is Evidence && other.point == point && other.planTitles == planTitles
@@ -186,12 +192,15 @@ data class LibraryFilter(
     val to: LocalDate? = null,
 )
 
-/** Plans a draft added or changed: one step of undo. */
-data class PlanDraftUndo(val added: List<CheckInItem>, val changed: PlanWorkflowUndo) {
+/** Plans a draft added or changed, and memos it added (存成清单): one step of undo. */
+data class PlanDraftUndo(val added: List<CheckInItem>, val changed: PlanWorkflowUndo, val addedMemos: List<MemoItem> = emptyList()) {
+    /** Everything the write did, for 「已撤销」. */
+    val total: Int get() = added.size + changed.before.size + addedMemos.size
+
     /**
      * Takes back only what has not been touched since. A plan that was edited,
-     * started or finished after the draft was accepted stays as it is.
-     * Returns the new state and how many plans were taken back.
+     * started or finished after the draft was accepted stays as it is; so does
+     * a memo edited since. Returns the new state and how many were taken back.
      */
     fun apply(state: PlanSnapshot, blockedId: String? = null): Pair<PlanSnapshot, Int> {
         // core's PlanWorkflowUndo.apply has no count, so count the plans it restores.
@@ -208,12 +217,24 @@ data class PlanDraftUndo(val added: List<CheckInItem>, val changed: PlanWorkflow
             result = result.copy(checkInItems = result.checkInItems.filterIndexed { i, _ -> i != index })
             count += 1
         }
+        for (memo in addedMemos) {
+            if (result.memos.none { it == memo }) continue
+            result = result.copy(memos = result.memos.filterNot { it == memo })
+            count += 1
+        }
         return result to count
     }
 }
 
 /** One week as plain facts, with the plans numbered so a point can cite them. */
-data class WeekRecord(val text: String, val plans: List<CheckInItem>)
+data class WeekRecord(val text: String, val plans: List<CheckInItem>, val stats: WeekStats = WeekStats())
+
+/** The week's counts, worked out on the device; the same numbers the record sends. [scheduled] is 完成 + 没做完 + 跳过. */
+data class WeekStats(val scheduled: Int = 0, val completed: Int = 0, val open: Int = 0, val skipped: Int = 0, val focusMinutes: Int = 0) {
+    /** 本周排了 N 件，完成 M 件，没做完 K 件；专注 X */
+    val line: String
+        get() = "本周排了 $scheduled 件，完成 $completed 件，没做完 $open 件；专注 ${AIDrafting.durationText(focusMinutes)}"
+}
 
 /**
  * Instructions sent to the model and the reading of its answers. Everything
@@ -500,26 +521,43 @@ object AIDrafting {
             val row = raw as? JsonObject ?: continue
             val index = integer(row["index"]) ?: continue
             if (index !in 0 until rowCount) continue
-            val hint = ConversionHint(day(row, now), category(row["category"], categories))
+            // A day already gone becomes today.
+            val hint = ConversionHint(day(row, now)?.let { maxOf(it, now.toLocalDate()) }, category(row["category"], categories))
             if (hint.day != null || hint.category != null) hints[index] = hint
         }
         return hints
     }
 
-    fun reflection(answer: String, plans: List<CheckInItem>): ReflectionDraft {
+    /**
+     * [record] is the text the model was given. With it, a sentence naming a
+     * number the record does not have is taken out (spec A8); nothing left of
+     * the note means the draft does not hold: [AIRequestError.reflectionMismatch].
+     */
+    fun reflection(answer: String, plans: List<CheckInItem>, record: String? = null): ReflectionDraft {
         val values = `object`(answer)
-        val note = string(values["note"]) ?: throw AIRequestError.unreadableAnswer
+        var note = string(values["note"]) ?: throw AIRequestError.unreadableAnswer
+        var nextFocus = string(values["next_focus"]) ?: ""
+        if (record != null) {
+            val allowed = ReflectionNumbers.allowed(record)
+            note = ReflectionNumbers.keepingKnown(note, allowed)
+            nextFocus = ReflectionNumbers.keepingKnown(nextFocus, allowed)
+            if (note.isEmpty()) throw AIRequestError.reflectionMismatch
+        }
         val evidence = (values["evidence"] as? JsonArray).orEmpty().mapNotNull { raw ->
             val item = raw as? JsonObject ?: return@mapNotNull null
             val point = string(item["point"]) ?: return@mapNotNull null
-            val titles = (item["plans"] as? JsonArray).orEmpty().mapNotNull { integer(it) }
-                .filter { it >= 1 && it <= plans.size }.map { plans[it - 1].title }
+            val cited = (item["plans"] as? JsonArray).orEmpty().mapNotNull { integer(it) }
+                .filter { it >= 1 && it <= plans.size }.map { plans[it - 1] }.take(4)
             // A point that rests on nothing in the record is not shown.
-            if (titles.isEmpty()) return@mapNotNull null
-            ReflectionDraft.Evidence(prefix(point, 80), titles.take(4))
+            if (cited.isEmpty()) return@mapNotNull null
+            ReflectionDraft.Evidence(prefix(point, 80), cited.map { it.title }, planIds = cited.map { it.id })
         }
-        return ReflectionDraft(prefix(note, 600), prefix(string(values["next_focus"]) ?: "", 120), evidence.take(3))
+        return ReflectionDraft(prefix(note, 600), prefix(nextFocus, 120), evidence.take(3))
     }
+
+    /** 周复盘 as drafted for [record], its numbers checked against the record's text. */
+    fun checkedReflection(answer: String, record: WeekRecord): ReflectionDraft =
+        reflection(answer, record.plans, record.text).copy(stats = record.stats)
 
     private fun planDrafts(
         values: JsonObject,
@@ -545,12 +583,34 @@ object AIDrafting {
         return drafts.take(limit)
     }
 
-    fun nextWeekDrafts(answer: String, week: LocalDate, fallbackCategory: String, categories: List<String>): List<PlanDraft> {
+    /**
+     * 下周 is the week after the one reviewed. A day of it that has already
+     * gone (last week's review read on a Wednesday) lands on [today] instead.
+     */
+    fun nextWeekDrafts(answer: String, week: LocalDate, fallbackCategory: String, categories: List<String>,
+                       today: LocalDate = LocalDate.now()): List<PlanDraft> {
         val monday = weekStart(week)
         return planDrafts(`object`(answer), 8, fallbackCategory, categories) { item ->
             val weekday = integer(item["weekday"])
-            if (weekday != null && weekday in 1..7) monday.plusDays((7 + weekday - 1).toLong()) else null
+            if (weekday != null && weekday in 1..7) maxOf(today, monday.plusDays((7 + weekday - 1).toLong())) else null
         }
+    }
+
+    /**
+     * The offer under 周复盘 once it is saved (B3): once per week, while the week can
+     * still be drafted for and the entry points are shown.
+     */
+    fun showsNextWeekOffer(reflection: WeeklyReflection?, week: LocalDate, today: LocalDate, showsEntries: Boolean, handled: Boolean): Boolean {
+        if (!showsEntries || handled || reflection == null) return false
+        if (reflection.note.isBlank() && reflection.nextFocus.isBlank()) return false
+        return offersNextWeek(week, today)
+    }
+
+    /** 拟下周草稿 is offered only while that 下周 is still ahead: for this week's review and last week's. */
+    fun offersNextWeek(week: LocalDate, today: LocalDate): Boolean {
+        val monday = weekStart(week)
+        val current = weekStart(today)
+        return monday == current || monday == current.minusDays(7)
     }
 
     fun preparationDrafts(
@@ -576,12 +636,23 @@ object AIDrafting {
         }
     }
 
+    /** What a model says for “no limit” on a filter: 全部类型、所有… */
+    val unlimitedWords = setOf("all", "any", "全部", "所有", "全部类型", "所有类型", "全部状态", "所有状态",
+        "全部日期", "所有日期", "全部计划", "所有计划", "不限")
+
     fun libraryFilter(answer: String, now: ZonedDateTime, categories: List<String>): LibraryFilter {
         val values = `object`(answer)
-        var filter = LibraryFilter(keyword = prefix(string(values["keyword"]) ?: "", 30))
-        category(values["category"], categories)?.let { filter = filter.copy(category = it) }
+        var filter = LibraryFilter()
+        // “全部”-like answers say “no limit”; they are read, not refused.
+        var understood = false
+        val keyword = string(values["keyword"]) ?: ""
+        if (keyword.lowercase() in unlimitedWords) understood = true else filter = filter.copy(keyword = prefix(keyword, 30))
+        val category = category(values["category"], categories)
+        if (category != null) filter = filter.copy(category = category)
+        else if (string(values["category"])?.lowercase() in unlimitedWords) understood = true
         string(values["status"])?.let { status ->
             if (status in listOf("planned", "inProgress", "completed", "skipped", "archived")) filter = filter.copy(status = status)
+            else if (status.lowercase() in unlimitedWords) understood = true
         }
         val today = now.toLocalDate()
         val monday = weekStart(today)
@@ -593,7 +664,8 @@ object AIDrafting {
             val start = today.withDayOfMonth(1).plusMonths(offset)
             filter = filter.copy(period = "range", from = start, to = start.plusMonths(1).minusDays(1))
         }
-        when (string(values["period"])) {
+        val period = string(values["period"])
+        when (period) {
             "past" -> filter = filter.copy(period = "past")
             "today" -> filter = filter.copy(period = "today")
             "future" -> filter = filter.copy(period = "future")
@@ -608,7 +680,8 @@ object AIDrafting {
                 if (from != null && to != null && from <= to) filter = filter.copy(period = "range", from = from, to = to)
             }
         }
-        if (filter == LibraryFilter()) throw AIRequestError.unreadableAnswer
+        if (period?.lowercase() in unlimitedWords) understood = true
+        if (filter == LibraryFilter() && !understood) throw AIRequestError.unreadableAnswer
         return filter
     }
 
@@ -681,7 +754,10 @@ object AIDrafting {
             lines.add("已跳过：")
             for (plan in skipped.take(15)) lines.add("[${number(plan)}] ${plan.title}（${categoryDisplayName(plan.category)}）")
         }
-        return WeekRecord(lines.joinToString("\n"), plans)
+        // 排了 counts every plan the record lists: 完成、没做完、跳过 together.
+        val stats = WeekStats(summary.completed.size + open.size + skipped.size, summary.completed.size, open.size, skipped.size,
+            summary.actualMinutes)
+        return WeekRecord(lines.joinToString("\n"), plans, stats)
     }
 
     fun nextWeekInput(snapshot: PlanSnapshot, week: LocalDate, now: ZonedDateTime): String {

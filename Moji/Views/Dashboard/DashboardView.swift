@@ -30,7 +30,9 @@ struct DashboardView: View {
     @State private var deletingItem: CheckInItem?
     @ObservedObject private var ai = AISettingsStore.shared
     /// What was read out of plans typed a moment ago, by plan. Never saved.
-    @State private var entrySuggestions: [UUID: EntrySuggestion] = [:]
+    @State private var entrySuggestions: [UUID: ShownEntrySuggestion] = [:]
+    /// 存为模板 offered under a plan just written by hand: how often its title was written.
+    @State private var templateHints: [UUID: Int] = [:]
     @State private var readingEntryIDs: Set<UUID> = []
     @State private var breakdownRoute: PlanBreakdownRoute?
     @State private var showsImport = false
@@ -92,7 +94,7 @@ struct DashboardView: View {
     /// once the user tapped 按建议排序. That order is kept for the day only.
     private var pendingItems: [CheckInItem] {
         let items = schedulePendingItems
-        guard ai.settings.dailyBrief, ai.showsEntries, isShowingToday,
+        guard ai.settings.dailyBrief, ai.isReady, isShowingToday,
               let order = daily.orderIDs(on: checklistDate) else { return items }
         return AIDailyBrief.ordered(items, by: order)
     }
@@ -125,6 +127,12 @@ struct DashboardView: View {
 
     var body: some View {
         NavigationStack {
+            dashboardPage
+        }
+    }
+
+    /// The list itself; the body is split in three so it type-checks in time.
+    private var dashboardList: some View {
             ZStack {
                 InkWashBackground()
 
@@ -281,50 +289,14 @@ struct DashboardView: View {
                 }
                 }
             }
+    }
+
+    private var dashboardNavigation: some View {
+        dashboardList
             .navigationTitle("计划")
             .toolbarBackground(Color.planBackground, for: .navigationBar)
             .toolbarBackground(.visible, for: .navigationBar)
-            .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
-                    Button {
-                        showsCalendar = true
-                    } label: {
-                        Image(systemName: "calendar")
-                    }
-                    .accessibilityLabel("打开计划日历")
-                }
-
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button { showsLibrary = true } label: { Image(systemName: "square.grid.2x2") }
-                        .accessibilityLabel("计划库与模板")
-                }
-                ToolbarItem(placement: .primaryAction) {
-                    Menu {
-                        Button {
-                            presentNewEditor(kind: .completedLog)
-                        } label: {
-                            Label("记录已做", systemImage: "clock.badge.checkmark")
-                        }
-
-                        Button {
-                            presentNewEditor(kind: .planned)
-                        } label: {
-                            Label("详细添加计划", systemImage: "slider.horizontal.3")
-                        }
-
-                        if ai.showsEntries {
-                            Button {
-                                if ai.isReady { showsImport = true } else { showsAIIntro = true }
-                            } label: {
-                                Label("从文字或截图添加", systemImage: "text.viewfinder")
-                            }
-                        }
-                    } label: {
-                        Image(systemName: "plus")
-                    }
-                    .accessibilityLabel("添加计划或记录")
-                }
-            }
+            .toolbar { dashboardToolbar }
             .navigationDestination(isPresented: $showsCalendar) {
                 PlanCalendarView(store: store)
             }
@@ -363,15 +335,12 @@ struct DashboardView: View {
                 let ids = Set(quickTokens.map(\.id))
                 if !adoptedChipIDs.isSubset(of: ids) { adoptedChipIDs.formIntersection(ids) }
             }
-            .sheet(item: $editorRoute) { route in
-                CheckInEditorView(
-                    store: store,
-                    item: route.item,
-                    defaultKind: route.defaultKind,
-                    defaultDate: route.defaultDate
-                )
-                .id(route.id)
-            }
+            .onChange(of: store.checkInItems) { _, items in dropStaleSuggestions(items) }
+    }
+
+    private var dashboardPage: some View {
+        dashboardNavigation
+            .sheet(item: $editorRoute) { editorSheet($0) }
             .sheet(isPresented: $showsLibrary) { PlanLibraryView(store: store) }
             .sheet(item: $copyingItem) { PlanCopySheet(store: store, item: $0) }
             .sheet(isPresented: $showsImport, onDismiss: { sharedItem = nil }) {
@@ -380,23 +349,7 @@ struct DashboardView: View {
             .sheet(isPresented: $showsWrites) { AIWritesSheet(store: store) }
             .aiIntroSheet(isPresented: $showsAIIntro, startsWithDemo: introStartsWithDemo, forShare: introForShare)
             .onChange(of: showsAIIntro) { _, shown in if !shown { introForShare = false } }
-            .sheet(item: $breakdownRoute) { route in
-                PlanDraftSheet(
-                    store: store,
-                    title: "拆成步骤",
-                    subject: route.item.title,
-                    waitingText: "正在拆步骤",
-                    planNote: "拆自：\(route.item.title)",
-                    showsDates: false,
-                    source: route.item,
-                    archivesSourceByDefault: route.replacesOriginal,
-                    origin: AIWriteText.splitOrigin(route.item.title),
-                    summary: { count, archived in
-                        AIWriteText.breakdown(count: count, title: route.item.title, archived: archived)
-                    },
-                    load: { try await AIAssistant.shared.breakDown(route.item) }
-                )
-            }
+            .sheet(item: $breakdownRoute) { breakdownSheet($0) }
             .alert("删除这个计划？", isPresented: Binding(get: { deletingItem != nil }, set: { if !$0 { deletingItem = nil } })) {
                 Button("取消", role: .cancel) { deletingItem = nil }
                 Button("删除", role: .destructive) {
@@ -433,7 +386,88 @@ struct DashboardView: View {
             } message: {
                 Text(restoreMessage ?? "")
             }
+    }
+
+    @ToolbarContentBuilder
+    private var dashboardToolbar: some ToolbarContent {
+        ToolbarItem(placement: .topBarLeading) {
+            Button {
+                showsCalendar = true
+            } label: {
+                Image(systemName: "calendar")
+            }
+            .accessibilityLabel("打开计划日历")
         }
+
+        ToolbarItem(placement: .topBarTrailing) {
+            Button { showsLibrary = true } label: { Image(systemName: "square.grid.2x2") }
+                .accessibilityLabel("计划库与模板")
+        }
+        ToolbarItem(placement: .primaryAction) {
+            Menu {
+                Button {
+                    presentNewEditor(kind: .completedLog)
+                } label: {
+                    Label("记录已做", systemImage: "clock.badge.checkmark")
+                }
+
+                Button {
+                    presentNewEditor(kind: .planned)
+                } label: {
+                    Label("详细添加计划", systemImage: "slider.horizontal.3")
+                }
+
+                if ai.showsEntries {
+                    Button {
+                        if ai.isReady { showsImport = true } else { showsAIIntro = true }
+                    } label: {
+                        Label("从文字或截图添加", systemImage: "text.viewfinder")
+                    }
+                }
+
+                // Writes not taken back today: where to undo them.
+                if writes.activeCount(on: AIClock.now()) > 0 {
+                    Button {
+                        showsWrites = true
+                    } label: {
+                        Label("今天的整理", systemImage: "list.bullet.rectangle")
+                    }
+                }
+            } label: {
+                Image(systemName: "plus")
+            }
+            .accessibilityLabel("添加计划或记录")
+        }
+    }
+
+    private func breakdownSheet(_ route: PlanBreakdownRoute) -> some View {
+        PlanDraftSheet(
+            store: store,
+            title: "拆成步骤",
+            subject: route.item.title,
+            waitingText: "正在拆步骤",
+            planNote: "拆自：\(route.item.title)",
+            showsDates: false,
+            source: route.item,
+            archivesSourceByDefault: route.replacesOriginal,
+            origin: AIWriteText.splitOrigin(route.item.title),
+            summary: { count, archived in
+                AIWriteText.breakdown(count: count, title: route.item.title, archived: archived)
+            },
+            offersDestinations: true,
+            load: { try await AIAssistant.shared.breakDown(route.item) }
+        )
+    }
+
+    private func editorSheet(_ route: PlanEditorRoute) -> some View {
+        CheckInEditorView(
+            store: store,
+            item: route.item,
+            defaultKind: route.defaultKind,
+            defaultDate: route.defaultDate,
+            onCreated: { plan in offerTemplateHint(for: plan, source: .typed) }
+        )
+        .id(route.id)
     }
 
     /// A re-signed install starts empty and the user's first question is always
@@ -538,8 +572,9 @@ struct DashboardView: View {
         AIDailyBrief.facts(pending: schedulePendingItems, countdowns: store.countdowns, today: checklistDate)
     }
 
+    /// Only once AI 整理 is set up: a card that could only explain itself is not shown.
     private var showsBrief: Bool {
-        ai.settings.dailyBrief && ai.showsEntries && isShowingToday
+        ai.settings.dailyBrief && ai.isReady && isShowingToday
             && !daily.isDismissed(on: checklistDate)
             && AIDailyBrief.shouldShow(briefFacts)
     }
@@ -598,7 +633,7 @@ struct DashboardView: View {
     /// After 21:00 on today's list, in the place of 今日提要.
     private var showsWrap: Bool {
         let now = AIClock.now()
-        return ai.settings.eveningWrap && ai.showsEntries && isShowingToday
+        return ai.settings.eveningWrap && ai.isReady && isShowingToday
             && AIEveningWrap.isEvening(now) && !wrap.isDismissed(on: now)
             && AIEveningWrap.shouldShow(wrapFacts, pending: pendingItems.count)
     }
@@ -675,13 +710,18 @@ struct DashboardView: View {
     /// The import page takes the item out of the inbox once it has read it:
     /// removing it here would delete a shared picture before it is read.
     private func takeSharedItemIfNeeded() {
-        guard sharedItem == nil, !showsImport, !showsAIIntro, let item = ShareInbox.oldest() else { return }
+        // Set up: the oldest item. Not set up: the oldest one not introduced yet,
+        // so a second item still opens the introduction once.
+        let waiting = ai.isReady ? ShareInbox.oldest() : ShareInbox.items().first { ai.shouldIntroduceShare($0.id) }
+        guard sharedItem == nil, !showsImport, !showsAIIntro, let item = waiting else { return }
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
             guard sharedItem == nil, !showsImport, !showsAIIntro else { return }
             if ai.isReady {
                 sharedItem = item
                 showsImport = true
-            } else {
+            } else if ai.shouldIntroduceShare(item.id) {
+                // Once per item: it stays in the inbox for when AI 整理 is set up.
+                ai.markShareIntroduced(item.id)
                 introStartsWithDemo = false
                 introForShare = true
                 showsAIIntro = true
@@ -711,7 +751,7 @@ struct DashboardView: View {
 
     /// Days late when the note in the margin belongs under this row.
     private func carryNoteDays(for item: CheckInItem) -> Int? {
-        guard ai.settings.carryOverNotes, ai.showsEntries, item.status == .planned,
+        guard ai.settings.carryOverNotes, ai.isReady, item.status == .planned,
               !daily.isCarryNoteDismissed(item.id),
               let days = CarryOverSeal.daysLate(scheduledStart: item.scheduledStart, on: checklistDate),
               days >= AIDailyBrief.carryNoteDays else { return nil }
@@ -910,7 +950,8 @@ struct DashboardView: View {
             openCopy: { copyingItem = item },
             breakDown: ai.showsEntries && !archived
                 ? { replaces in openBreakdown(item, replacesOriginal: replaces) }
-                : nil
+                : nil,
+            openWrites: { showsWrites = true }
         )
         VStack(spacing: 0) {
             Group {
@@ -925,12 +966,12 @@ struct DashboardView: View {
             }
 
             if !archived {
-                if let suggestion = entrySuggestions[item.id] {
+                if let shown = entrySuggestions[item.id] {
                     EntrySuggestionStrip(
-                        suggestion: suggestion,
-                        apply: { applySuggestion(suggestion, to: item.id) },
-                        split: { splitEntry(suggestion, id: item.id) },
-                        dismiss: { withAnimation(.easeOut(duration: 0.2)) { entrySuggestions[item.id] = nil } }
+                        suggestion: shown.suggestion,
+                        apply: { applySuggestion(shown.suggestion, to: item.id) },
+                        split: { splitEntry(shown.suggestion, id: item.id) },
+                        dismiss: { withAnimation(.easeOut(duration: 0.2)) { removeSuggestion(item.id) } }
                     )
                     .padding(.leading, 46)
                     .padding(.trailing, 4)
@@ -953,6 +994,24 @@ struct DashboardView: View {
                     .padding(.leading, 46)
                     .padding(.trailing, 4)
                     .padding(.bottom, 4)
+                    .transition(.opacity)
+                }
+
+                if let count = templateHints[item.id] {
+                    TemplateHintLine(
+                        count: count,
+                        save: {
+                            store.saveTemplate(from: item.id)
+                            withAnimation(.easeOut(duration: 0.2)) { templateHints[item.id] = nil }
+                        },
+                        dismiss: {
+                            TemplateHintStore.dismiss(item.title)
+                            withAnimation(.easeOut(duration: 0.2)) { templateHints[item.id] = nil }
+                        }
+                    )
+                    .padding(.leading, 46)
+                    .padding(.trailing, 4)
+                    .padding(.bottom, 6)
                     .transition(.opacity)
                 }
             }
@@ -1139,10 +1198,39 @@ struct DashboardView: View {
                 isQuickEntryFocused = false
                 guard scenario == "ai-entry-applied" else { return }
                 DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
-                    if let entry = entrySuggestions.first { applySuggestion(entry.value, to: entry.key) }
+                    if let entry = entrySuggestions.first { applySuggestion(entry.value.suggestion, to: entry.key) }
                 }
             }
-        case "ai-breakdown", "ai-breakdown-carry":
+        case "ai-entry-local":
+            // AI 整理 not set up: only what the device read, under the new row.
+            didRunQAScenario = true
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                quickTitle = "明早八点背单词半小时，工作日都要"
+                addQuickPlan()
+                isQuickEntryFocused = false
+            }
+        case "ai-plan-template-hint":
+            // 背单词 written twice in the last few days, then once more by hand.
+            didRunQAScenario = true
+            TemplateHintStore.resetForQA()
+            let calendar = Calendar.current
+            let today = calendar.startOfDay(for: Date())
+            for daysBack in [2, 4] {
+                let day = calendar.date(byAdding: .day, value: -daysBack, to: today) ?? today
+                let start = calendar.date(bySettingHour: 7, minute: 30, second: 0, of: day) ?? day
+                var past = CheckInItem(title: "背单词", category: .study, scheduledStart: start, plannedMinutes: 30,
+                                       scheduleKind: .exactTime, detailsConfigured: true, plannedDurationEnabled: true)
+                past.createdAt = start.addingTimeInterval(-3_600)
+                past.status = .completed
+                past.completedAt = start.addingTimeInterval(1_800)
+                store.saveCheckIn(past)
+            }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                quickTitle = "背单词"
+                addQuickPlan()
+                isQuickEntryFocused = false
+            }
+        case "ai-breakdown", "ai-breakdown-carry", "ai-breakdown-note":
             didRunQAScenario = true
             let carried = ProcessInfo.processInfo.environment["MOJI_QA_SCENARIO"] == "ai-breakdown-carry"
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
@@ -1348,12 +1436,15 @@ struct DashboardView: View {
         guard !cleanQuickTitle.isEmpty else { return }
         speech.stop()
         let text = cleanQuickTitle
+        let typed = quickTitle
         let today = Calendar.current.startOfDay(for: Date())
+        let snapshot = store.snapshot
         var plan = CheckInItem(
             title: text,
             category: quickEntryCategory,
             scheduledStart: today,
-            plannedMinutes: 25,
+            // The usual length of the type when there is one, as in the editor.
+            plannedMinutes: MojiLocalRules.typicalMinutes(for: quickEntryCategory, snapshot: snapshot) ?? 25,
             scheduleKind: .allDay,
             detailsConfigured: false
         )
@@ -1362,9 +1453,12 @@ struct DashboardView: View {
         let adopted = adoptedChipIDs.intersection(tokens.map(\.id))
         var movedTo: Date?
         if !adopted.isEmpty,
-           let chosen = QuickEntryParser.suggestion(text: quickTitle, tokens: tokens, adopted: adopted),
+           let chosen = QuickEntryParser.suggestion(text: typed, tokens: tokens, adopted: adopted),
            let updated = chosen.applied(to: plan) {
             plan = updated
+            if chosen.minutes == nil, chosen.category != nil {
+                plan.plannedMinutes = MojiLocalRules.typicalMinutes(for: plan.category, snapshot: snapshot) ?? 25
+            }
             if let day = chosen.day, !Calendar.current.isDate(day, inSameDayAs: today) { movedTo = day }
         }
         withAnimation(.spring(response: 0.42, dampingFraction: 0.82)) {
@@ -1377,20 +1471,36 @@ struct DashboardView: View {
             store.workflowNotice = "已加到\(AIDrafting.dayText(movedTo))，可在日历查看"
         }
         // A plan moved off today has no row here to hang a suggestion under.
-        if plan.isVisibleInChecklist(on: checklistDate) {
-            readQuickEntry(plan, text: text)
+        guard plan.isVisibleInChecklist(on: checklistDate) else { return }
+        // Nothing tapped, but the words carry a day, a time, a length, a type or a
+        // repeat: what the device read is offered under the row at once.
+        var shownLocally = false
+        if adopted.isEmpty, ai.settings.readsQuickEntry, ai.showsEntries,
+           let local = QuickEntryParser.suggestion(text: typed, tokens: tokens, adopted: Set(tokens.map(\.id)))?
+               .removingMatches(of: plan),
+           !local.isEmpty {
+            shownLocally = true
+            withAnimation(.easeOut(duration: 0.25)) {
+                entrySuggestions[plan.id] = ShownEntrySuggestion(suggestion: local, basis: EntrySuggestionBasis(plan),
+                                                                 isLocal: true)
+            }
         }
+        readQuickEntry(plan, text: text, shownLocally: shownLocally)
+        offerTemplateHint(for: plan, source: .typed)
     }
 
     /// The plan is already saved. If the sentence carries a time, a length or
     /// several things, ask what the words say and offer under the row only
-    /// what would still change.
-    private func readQuickEntry(_ plan: CheckInItem, text: String) {
+    /// what would still change. A suggestion read on the device is replaced
+    /// only while it is still there untouched; otherwise the answer is dropped.
+    private func readQuickEntry(_ plan: CheckInItem, text: String, shownLocally: Bool) {
         guard ai.isReady, ai.settings.readsQuickEntry, AIDrafting.isWorthReading(text) else { return }
         readingEntryIDs.insert(plan.id)
         Task { @MainActor in
             // A failed reading is not worth a message: the plan is there either way.
             let reading = try? await AIAssistant.shared.readEntry(text)
+            // The strip read on the device was taken or waved away meanwhile: nothing more to show.
+            guard readingEntryIDs.contains(plan.id) else { return }
             withAnimation(.easeOut(duration: 0.25)) {
                 readingEntryIDs.remove(plan.id)
                 guard let current = store.checkInItems.first(where: {
@@ -1398,13 +1508,47 @@ struct DashboardView: View {
                       }),
                       let suggestion = reading?.removingMatches(of: current), !suggestion.isEmpty
                 else { return }
-                entrySuggestions[plan.id] = suggestion
+                if shownLocally {
+                    guard let local = entrySuggestions[plan.id], local.isLocal else { return }
+                }
+                entrySuggestions[plan.id] = ShownEntrySuggestion(suggestion: suggestion,
+                                                                 basis: EntrySuggestionBasis(current), isLocal: false)
             }
         }
     }
 
+    /// A suggestion goes once the plan's day, time, length, type, repeat, title
+    /// or status is no longer what it was when the suggestion was made.
+    private func dropStaleSuggestions(_ items: [CheckInItem]) {
+        let plans = Dictionary(items.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+        let stale = entrySuggestions.filter { id, shown in
+            guard let plan = plans[id] else { return true }
+            return !shown.basis.stillHolds(for: plan)
+        }.map(\.key)
+        let gone = templateHints.keys.filter { plans[$0] == nil || plans[$0]?.isArchived == true }
+        guard !stale.isEmpty || !gone.isEmpty else { return }
+        withAnimation(.easeOut(duration: 0.2)) {
+            for id in stale { removeSuggestion(id) }
+            for id in gone { templateHints[id] = nil }
+        }
+    }
+
+    /// The strip under a row goes, and so does any reading still on its way:
+    /// a model's answer to a strip already taken or waved away is not shown.
+    private func removeSuggestion(_ id: UUID) {
+        entrySuggestions[id] = nil
+        readingEntryIDs.remove(id)
+    }
+
+    /// 存为模板 under a new plan written by hand whose title keeps coming back.
+    private func offerTemplateHint(for plan: CheckInItem, source: MojiLocalRules.PlanEntrySource) {
+        guard let count = MojiLocalRules.templateHintCount(for: plan, source: source, snapshot: store.snapshot,
+                                                           dismissed: TemplateHintStore.dismissed()) else { return }
+        withAnimation(.easeOut(duration: 0.25)) { templateHints[plan.id] = count }
+    }
+
     private func applySuggestion(_ suggestion: EntrySuggestion, to id: UUID) {
-        withAnimation(.easeOut(duration: 0.2)) { entrySuggestions[id] = nil }
+        withAnimation(.easeOut(duration: 0.2)) { removeSuggestion(id) }
         guard let plan = store.checkInItems.first(where: { $0.id == id }),
               let updated = suggestion.applied(to: plan) else { return }
         let notice = suggestion.day.map { "已移到\(AIDrafting.dayText($0))，可在日历查看" } ?? "已按建议调整"
@@ -1415,27 +1559,14 @@ struct DashboardView: View {
         }
     }
 
+    /// 拆成 N 条: the day, time, length, type and repeat read from the sentence
+    /// go on every part, the renamed plan included. One write, undoable.
     private func splitEntry(_ suggestion: EntrySuggestion, id: UUID) {
-        withAnimation(.easeOut(duration: 0.2)) { entrySuggestions[id] = nil }
-        guard suggestion.parts.count >= 2,
-              let plan = store.checkInItems.first(where: { $0.id == id }), plan.kind == .planned else { return }
-        var first = plan
-        first.title = suggestion.parts[0]
-        let rest = suggestion.parts.dropFirst().map { part in
-            var item = CheckInItem(
-                title: part,
-                category: plan.category,
-                scheduledStart: plan.scheduledStart,
-                plannedMinutes: plan.plannedMinutes,
-                scheduleKind: plan.effectiveScheduleKind,
-                detailsConfigured: plan.hasConfiguredDetails,
-                plannedDurationEnabled: plan.plannedDurationEnabled
-            )
-            item.aiOrigin = AIWriteText.splitOrigin(plan.title)
-            return item
-        }
+        withAnimation(.easeOut(duration: 0.2)) { removeSuggestion(id) }
+        guard let plan = store.checkInItems.first(where: { $0.id == id }),
+              let parts = suggestion.split(plan, origin: AIWriteText.splitOrigin(plan.title)) else { return }
         withAnimation(.spring(response: 0.42, dampingFraction: 0.84)) {
-            _ = store.commitDrafts(adding: Array(rest), changing: [first], notice: "已拆成 \(suggestion.parts.count) 条",
+            _ = store.commitDrafts(adding: parts.rest, changing: [parts.first], notice: "已拆成 \(suggestion.parts.count) 条",
                                summary: AIWriteText.entrySplit(count: suggestion.parts.count, original: plan.title))
         }
     }
@@ -1464,6 +1595,8 @@ private struct MinimalPlanRow: View {
     /// calling it opens the introduction); the argument says whether the steps
     /// are meant to replace this plan.
     var breakDown: ((Bool) -> Void)? = nil
+    /// The vermilion 墨记… mark opens 今天的整理, where the write can be taken back.
+    var openWrites: (() -> Void)? = nil
 
     @State private var completionInkProgress = 0.0
     @State private var isCommittingCompletion = false
@@ -1704,13 +1837,16 @@ private struct MinimalPlanRow: View {
                 .accessibilityElement(children: .ignore)
                 .accessibilityLabel(CarryOverSeal.accessibilityLabel(daysLate: days))
                 .accessibilityHidden(false)
-            if let breakDown, item.status == .planned {
+            if item.status == .planned {
                 // A plan that keeps being carried over is usually too big, on
                 // the wrong day, or no longer wanted: the seal offers all three.
+                // 改期 and 放下 are always there; 拆小一点 only with the entry points shown.
                 Menu {
-                    Button("拆小一点") { breakDown(true) }
+                    if let breakDown {
+                        Button("拆小一点") { breakDown(true) }
+                    }
                     Button("改期") { quickField = .date }
-                    Button("放下") { store.skipCheckIn(id: item.id) }
+                    Button("放下") { dropPlan() }
                 } label: {
                     seal
                         .frame(width: 22, height: 44)
@@ -1720,6 +1856,20 @@ private struct MinimalPlanRow: View {
             } else {
                 seal
             }
+        }
+    }
+
+    /// 放下, as in 晚间收尾: archived, undoable, kept in 今天的整理.
+    private func dropPlan() {
+        guard var plan = store.checkInItems.first(where: { $0.id == item.id }), plan.status == .planned else { return }
+        guard !store.isBeingFocused(plan.id) else {
+            store.workflowNotice = "这条计划正在专注，先结束再放下。"
+            return
+        }
+        plan.isArchived = true
+        withAnimation(.spring(response: 0.42, dampingFraction: 0.84)) {
+            _ = store.commitDrafts(changing: [plan], notice: "已放下，可撤销",
+                                   summary: AIWriteText.dropped(title: plan.title))
         }
     }
 
@@ -1751,6 +1901,9 @@ private struct MinimalPlanRow: View {
                 Text(AIWriteText.mark(origin))
                     .foregroundStyle(Color.planVermilion)
                     .layoutPriority(-1)
+                    .contentShape(Rectangle())
+                    .highPriorityGesture(TapGesture().onEnded { openWrites?() })
+                    .accessibilityAddTraits(.isButton)
                     .accessibilityIdentifier("plan.origin")
             }
         }
@@ -1995,5 +2148,46 @@ private struct RestoreWelcomeSheet: View {
     private func finish() {
         didOfferRestore = true
         dismiss()
+    }
+}
+
+/// 存为模板 under a plan written by hand again: plain secondary text, not a draft.
+private struct TemplateHintLine: View {
+    let count: Int
+    let save: () -> Void
+    let dismiss: () -> Void
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Text(MojiLocalRules.templateHintText(count: count))
+                .font(.footnote)
+                .foregroundStyle(Color.planSecondary)
+                .lineLimit(2)
+                .fixedSize(horizontal: false, vertical: true)
+                // The words take the room left by the buttons, as on Android, instead of
+                // sharing it with a spacer and breaking after a few characters.
+                .frame(maxWidth: .infinity, alignment: .leading)
+            Button("存为模板", action: save)
+                .font(.footnote.weight(.semibold))
+                .foregroundStyle(Color.planPrimary)
+                .buttonStyle(.plain)
+                .frame(minHeight: 32)
+                .accessibilityIdentifier("plan.templateHint.save")
+            Button(action: dismiss) {
+                Image(systemName: "xmark")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(Color.planSecondary)
+                    .frame(width: 32, height: 32)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("不再提示")
+            .accessibilityIdentifier("plan.templateHint.dismiss")
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 2)
+        .background(Color.planPrimary.opacity(0.04), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("plan.templateHint")
     }
 }

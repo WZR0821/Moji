@@ -124,6 +124,8 @@ struct PlanDraftSheet: View {
     var origin: String?
     /// The line kept in 今天的整理: plans added, and whether the source was archived.
     var summary: ((_ count: Int, _ archivedSource: Bool) -> String)?
+    /// 拆成步骤: the steps can also go into the plan's note or a checklist memo.
+    var offersDestinations = false
     /// Called after the drafts were written, with the plans added.
     var onAccept: (([CheckInItem]) -> Void)?
     let load: @MainActor () async throws -> [PlanDraft]
@@ -136,7 +138,7 @@ struct PlanDraftSheet: View {
             PlanDraftPage(store: store, title: title, subject: subject, waitingText: waitingText,
                           planNote: planNote, showsDates: showsDates, source: source,
                           archivesSourceByDefault: archivesSourceByDefault, origin: origin,
-                          summary: summary, onAccept: onAccept, load: load,
+                          summary: summary, offersDestinations: offersDestinations, onAccept: onAccept, load: load,
                           needsRoom: { detent = .large }) { dismiss() }
                 .toolbar {
                     ToolbarItem(placement: .cancellationAction) {
@@ -160,6 +162,7 @@ struct PlanDraftPage: View {
     var archivesSourceByDefault = false
     var origin: String?
     var summary: ((_ count: Int, _ archivedSource: Bool) -> String)?
+    var offersDestinations = false
     var onAccept: (([CheckInItem]) -> Void)?
     let load: @MainActor () async throws -> [PlanDraft]
     /// Called once when the drafts do not fit the height the page was given,
@@ -173,12 +176,40 @@ struct PlanDraftPage: View {
     @State private var isLoading = true
     @State private var attempt = 0
     @State private var archivesSource = false
+    @State private var destination = StepsDestination.plans
+    /// Set on the first tap, so a second tap cannot write the drafts twice.
+    @State private var isAccepting = false
     @State private var contentHeight: CGFloat = 0
     @State private var pageHeight: CGFloat = 0
     @State private var askedForRoom = false
 
     private var selected: [PlanDraft] {
         drafts.filter { $0.isSelected && !$0.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+    }
+
+    private var showsDestinations: Bool { offersDestinations && source != nil }
+
+    /// The source is being timed right now; a draft does not rewrite it.
+    private var sourceIsFocused: Bool {
+        guard let source else { return false }
+        return store.isBeingFocused(source.id)
+    }
+
+    /// The line above the drafts follows where the checked steps will go.
+    private var draftHint: String {
+        switch showsDestinations ? destination : .plans {
+        case .plans: return "这些是草稿，勾选的才会加入计划。"
+        case .note: return "这些是草稿，勾选的才会写进说明。"
+        case .checklist: return "这些是草稿，勾选的才会存进清单。"
+        }
+    }
+
+    private var acceptTitle: String {
+        switch showsDestinations ? destination : .plans {
+        case .plans: return selected.isEmpty ? "加入" : "加入 \(selected.count) 条"
+        case .note: return "写进说明"
+        case .checklist: return "存成清单"
+        }
     }
 
     var body: some View {
@@ -200,7 +231,7 @@ struct PlanDraftPage: View {
                 } else {
                     HStack(spacing: 7) {
                         DraftSeal(size: 20, seed: 3)
-                        Text("这些是草稿，勾选的才会加入计划。")
+                        Text(draftHint)
                             .font(.footnote)
                             .foregroundStyle(Color.planSecondary)
                     }
@@ -210,7 +241,29 @@ struct PlanDraftPage: View {
                         PlanDraftRow(draft: $draft, showsDate: showsDates)
                     }
 
-                    if source != nil {
+                    if showsDestinations {
+                        Picker("去向", selection: $destination) {
+                            ForEach(StepsDestination.allCases) { option in
+                                Text(option.title).tag(option)
+                                    .disabled(option == .note && sourceIsFocused)
+                            }
+                        }
+                        .pickerStyle(.segmented)
+                        .accessibilityIdentifier("draft.destination")
+                        // A plan being timed cannot be rewritten, so its note cannot take the steps.
+                        .onChange(of: destination) { previous, chosen in
+                            if chosen == .note, sourceIsFocused { destination = previous }
+                        }
+                        if sourceIsFocused {
+                            Text("这条计划正在专注，结束后再写进说明。")
+                                .font(.footnote)
+                                .foregroundStyle(Color.planSecondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                                .accessibilityIdentifier("draft.destination.focused")
+                        }
+                    }
+
+                    if source != nil, !showsDestinations || destination == .plans {
                         Toggle("加入后把原计划归档", isOn: $archivesSource)
                             .font(.subheadline)
                             .tint(Color.planPrimary)
@@ -236,14 +289,20 @@ struct PlanDraftPage: View {
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .confirmationAction) {
-                Button(selected.isEmpty ? "加入" : "加入 \(selected.count) 条") { accept() }
+                Button(acceptTitle) { accept() }
                     .fontWeight(.semibold)
-                    .disabled(isLoading || selected.isEmpty)
+                    .disabled(isLoading || selected.isEmpty || isAccepting
+                              || (showsDestinations && destination == .note && sourceIsFocused))
                     .accessibilityIdentifier("draft.accept")
             }
         }
         .task(id: attempt) { await run() }
-        .onAppear { archivesSource = archivesSourceByDefault }
+        .onAppear {
+            archivesSource = archivesSourceByDefault
+#if DEBUG
+            if showsDestinations, !sourceIsFocused, AIQAFixture.scenario == "ai-breakdown-note" { destination = .note }
+#endif
+        }
     }
 
     private func askForRoomIfNeeded() {
@@ -267,15 +326,36 @@ struct PlanDraftPage: View {
     }
 
     private func accept() {
+        guard !isAccepting else { return }
+        isAccepting = true
+        switch showsDestinations ? destination : .plans {
+        case .plans: acceptAsPlans()
+        case .note where sourceIsFocused:
+            isAccepting = false
+            return
+        case .note: acceptIntoNote()
+        case .checklist: acceptAsChecklist()
+        }
+        close()
+    }
+
+    private func acceptAsPlans() {
+        // No length from the model: the usual length of the type, when there is one.
+        let snapshot = store.snapshot
+        let typical: [RecordCategory: Int?] = Dictionary(uniqueKeysWithValues: Set(selected.map(\.category)).map {
+            ($0, MojiLocalRules.typicalMinutes(for: $0, snapshot: snapshot))
+        })
         let plans = selected.map { draft -> CheckInItem in
             var clean = draft
             clean.title = draft.title.trimmingCharacters(in: .whitespacesAndNewlines)
-            var plan = clean.plan(note: planNote)
+            var plan = clean.plan(note: planNote, fallbackMinutes: typical[draft.category] ?? nil)
             plan.aiOrigin = origin.map { String($0.prefix(40)) }
             return plan
         }
         var changed: [CheckInItem] = []
-        if archivesSource, let source, var original = store.checkInItems.first(where: { $0.id == source.id }) {
+        // A plan being timed is never archived; the words then say so.
+        if archivesSource, let source, var original = store.checkInItems.first(where: { $0.id == source.id }),
+           original.status != .inProgress, !store.isBeingFocused(original.id) {
             original.isArchived = true
             changed = [original]
         }
@@ -286,7 +366,45 @@ struct PlanDraftPage: View {
             summary: summary?(plans.count, !changed.isEmpty)
         )
         onAccept?(plans)
-        close()
+    }
+
+    private var selectedSteps: [String] {
+        selected.map { $0.title.trimmingCharacters(in: .whitespacesAndNewlines) }
+    }
+
+    /// 写进说明: the steps appended to the plan's own note, undoable.
+    private func acceptIntoNote() {
+        guard let source, var original = store.checkInItems.first(where: { $0.id == source.id }) else { return }
+        let steps = selectedSteps
+        original.note = AIWriteText.stepsNote(original: original.note, steps: steps)
+        store.commitDrafts(changing: [original], notice: "已写进说明，可撤销",
+                           summary: AIWriteText.stepsIntoNote(count: steps.count, title: original.title))
+    }
+
+    /// 存成清单: a new checklist memo named after the plan, undoable.
+    private func acceptAsChecklist() {
+        guard let source else { return }
+        let title = store.checkInItems.first(where: { $0.id == source.id })?.title ?? source.title
+        let steps = selectedSteps
+        let memo = MemoItem(title: title, content: "", mode: .checklist,
+                            checklistItems: steps.map { MemoChecklistItem(text: $0) })
+        store.commitDrafts(addingMemos: [memo], notice: "已存成清单备忘，可撤销",
+                           summary: AIWriteText.stepsAsChecklist(count: steps.count, title: title))
+    }
+}
+
+/// Where the steps of 拆成步骤 go.
+enum StepsDestination: String, CaseIterable, Identifiable {
+    case plans, note, checklist
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .plans: return "加成计划"
+        case .note: return "写进说明"
+        case .checklist: return "存成清单"
+        }
     }
 }
 
@@ -394,7 +512,7 @@ struct DraftUndoToast: View {
                 .padding(.horizontal, PlanLayout.pageHorizontalPadding)
                 .padding(.bottom, 58)
                 .transition(.move(edge: .bottom).combined(with: .opacity))
-                .task(id: notice) {
+                .task(id: store.draftNoticeID) {
                     do {
                         try await Task.sleep(for: .seconds(lifetime))
                         store.clearDraftNotice()

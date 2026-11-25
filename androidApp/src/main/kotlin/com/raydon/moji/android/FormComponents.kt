@@ -223,6 +223,7 @@ fun FormTextField(
     keyboardOptions: KeyboardOptions = KeyboardOptions.Default,
     textStyle: TextStyle = MaterialTheme.typography.bodyLarge.copy(color = MaterialTheme.colorScheme.onSurface),
     focusRequester: androidx.compose.ui.focus.FocusRequester? = null,
+    keyboardActions: androidx.compose.foundation.text.KeyboardActions = androidx.compose.foundation.text.KeyboardActions.Default,
 ) {
     androidx.compose.foundation.text.BasicTextField(
                             cursorBrush = androidx.compose.ui.graphics.SolidColor(MaterialTheme.colorScheme.onSurface),
@@ -231,6 +232,7 @@ fun FormTextField(
         modifier = Modifier.fillMaxWidth().heightIn(min = minHeight.dp).then(if (focusRequester != null) Modifier.focusRequester(focusRequester) else Modifier).padding(start = 20.dp, end = 20.dp, top = if (singleLine) 10.dp else 10.5.dp, bottom = if (singleLine) 10.dp else 13.5.dp),
         singleLine = singleLine,
         keyboardOptions = keyboardOptions,
+        keyboardActions = keyboardActions,
         // A vertical SwiftUI TextField advances 22pt per line at 17pt.
         textStyle = if (singleLine) textStyle else textStyle.copy(lineHeight = 22.sp),
         decorationBox = { inner ->
@@ -247,11 +249,14 @@ fun FormSegmentedControl(
     options: List<Pair<String, String>>,
     selected: String,
     modifier: Modifier = Modifier,
+    horizontalPadding: Int = 20,
+    /** Options shown dimmed that cannot be picked. */
+    disabled: Set<String> = emptySet(),
     onSelected: (String) -> Unit,
 ) {
     val dark = MaterialTheme.colorScheme.background.luminance() < 0.5f
     Surface(
-        modifier = modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 6.dp),
+        modifier = modifier.fillMaxWidth().padding(horizontal = horizontalPadding.dp, vertical = 6.dp),
         color = if (dark) Color(0xFF3D3D42) else Color(0xFFEEEEF0),
         shape = RoundedCornerShape(9.dp),
     ) {
@@ -263,14 +268,15 @@ fun FormSegmentedControl(
                     Box(Modifier.width(1.dp).height(16.dp).align(Alignment.CenterVertically).background(if (besideSelected) Color.Transparent else if (dark) Color(0x33EBEBF5) else Color(0x293C3C43)))
                 }
                 Surface(
-                    modifier = Modifier.weight(1f).fillMaxHeight().clickable { onSelected(raw) },
+                    modifier = Modifier.weight(1f).fillMaxHeight().clickable(enabled = raw !in disabled) { onSelected(raw) },
                     color = if (active) if (dark) Color(0xFF727278) else Color.White else Color.Transparent,
                     shape = RoundedCornerShape(7.dp),
                     border = if (active) BorderStroke(0.5.dp, MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f)) else null,
                     shadowElevation = if (active) 1.dp else 0.dp,
                 ) {
                     Box(contentAlignment = Alignment.Center) {
-                        Text(label, fontSize = 13.sp, fontWeight = if (active) FontWeight.Medium else FontWeight.Normal)
+                        Text(label, fontSize = 13.sp, fontWeight = if (active) FontWeight.Medium else FontWeight.Normal,
+                            modifier = if (raw in disabled) Modifier.alpha(0.35f) else Modifier)
                     }
                 }
             }

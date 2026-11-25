@@ -173,6 +173,7 @@ internal fun DraftDismissButton(label: String, onClick: () -> Unit) {
 private class DraftLoad<T> {
     var value by mutableStateOf<T?>(null)
     var failure by mutableStateOf<String?>(null)
+    var error by mutableStateOf<Throwable?>(null)
     var loading by mutableStateOf(true)
     var attempt by mutableIntStateOf(0)
 }
@@ -181,12 +182,12 @@ private class DraftLoad<T> {
 private fun <T> rememberDraftLoad(load: suspend () -> T, onLoaded: (T) -> Unit = {}): DraftLoad<T> {
     val state = remember { DraftLoad<T>() }
     LaunchedEffect(state.attempt) {
-        state.loading = true; state.failure = null
+        state.loading = true; state.failure = null; state.error = null
         try {
             val result = load()
             state.value = result; onLoaded(result)
         } catch (cancelled: CancellationException) { throw cancelled }
-        catch (error: Throwable) { state.failure = error.draftMessage }
+        catch (error: Throwable) { state.failure = error.draftMessage; state.error = error }
         state.loading = false
     }
     return state
@@ -235,6 +236,9 @@ fun PlanDraftSheet(
     archivesSourceByDefault: Boolean = false,
     origin: String? = null,
     summary: ((count: Int, archivedSource: Boolean) -> String)? = null,
+    /** Shown in place of a draft when there was nothing to send (下周草稿 for a week with no plans). */
+    /** After plans were put in, before the sheet closes. */
+    onAccepted: (() -> Unit)? = null,
     load: suspend () -> List<PlanDraft>,
     onDismiss: () -> Unit,
 ) {
@@ -242,7 +246,8 @@ fun PlanDraftSheet(
     Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false)) {
         MojiScreen(sheetFraction = if (large) null else 0.532f) {
             PlanDraftPage(viewModel, title, subject, waitingText, planNote, showsDates, source, archivesSourceByDefault, origin, summary, load,
-                leading = "取消", onLeading = onDismiss, needsRoom = { large = true }, close = onDismiss)
+                leading = "取消", onLeading = onDismiss, needsRoom = { large = true }, close = onDismiss,
+                onAccepted = onAccepted)
         }
     }
 }
@@ -267,9 +272,24 @@ fun PlanDraftPage(
     onLeading: () -> Unit,
     needsRoom: (() -> Unit)? = null,
     close: () -> Unit,
+    onAccepted: (() -> Unit)? = null,
 ) {
     val drafts = remember { mutableStateListOf<PlanDraft>() }
     var archivesSource by remember { mutableStateOf(archivesSourceByDefault) }
+    // 拆成步骤 (a draft with a source) can also go into the plan's note or a checklist memo (B1).
+    var destination by remember {
+        mutableStateOf(if (BuildConfig.DEBUG && source != null && viewModel.visualQaRoute.value == "ai-breakdown-note")
+            com.raydon.moji.android.ai.BreakdownDestination.Note else com.raydon.moji.android.ai.BreakdownDestination.Plans)
+    }
+    // Once tapped, the confirm button stays off until the page closes (A12).
+    var committed by remember { mutableStateOf(false) }
+    // A plan being timed is not rewritten: 写进说明 cannot be picked for it.
+    val timer by viewModel.pomodoro.collectAsStateWithLifecycle()
+    val stored by viewModel.snapshot.collectAsStateWithLifecycle()
+    val sourceFocused = remember(timer, stored.activeSession, source?.id) { source != null && viewModel.isBeingFocused(source.id) }
+    LaunchedEffect(sourceFocused) {
+        if (sourceFocused && destination == com.raydon.moji.android.ai.BreakdownDestination.Note) destination = com.raydon.moji.android.ai.BreakdownDestination.Plans
+    }
     val state = rememberDraftLoad(load) { drafts.clear(); drafts.addAll(it) }
     val selected = drafts.filter { it.isSelected && it.title.isNotBlank() }
     val scroll = rememberScrollState()
@@ -277,34 +297,75 @@ fun PlanDraftPage(
         if (!state.loading && state.failure == null && scroll.maxValue > 4) needsRoom?.invoke()
     }
     fun accept() {
-        val mark = origin?.let { AIDrafting.prefix(it, 40) }
-        val plans = selected.map { it.copy(title = it.title.trim()).plan(planNote).copy(aiOrigin = mark) }
+        if (committed) return
+        committed = true
         val original = source?.let { s -> viewModel.snapshot.value.checkInItems.firstOrNull { it.id == s.id } }
-        val changed = if (archivesSource && original != null) listOf(original.copy(isArchived = true)) else emptyList()
-        viewModel.commitDrafts(plans, changed, if (changed.isEmpty()) "已加入 ${plans.size} 条计划" else "已加入 ${plans.size} 条计划，原计划已归档",
-            summary?.invoke(plans.size, changed.isNotEmpty()))
+        val steps = selected.map { it.title.trim() }
+        when (if (original == null) com.raydon.moji.android.ai.BreakdownDestination.Plans else destination) {
+            com.raydon.moji.android.ai.BreakdownDestination.Note -> {
+                val plan = original!!
+                viewModel.commitDrafts(changed = listOf(plan.copy(note = com.raydon.moji.android.ai.BreakdownText.noteWithSteps(plan.note, steps))),
+                    notice = "已写进说明，可撤销", summary = com.raydon.moji.android.ai.AIWriteText.stepsIntoNote(steps.size, plan.title))
+            }
+            com.raydon.moji.android.ai.BreakdownDestination.Checklist -> {
+                val plan = original!!
+                viewModel.commitDrafts(addedMemos = listOf(com.raydon.moji.android.ai.BreakdownText.checklistMemo(plan.title, steps)),
+                    notice = "已存成清单备忘，可撤销", summary = com.raydon.moji.android.ai.AIWriteText.stepsIntoChecklist(plan.title, steps.size))
+            }
+            com.raydon.moji.android.ai.BreakdownDestination.Plans -> {
+                val mark = origin?.let { AIDrafting.prefix(it, 40) }
+                val shaped = selected.map { draft -> draft to draft.copy(title = draft.title.trim()).plan(planNote).copy(aiOrigin = mark) }
+                // The usual length of each type (N1), worked out once per type rather than once per step.
+                val usual = shaped.filter { it.first.minutes == null }.map { it.second.category }.distinct()
+                    .associateWith { viewModel.historyMinutes(it) }
+                val plans = shaped.map { (draft, plan) ->
+                    // A step the model gave no length takes the usual one for its type; it stays off until switched on.
+                    if (draft.minutes == null) usual[plan.category]?.let { plan.copy(plannedMinutes = it) } ?: plan else plan
+                }
+                val changed = if (archivesSource && original != null) listOf(original.copy(isArchived = true)) else emptyList()
+                // A plan being timed is not archived; the notice says only what happened (A12).
+                viewModel.commitDrafts(plans, changed, "已加入 ${plans.size} 条计划", summary?.invoke(plans.size, false),
+                    describe = { archived ->
+                        (if (archived > 0) "已加入 ${plans.size} 条计划，原计划已归档" else "已加入 ${plans.size} 条计划") to summary?.invoke(plans.size, archived > 0)
+                    })
+            }
+        }
+        onAccepted?.invoke()
         close()
     }
+    val chosen = if (source == null) com.raydon.moji.android.ai.BreakdownDestination.Plans else destination
     Column(Modifier.fillMaxSize()) {
-        MojiSheetBar(title, leading, if (selected.isEmpty()) "加入" else "加入 ${selected.size} 条", onLeading, ::accept,
-            trailingEnabled = !state.loading && selected.isNotEmpty())
+        MojiSheetBar(title, leading, chosen.confirmTitle(selected.size), onLeading, ::accept,
+            trailingEnabled = !state.loading && selected.isNotEmpty() && !committed)
         Column(Modifier.fillMaxWidth().verticalScroll(scroll).padding(horizontal = 18.dp, vertical = 14.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Text(subject, Modifier.padding(horizontal = 2.dp), fontSize = 15.sp, lineHeight = 20.sp, maxLines = 2, overflow = TextOverflow.Ellipsis, color = MaterialTheme.colorScheme.secondary)
             when {
                 state.loading -> InkDraftWaiting(waitingText, Modifier.fillMaxWidth().inkDraftSurface().padding(14.dp))
+                // A week without plans: nothing to try again (A3).
+                state.error === com.raydon.moji.android.ai.AIRequestError.emptyWeek -> DraftFailureView(com.raydon.moji.android.ai.AIRequestError.emptyWeek.message, null)
                 state.failure != null -> DraftFailureView(state.failure!!) { state.attempt++ }
                 else -> {
                     Row(Modifier.padding(horizontal = 2.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(7.dp)) {
                         DraftSeal(20)
-                        Text("这些是草稿，勾选的才会加入计划。", fontSize = 13.sp, color = MaterialTheme.colorScheme.secondary)
+                        // Follows the three-way choice on 拆成步骤; every other draft page adds plans.
+                        Text(chosen.draftHint, fontSize = 13.sp, color = MaterialTheme.colorScheme.secondary)
                     }
                     drafts.forEachIndexed { index, draft ->
                         PlanDraftRow(draft, showsDates) { drafts[index] = it }
                     }
                     if (source != null) {
-                        Row(Modifier.fillMaxWidth().inkPaperSurface(14.dp).padding(horizontal = 14.dp, vertical = 10.5.dp), verticalAlignment = Alignment.CenterVertically) {
-                            Text("加入后把原计划归档", Modifier.weight(1f), fontSize = 15.sp)
-                            FormSwitch(archivesSource, { archivesSource = it })
+                        FormSegmentedControl(com.raydon.moji.android.ai.BreakdownDestination.entries.map { it.name to it.label }, destination.name,
+                            horizontalPadding = 0,
+                            disabled = if (sourceFocused) setOf(com.raydon.moji.android.ai.BreakdownDestination.Note.name) else emptySet()) { name ->
+                            destination = com.raydon.moji.android.ai.BreakdownDestination.valueOf(name)
+                        }
+                        if (sourceFocused) Text("这条计划正在专注，结束后再写进说明。", Modifier.padding(horizontal = 2.dp), fontSize = 13.sp,
+                            lineHeight = 18.sp, color = MaterialTheme.colorScheme.secondary)
+                        if (destination == com.raydon.moji.android.ai.BreakdownDestination.Plans) {
+                            Row(Modifier.fillMaxWidth().inkPaperSurface(14.dp).padding(horizontal = 14.dp, vertical = 10.5.dp), verticalAlignment = Alignment.CenterVertically) {
+                                Text("加入后把原计划归档", Modifier.weight(1f), fontSize = 15.sp)
+                                FormSwitch(archivesSource, { archivesSource = it })
+                            }
                         }
                     }
                 }
@@ -361,13 +422,15 @@ private fun planDraftDetail(draft: PlanDraft, showsDate: Boolean): String {
 fun BoxScope.DraftUndoToast(viewModel: MojiViewModel, bottomPadding: Dp = 58.dp) {
     val notice by viewModel.draftNotice.collectAsStateWithLifecycle()
     val undo by viewModel.draftUndo.collectAsStateWithLifecycle()
+    // Each notice has its own number: the same words twice in a row still get their full time (A2).
+    val serial by viewModel.draftNoticeSerial.collectAsStateWithLifecycle()
     var shown by remember { mutableStateOf<String?>(null) }
     if (notice != null) shown = notice
-    LaunchedEffect(notice, undo != null) {
-        val text = notice ?: return@LaunchedEffect
+    LaunchedEffect(serial, undo != null) {
+        if (notice == null) return@LaunchedEffect
         val lifetime = if (BuildConfig.DEBUG && AIQAFixture.isActive) 60_000L else if (undo == null) 3_000L else 8_000L
         delay(lifetime)
-        if (viewModel.draftNotice.value == text) viewModel.clearDraftNotice()
+        if (viewModel.draftNoticeSerial.value == serial) viewModel.clearDraftNotice()
     }
     AnimatedVisibility(notice != null, Modifier.align(Alignment.BottomCenter),
         enter = slideInVertically(tween(240)) { it / 2 } + fadeIn(tween(240)),
@@ -403,12 +466,42 @@ fun EntrySuggestionStrip(suggestion: EntrySuggestion, apply: () -> Unit, split: 
         DraftSeal(18)
         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
             suggestion.title?.let { Text(it, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, color = MaterialTheme.colorScheme.primary) }
-            if (chips.isNotEmpty()) Text(chips.joinToString(" · "), fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, color = MaterialTheme.colorScheme.secondary)
+            // Up to two lines before it is cut, so a day, a time, a length and a repeat all fit; the buttons stay centred beside it.
+            if (chips.isNotEmpty()) Text(chips.joinToString(" · "), fontSize = 12.sp, lineHeight = 16.sp, maxLines = 2, overflow = TextOverflow.Ellipsis, color = MaterialTheme.colorScheme.secondary)
             else if (suggestion.parts.size >= 2) Text("这句话里像是 ${suggestion.parts.size} 件事", fontSize = 12.sp, maxLines = 1, color = MaterialTheme.colorScheme.secondary)
         }
         if (suggestion.parts.size >= 2) DraftCapsuleButton("拆成 ${suggestion.parts.size} 条", onClick = split)
         if (suggestion.hasDetails) DraftCapsuleButton("应用", onClick = apply)
         DraftDismissButton("不用这条建议", dismiss)
+    }
+}
+
+/** 存为模板 under a plan whose title keeps being written by hand (N3). Plain, not a draft. */
+@Composable
+fun TemplateHintStrip(count: Int, save: () -> Unit, dismiss: () -> Unit, modifier: Modifier = Modifier) {
+    // Plain secondary text on a faint wash, not a draft: nothing here was written by a model.
+    Row(modifier.fillMaxWidth().background(MaterialTheme.colorScheme.primary.copy(alpha = 0.04f), RoundedCornerShape(12.dp))
+        .padding(start = 10.dp, end = 0.dp, top = 2.dp, bottom = 2.dp),
+        verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text(com.raydon.moji.android.ai.TemplateHint.text(count), Modifier.weight(1f), fontSize = 13.sp, lineHeight = 18.sp,
+            maxLines = 2, overflow = TextOverflow.Ellipsis, color = MaterialTheme.colorScheme.secondary)
+        Box(Modifier.heightIn(min = 32.dp).clickable(onClick = save), contentAlignment = Alignment.Center) {
+            Text("存为模板", fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.primary)
+        }
+        DraftDismissButton("不再提示", dismiss)
+    }
+}
+
+/** Under a saved 周复盘 of this week or last: the 下周 offer (B3). */
+@Composable
+fun NextWeekOfferStrip(accept: () -> Unit, dismiss: () -> Unit, modifier: Modifier = Modifier) {
+    Row(modifier.fillMaxWidth().inkDraftSurface(12.dp).padding(start = 10.dp, end = 2.dp, top = 4.dp, bottom = 4.dp),
+        verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        DraftSeal(18)
+        Text("复盘存好了，按「下周关注」拟一份下周计划？", Modifier.weight(1f).padding(vertical = 4.dp), fontSize = 13.sp, lineHeight = 18.sp,
+            color = MaterialTheme.colorScheme.primary)
+        DraftCapsuleButton("拟下周草稿", onClick = accept)
+        DraftDismissButton("不用", dismiss)
     }
 }
 
@@ -440,12 +533,14 @@ fun ChecklistDraftSheet(subject: String, load: suspend () -> List<String>, accep
     val state = rememberDraftLoad(load) { items -> rows.clear(); rows.addAll(items.map { ChecklistDraftRow(it) }) }
     val selected = rows.filter { it.isSelected }.map { it.text.trim() }.filter { it.isNotEmpty() }
     var large by remember { mutableStateOf(false) }
+    var committed by remember { mutableStateOf(false) }
     val scroll = rememberScrollState()
     LaunchedEffect(state.loading, scroll.maxValue) { if (!state.loading && scroll.maxValue > 4) large = true }
     Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false)) {
         MojiScreen(sheetFraction = if (large) null else 0.532f) {
             Column(Modifier.fillMaxSize()) {
-                MojiSheetBar("整理成清单", "取消", "用这份清单", onDismiss, { accept(selected); onDismiss() }, trailingEnabled = !state.loading && selected.isNotEmpty())
+                MojiSheetBar("整理成清单", "取消", "用这份清单", onDismiss, { if (!committed) { committed = true; accept(selected); onDismiss() } },
+                    trailingEnabled = !state.loading && selected.isNotEmpty() && !committed)
                 Column(Modifier.fillMaxWidth().verticalScroll(scroll).padding(horizontal = 18.dp, vertical = 14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     Text(subject, Modifier.padding(horizontal = 2.dp), fontSize = 15.sp, lineHeight = 20.sp, maxLines = 2, overflow = TextOverflow.Ellipsis, color = MaterialTheme.colorScheme.secondary)
                     when {
@@ -483,14 +578,43 @@ fun ChecklistDraftSheet(subject: String, load: suspend () -> List<String>, accep
 
 // MARK: - 周复盘草稿
 
-/** The points a drafted reflection rests on, each naming the plans behind it. */
+/**
+ * The points a drafted reflection rests on, each naming the plans behind it. With
+ * [plansOf], a point opens to one line per plan: 标题 · 日期 · 状态 (B2).
+ */
 @Composable
-fun ReflectionEvidenceList(evidence: List<ReflectionDraft.Evidence>) {
+fun ReflectionEvidenceList(
+    evidence: List<ReflectionDraft.Evidence>,
+    plansOf: ((ReflectionDraft.Evidence) -> List<CheckInItem>)? = null,
+    initiallyOpen: String? = null,
+) {
+    // Any number of points can be open at once; a point with no plans to show does not open.
+    var open by remember(evidence) { mutableStateOf(setOfNotNull(initiallyOpen)) }
+    val now = java.time.ZonedDateTime.now()
     Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         evidence.forEach { item ->
-            Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
+            val plans = plansOf?.invoke(item).orEmpty()
+            val isOpen = item.id in open && plans.isNotEmpty()
+            Column(
+                Modifier.fillMaxWidth().then(if (plans.isNotEmpty()) Modifier.clickable { open = if (isOpen) open - item.id else open + item.id } else Modifier)
+                    .semantics(mergeDescendants = true) {},
+                verticalArrangement = Arrangement.spacedBy(3.dp),
+            ) {
                 Text(item.point, fontSize = 13.sp, fontWeight = FontWeight.Medium, color = MaterialTheme.colorScheme.primary)
-                Text("依据：" + item.planTitles.joinToString("、"), fontSize = 12.sp, lineHeight = 16.sp, color = MaterialTheme.colorScheme.secondary)
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text("依据：" + item.planTitles.joinToString("、"), Modifier.weight(1f, fill = false), fontSize = 12.sp, lineHeight = 16.sp,
+                        color = MaterialTheme.colorScheme.secondary)
+                    if (plans.isNotEmpty()) WrapMenuChevron(MaterialTheme.colorScheme.secondary.copy(alpha = 0.7f),
+                        Modifier.graphicsLayer { rotationZ = if (isOpen) 180f else 0f })
+                }
+                AnimatedVisibility(isOpen) {
+                    Column(Modifier.padding(start = 10.dp, top = 2.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                        plans.forEach { plan ->
+                            Text(com.raydon.moji.android.ai.ReflectionEvidenceText.line(plan, now), fontSize = 12.sp, lineHeight = 16.sp,
+                                color = MaterialTheme.colorScheme.secondary)
+                        }
+                    }
+                }
             }
         }
     }

@@ -775,6 +775,14 @@ enum SharedPersistence {
         return encoder
     }
 
+    /// A value as it reads back from storage: dates keep whole seconds only.
+    /// An undo compares against what was saved, so it keeps values in this form.
+    static func roundTrip<T: Codable>(_ value: T) -> T {
+        guard let data = try? encoder.encode(value),
+              let decoded = try? decoder.decode(T.self, from: data) else { return value }
+        return decoded
+    }
+
     private static var decoder: JSONDecoder {
         let decoder = JSONDecoder()
         let wholeSeconds = Date.ISO8601FormatStyle()

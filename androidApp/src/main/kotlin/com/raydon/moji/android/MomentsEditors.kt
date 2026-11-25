@@ -73,8 +73,12 @@ fun CountdownEditorScreenDialog(existing: CountdownEvent?, viewModel: MojiViewMo
                 MojiSheetBar(if (advanced) "更多设置" else editorTitle,
                     if (advanced) editorTitle else "取消", if (advanced) "" else "保存", { if (advanced) advanced = false else requestDismiss() }, {
                         focusManager.clearFocus()
+                        // The symbol follows the title's words (N4): always for a new day, and for one being
+                        // edited whose title changed while it still has a type's default.
                         if (title.isNotBlank()) viewModel.saveCountdown(draftId, title, date, repeat, includesToday, pinned, calendarSync,
-                            existing?.symbolName ?: if (context == "past") "seal" else "hourglass", existing?.colorName ?: "vermilion", onCreated = onCreated, onSaved = onDismiss)
+                            com.raydon.moji.android.ai.CountdownSymbols.symbol(title, past = context == "past", existing = existing?.symbolName,
+                                existingTitle = existing?.title),
+                            existing?.colorName ?: "vermilion", onCreated = onCreated, onSaved = onDismiss)
                     }, title.isNotBlank() || titleFocused, leadingIsBack = advanced)
                 // The main form uses 12pt section spacing; the pushed settings page keeps the inset-grouped default.
                 LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(top = 7.dp, bottom = 36.dp), verticalArrangement = Arrangement.spacedBy(if (advanced) 24.dp else 12.dp)) {

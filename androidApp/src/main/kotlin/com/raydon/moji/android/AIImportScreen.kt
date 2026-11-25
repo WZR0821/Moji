@@ -185,7 +185,8 @@ fun PlanImportDialog(viewModel: MojiViewModel, shared: ShareInboxItem? = null, o
                     Box(Modifier.fillMaxWidth().heightIn(min = 220.dp).background(paper, RoundedCornerShape(16.dp))
                         .drawBehind { drawRoundRect(edge, cornerRadius = CornerRadius(16.dp.toPx()), style = Stroke(0.75.dp.toPx())) }
                         .padding(horizontal = 15.dp, vertical = 16.dp)) {
-                        BasicTextField(text, { text = it }, Modifier.fillMaxWidth().heightIn(min = 188.dp),
+                        // A picture that could not be read stops mattering once the words are changed (A12).
+                        BasicTextField(text, { text = it; failure = null }, Modifier.fillMaxWidth().heightIn(min = 188.dp),
                             textStyle = MaterialTheme.typography.bodyLarge.copy(color = MaterialTheme.colorScheme.onSurface, lineHeight = 25.sp),
                             cursorBrush = SolidColor(MaterialTheme.colorScheme.onSurface),
                             decorationBox = { inner -> if (text.isEmpty()) Text("把文字粘贴到这里……", fontSize = 17.sp, color = iosTertiaryLabel); inner() })

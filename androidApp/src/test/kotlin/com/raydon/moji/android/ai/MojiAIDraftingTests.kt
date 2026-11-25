@@ -194,7 +194,7 @@ class MojiAIDraftingTests {
     fun testNextWeekAndPreparationDraftsStayInsideTheirDays() {
         val next = AIDrafting.nextWeekDrafts(
             """{"plans":[{"title":"补第三节","weekday":2,"part":"afternoon","minutes":60,"category":"学习","reason":"本周没做完"},{"title":"没有星期","weekday":null},{"title":"复盘","weekday":7,"category":"钓鱼"}]}""",
-            today, "work", categories,
+            today, "work", categories, today = today,
         )
         assertEquals(listOf("补第三节", "复盘"), next.map { it.title })
         assertEquals(listOf(day("2026-11-24"), day("2026-11-29")), next.map { it.day })
@@ -250,7 +250,10 @@ class MojiAIDraftingTests {
         assertEquals(day("2026-10-01"), month.from); assertEquals(day("2026-10-31"), month.to)
         val range = AIDrafting.libraryFilter("""{"period":"range","from":"2026-11-01","to":"2026-11-10"}""", now, categories)
         assertEquals(day("2026-11-01"), range.from); assertEquals(day("2026-11-10"), range.to)
-        assertThrows(AIRequestError::class.java) { AIDrafting.libraryFilter("""{"status":"all","period":"all"}""", now, categories) }
+        // 1.10.0 (A5): “全部” is a filter that limits nothing, not an answer that cannot be read.
+        assertEquals(LibraryFilter(), AIDrafting.libraryFilter("""{"status":"all","period":"all"}""", now, categories))
+        assertThrows(AIRequestError::class.java) { AIDrafting.libraryFilter("""{"status":"weird"}""", now, categories) }
+        assertThrows(AIRequestError::class.java) { AIDrafting.libraryFilter("""{"keyword":null}""", now, categories) }
         assertThrows(AIRequestError::class.java) {
             AIDrafting.libraryFilter("""{"period":"range","from":"2026-11-10","to":"2026-11-01"}""", now, categories)
         }

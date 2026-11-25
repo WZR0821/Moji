@@ -196,6 +196,8 @@ struct AIWritesView: View {
     @ObservedObject var store: PlanStore
     @ObservedObject private var log = AIWriteLog.shared
     @State private var notice: String?
+    /// New for every notice, so the same words twice still restart its timer.
+    @State private var noticeID = UUID()
 
     private static let timeFormatter: DateFormatter = {
         let formatter = DateFormatter()
@@ -256,10 +258,11 @@ struct AIWritesView: View {
                     .accessibilityIdentifier("writes.notice")
             }
         }
-        .task(id: notice) {
-            guard let notice else { return }
+        .task(id: noticeID) {
+            guard notice != nil else { return }
+            let shown = noticeID
             try? await Task.sleep(for: .seconds(3))
-            if !Task.isCancelled, self.notice == notice { withAnimation { self.notice = nil } }
+            if !Task.isCancelled, noticeID == shown { withAnimation { notice = nil } }
         }
         .accessibilityIdentifier("writes.page")
     }
@@ -285,7 +288,10 @@ struct AIWritesView: View {
                     .frame(minWidth: 44, minHeight: 32)
             } else {
                 Button {
-                    if let text = store.undoWrite(entry.id) { withAnimation { notice = text } }
+                    if let text = store.undoWrite(entry.id) {
+                        withAnimation { notice = text }
+                        noticeID = UUID()
+                    }
                 } label: {
                     Text("撤销")
                         .font(.footnote.weight(.semibold))
@@ -379,6 +385,8 @@ struct WeeklyLetterCard: View {
     let range: String
     let content: Content
     var showsReminder = false
+    /// 拟下周计划 only while the week after the letter's has not passed.
+    var showsNextWeek = true
     var showsClose = true
     var putIntoReflection: () -> Void = {}
     var draftNextWeek: () -> Void = {}
@@ -443,7 +451,9 @@ struct WeeklyLetterCard: View {
             }
             HStack(spacing: 8) {
                 DraftCapsuleButton(title: "放进复盘", identifier: "letter.reflection", action: putIntoReflection)
-                DraftCapsuleButton(title: "拟下周计划", identifier: "letter.nextWeek", action: draftNextWeek)
+                if showsNextWeek {
+                    DraftCapsuleButton(title: "拟下周计划", identifier: "letter.nextWeek", action: draftNextWeek)
+                }
             }
             .padding(.top, 2)
             if showsReminder {

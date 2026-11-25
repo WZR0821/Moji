@@ -172,6 +172,7 @@ private struct SummaryDetailView: View {
     @State private var anchorDate = Date()
 
     var body: some View {
+        ScrollViewReader { proxy in
         ScrollView {
             if range == .week {
                 VStack(spacing: 16) {
@@ -185,6 +186,15 @@ private struct SummaryDetailView: View {
                     anchorDate: $anchorDate
                 )
             }
+        }
+#if DEBUG
+        .onAppear {
+            guard AIQAFixture.scenario == "ai-nextweek-offer" else { return }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.9) {
+                withAnimation(.easeOut(duration: 0.3)) { proxy.scrollTo("week.nextWeekOffer", anchor: .bottom) }
+            }
+        }
+#endif
         }
         .contentMargins(
             .horizontal,
@@ -286,6 +296,7 @@ private struct RecordDayGroup: Identifiable {
 
 struct PersonalView: View {
     @ObservedObject var store: PlanStore
+    @ObservedObject var pomodoro: PomodoroEngine
 
     @State private var isPresentingSettings = false
     @State private var selectedReviewDay: CheckInDaySummary?
@@ -319,12 +330,19 @@ struct PersonalView: View {
         )
     }
 
-    private var pendingPlanCount: Int {
+    private var pendingPlanCount: Int { todayPendingItems.count }
+
+    /// Today's open plans, carried-over ones included, in the home list's time order.
+    private var todayPendingItems: [CheckInItem] {
         store.checkInItems.filter {
             $0.kind == .planned
                 && ($0.status == .planned || $0.status == .inProgress)
                 && $0.isVisibleInChecklist(on: Date())
-        }.count
+        }
+        .sorted {
+            if $0.scheduledStart != $1.scheduledStart { return $0.scheduledStart < $1.scheduledStart }
+            return $0.createdAt < $1.createdAt
+        }
     }
 
     private var hasWeeklyFocus: Bool {
@@ -390,6 +408,9 @@ struct PersonalView: View {
                             .font(.caption)
                             .foregroundStyle(Color.planSecondary.opacity(0.78))
                     }
+                    // The letter's stack comes and goes with the card: the page moves with it.
+                    .animation(.easeOut(duration: 0.25), value: letters.loadingWeek)
+                    .animation(.easeOut(duration: 0.25), value: letters.letters)
                     .padding(.horizontal, 18)
                     .padding(.top, 16)
                     .padding(.bottom, 28)
@@ -425,7 +446,15 @@ struct PersonalView: View {
                     }
                     return
                 }
-                if let scenario, scenario.hasPrefix("workflow-") || ["ai-reflection", "ai-reflection-applied", "ai-next-week"].contains(scenario) {
+                if scenario == "ai-review-next-carry" {
+                    // 归纳昨日待办 carried three days, as on the home page's QA screens.
+                    didRunSettingsQAScenario = true
+                    moveQAPlan("归纳昨日待办", daysBack: 3)
+                    return
+                }
+                if scenario == "ai-nextweek-offer" { seedQAReflectionIfNeeded() }
+                if let scenario, scenario.hasPrefix("workflow-") || ["ai-reflection", "ai-reflection-applied", "ai-reflection-auto",
+                                                                     "ai-next-week", "ai-nextweek-offer"].contains(scenario) {
                     didRunSettingsQAScenario = true
                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
                         if scenario.hasPrefix("workflow-settings") { isPresentingSettings = true }
@@ -465,6 +494,8 @@ struct PersonalView: View {
                 PlanDraftSheet(store: store, title: "下周草稿", subject: "按这一周的记录和“下周关注”拟的",
                                waitingText: "正在拟下周", origin: AIWriteText.nextWeekOrigin,
                                summary: { count, _ in AIWriteText.nextWeek(count: count) },
+                               // Taken up from the letter: the offer under 周复盘 for that week goes too.
+                               onAccept: { _ in ai.markNextWeekOfferHandled(PlanWorkflow.weekKey(monday)) },
                                load: { try await AIAssistant.shared.draftNextWeek(snapshot: store.snapshot, week: monday) })
             }
             .aiIntroSheet(isPresented: $showsLetterIntro)
@@ -482,7 +513,8 @@ struct PersonalView: View {
                 case "workflow-goal": WeeklyGoalEditor(store: store, week: Date(), goal: store.snapshot.weeklyGoals.first)
                 case "workflow-reflection": WeeklyReflectionEditor(store: store, week: Date(), reflection: store.snapshot.weeklyReflections.first)
                 case "workflow-next-week": NextWeekPlansSheet(store: store, week: Date())
-                case "ai-reflection", "ai-reflection-applied": WeeklyReflectionEditor(store: store, week: Date(), reflection: nil)
+                case "ai-reflection", "ai-reflection-applied", "ai-reflection-auto": WeeklyReflectionEditor(store: store, week: Date(), reflection: nil)
+                case "ai-nextweek-offer": NavigationStack { SummaryDetailView(store: store, range: .week) }
                 case "ai-next-week":
                     PlanDraftSheet(store: store, title: "下周草稿", subject: "按这一周的记录和“下周关注”拟的", waitingText: "正在拟下周",
                                    origin: AIWriteText.nextWeekOrigin, summary: { count, _ in AIWriteText.nextWeek(count: count) },
@@ -509,50 +541,56 @@ struct PersonalView: View {
             let facts = AIWeeklyLetter.facts(items: store.checkInItems, records: store.records, week: monday)
             let enough = facts.planned >= AIWeeklyLetter.minimumPlans
             let dismiss = { withAnimation(.easeOut(duration: 0.2)) { letters.dismiss(monday) } }
-            VStack(alignment: .leading, spacing: 10) {
-                if !letters.isDismissed(monday) {
-                    if let letter = letters.letter(for: monday) {
-                        WeeklyLetterCard(
-                            range: range,
-                            content: .letter(letter, facts: AIWeeklyLetter.factsLine(facts)),
-                            showsReminder: notificationStatus == .notDetermined,
-                            putIntoReflection: { letterReflection = letter },
-                            draftNextWeek: { if ai.isReady { letterNextWeek = letter } else { showsLetterIntro = true } },
-                            enableReminder: enableLetterReminder,
-                            dismiss: dismiss
-                        )
-                        .transition(.opacity)
-                    } else if ai.isReady, enough, letters.isLoading(monday) {
-                        WeeklyLetterCard(range: range, content: .loading, dismiss: dismiss)
+            // Not set up: no card and no teaser; the letters kept so far stay below.
+            let showsCard = ai.isReady && !letters.isDismissed(monday)
+                && (letters.letter(for: monday) != nil || (enough && letters.isLoading(monday)))
+            // Nothing to show: no empty stack either, or the page's spacing would leave a gap
+            // above 本周回顾 (Android shows none).
+            if showsCard || !letters.letters.isEmpty {
+                VStack(alignment: .leading, spacing: 10) {
+                    if showsCard {
+                        if let letter = letters.letter(for: monday) {
+                            WeeklyLetterCard(
+                                range: range,
+                                content: .letter(letter, facts: AIWeeklyLetter.factsLine(facts)),
+                                showsReminder: notificationStatus == .notDetermined,
+                                showsNextWeek: AIDrafting.canDraftNextWeek(week: monday, now: now),
+                                putIntoReflection: { letterReflection = letter },
+                                draftNextWeek: { if ai.isReady { letterNextWeek = letter } else { showsLetterIntro = true } },
+                                enableReminder: enableLetterReminder,
+                                dismiss: dismiss
+                            )
                             .transition(.opacity)
-                    } else if !ai.isReady, enough, AIWeeklyLetter.isTeaserTime(now) {
-                        WeeklyLetterCard(range: range, content: .teaser,
-                                         openIntro: { showsLetterIntro = true }, dismiss: dismiss)
-                    }
-                }
-                if !letters.letters.isEmpty {
-                    NavigationLink {
-                        WeeklyLetterArchiveView()
-                    } label: {
-                        HStack(spacing: 8) {
-                            Text("往期来信")
-                                .font(.subheadline.weight(.medium))
-                                .foregroundStyle(Color.planPrimary)
-                            Spacer(minLength: 0)
-                            Text("已存 \(letters.letters.count) 封 ›")
-                                .font(.footnote)
-                                .foregroundStyle(Color.planSecondary)
+                        } else if enough, letters.isLoading(monday) {
+                            WeeklyLetterCard(range: range, content: .loading, dismiss: dismiss)
+                                .transition(.opacity)
                         }
-                        .padding(.horizontal, 14)
-                        .frame(minHeight: 40)
-                        .contentShape(Rectangle())
                     }
-                    .buttonStyle(.plain)
-                    .accessibilityIdentifier("letter.archive.open")
+                    if !letters.letters.isEmpty {
+                        NavigationLink {
+                            WeeklyLetterArchiveView()
+                        } label: {
+                            HStack(spacing: 8) {
+                                Text("往期来信")
+                                    .font(.subheadline.weight(.medium))
+                                    .foregroundStyle(Color.planPrimary)
+                                Spacer(minLength: 0)
+                                Text("已存 \(letters.letters.count) 封 ›")
+                                    .font(.footnote)
+                                    .foregroundStyle(Color.planSecondary)
+                            }
+                            .padding(.horizontal, 14)
+                            .frame(minHeight: 40)
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityIdentifier("letter.archive.open")
+                    }
                 }
+                .animation(.easeOut(duration: 0.25), value: letters.letters)
+                .animation(.easeOut(duration: 0.25), value: letters.loadingWeek)
+                .transition(.opacity)
             }
-            .animation(.easeOut(duration: 0.25), value: letters.letters)
-            .animation(.easeOut(duration: 0.25), value: letters.loadingWeek)
         }
     }
 
@@ -688,7 +726,16 @@ struct PersonalView: View {
 
     @ViewBuilder
     private var reviewNextAction: some View {
-        if pendingPlanCount > 0 {
+        if let carried = MojiLocalRules.longestCarried(todayPendingItems, today: Date()) {
+            // The plan carried longest goes to the pomodoro, as 去专注 on its row does.
+            reviewActionButton(
+                title: MojiLocalRules.carriedNextStep(title: carried.item.title, days: carried.days),
+                symbol: "timer"
+            ) {
+                focus(on: carried.item)
+            }
+            .accessibilityIdentifier("review.next.carried")
+        } else if pendingPlanCount > 0 {
             reviewActionButton(
                 title: "下一步：完成剩余 \(pendingPlanCount) 项计划",
                 symbol: "checklist"
@@ -705,6 +752,16 @@ struct PersonalView: View {
         }
     }
 
+    /// The same path as 去专注 on a plan row.
+    private func focus(on item: CheckInItem) {
+        guard !pomodoro.hasActiveSession else {
+            NotificationCenter.default.post(name: .mojiOpenPomodoro, object: nil)
+            return
+        }
+        pomodoro.link(to: item)
+        NotificationCenter.default.post(name: .mojiOpenPomodoro, object: nil)
+    }
+
     private func reviewActionButton(
         title: String,
         symbol: String,
@@ -719,6 +776,8 @@ struct PersonalView: View {
                 Text(title)
                     .font(.subheadline.weight(.semibold))
                     .foregroundStyle(Color.planPrimary)
+                    .lineLimit(2)
+                    .multilineTextAlignment(.leading)
                 Spacer()
                 Image(systemName: "arrow.up.right")
                     .font(.caption.weight(.bold))
@@ -784,6 +843,25 @@ struct PersonalView: View {
     }
 
 #if DEBUG
+    /// Moves a sample plan to the same time a few days back.
+    private func moveQAPlan(_ title: String, daysBack: Int) {
+        let calendar = Calendar.mojiISO
+        guard var item = store.checkInItems.first(where: { $0.title == title }),
+              let day = calendar.date(byAdding: .day, value: -daysBack, to: calendar.startOfDay(for: Date())) else { return }
+        let time = calendar.dateComponents([.hour, .minute], from: item.scheduledStart)
+        item.scheduledStart = calendar.date(bySettingHour: time.hour ?? 0, minute: time.minute ?? 0,
+                                            second: 0, of: day) ?? day
+        store.saveCheckIn(item)
+    }
+
+    /// nextweek-offer: this week's reflection is saved, so the offer shows under it.
+    private func seedQAReflectionIfNeeded() {
+        let key = PlanWorkflow.weekKey(Date())
+        guard !store.snapshot.weeklyReflections.contains(where: { $0.weekStart == key && !$0.nextFocus.isEmpty }) else { return }
+        store.saveWeeklyReflection(WeeklyReflection(weekStart: key, note: "前半周按计划完成，周四起两件大事一直顺延。",
+                                                    nextFocus: "先把大事拆出能马上开始的第一步。"))
+    }
+
     private func seedSummaryQADataIfNeeded() {
         guard !store.records.contains(where: { $0.title.hasPrefix("UI 核验样本") }) else {
             return

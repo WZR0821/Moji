@@ -117,7 +117,7 @@ fun ReviewScreen(
     LaunchedEffect(qaRoute, snapshot.records.size) { if (!didQA && qaRoute.isNotEmpty() && snapshot.records.isNotEmpty()) {
         didQA = true
         if (qaRoute.startsWith("settings") || qaRoute == "ai-settings-help") showSettings = true
-        else when (qaRoute) { "review-week" -> secondaryRoute = "weekly"; "review-month" -> secondaryRoute = "monthly"; "review-records" -> secondaryRoute = "records"; "goal", "reflection", "next-week", "record-editor", "record-untimed", "ai-reflection", "ai-reflection-applied", "ai-next-week" -> qaEditor = qaRoute
+        else when (qaRoute) { "review-week", "ai-nextweek-offer" -> secondaryRoute = "weekly"; "review-month" -> secondaryRoute = "monthly"; "review-records" -> secondaryRoute = "records"; "goal", "reflection", "next-week", "record-editor", "record-untimed", "ai-reflection", "ai-reflection-applied", "ai-reflection-auto", "ai-next-week" -> qaEditor = qaRoute
             "ai-letter-archive", "ai-letter-detail" -> letterQA = qaRoute }
     } }
     // ai-letter-archive / ai-letter-detail: three earlier letters, then their list or one of them.
@@ -132,9 +132,7 @@ fun ReviewScreen(
     if (qaEditor == "reflection") WeeklyReflectionDialog(viewModel, workflowWeek(LocalDate.now()), snapshot.weeklyReflections.firstOrNull()) { qaEditor = "" }
     if (qaEditor == "next-week") NextWeekPlansDialog(viewModel, workflowWeek(LocalDate.now())) { qaEditor = "" }
     if (qaEditor.startsWith("ai-reflection")) WeeklyReflectionDialog(viewModel, workflowWeek(LocalDate.now()), null) { qaEditor = "" }
-    if (qaEditor == "ai-next-week") PlanDraftSheet(viewModel, "下周草稿", "按这一周的记录和“下周关注”拟的", waitingText = "正在拟下周",
-        origin = com.raydon.moji.android.ai.AIWriteText.nextWeekOrigin, summary = { count, _ -> com.raydon.moji.android.ai.AIWriteText.nextWeek(count) },
-        load = { com.raydon.moji.android.ai.AIAssistant.shared.draftNextWeek(viewModel.snapshot.value, workflowWeek(LocalDate.now()), aiCategories(viewModel)) }) { qaEditor = "" }
+    if (qaEditor == "ai-next-week") NextWeekDraftSheet(viewModel, workflowWeek(LocalDate.now())) { qaEditor = "" }
     if (qaEditor == "record-editor") RecordEditorScreenDialog(snapshot.records.firstOrNull { it.scheduleKind == "exactTime" }, viewModel) { qaEditor = "" }
     if (qaEditor == "record-untimed") RecordEditorScreenDialog(snapshot.records.firstOrNull { it.scheduleKind == "allDay" }, viewModel) { qaEditor = "" }
     // The letter pages are pushed in place of the page, as on iOS.
@@ -163,13 +161,19 @@ fun ReviewScreen(
     }
     val minutes = LocalRules.minutes(snapshot.records, weekStart, weekEnd)
     val streak = calculateStreak(snapshot.checkInItems.mapNotNull { if (it.status == "completed") it.completedAt?.let(Instant::parse)?.atZone(zone)?.toLocalDate() else null }.toSet())
-    val pending = snapshot.checkInItems.count { it.kind == "planned" && it.isArchived != true && it.status in listOf("planned", "inProgress") && com.raydon.moji.core.ChecklistPolicy.isVisible(it.scheduledStart, it.status, Instant.now().toString(), viewModel.carriesOver, zone.id) }
+    val pendingPlans = snapshot.checkInItems.filter { it.kind == "planned" && it.isArchived != true && it.status in listOf("planned", "inProgress") && com.raydon.moji.core.ChecklistPolicy.isVisible(it.scheduledStart, it.status, Instant.now().toString(), viewModel.carriesOver, zone.id) }
+        .sortedWith(compareBy<CheckInItem> { it.scheduledStart }.thenBy { it.createdAt })
+    val pending = pendingPlans.size
+    // 下一步: the plan carried longest goes first, straight into the pomodoro (N2).
+    val carried = com.raydon.moji.android.ai.ReviewNextStep.carried(pendingPlans, java.time.ZonedDateTime.now(zone))
     // 本周来信 above 本周回顾: the letter for the week that has just ended, the wait for it, or
     // the teaser; then the letters kept so far. The facts are worked out now, as on the card.
     val letterNow = AIClock.now()
     val letterMonday = AIWeeklyLetter.letterWeek(letterNow)
     val letterKey = AIWeeklyLetter.weekKey(letterMonday)
-    val letterOn = aiSettings.weeklyLetter && showsEntries
+    // The card (and its teaser) only once a model is set up (B6); 往期来信 stays with the entry points.
+    val letterOn = aiSettings.weeklyLetter && aiReady
+    val keepsLetters = aiSettings.weeklyLetter && showsEntries
     val letterFacts = AIWeeklyLetter.facts(snapshot.checkInItems, snapshot.records, letterMonday, letterNow.zone)
     val letterEnough = letterFacts.planned >= AIWeeklyLetter.minimumPlans
     val currentLetter = letters.firstOrNull { it.week == letterKey }
@@ -180,7 +184,7 @@ fun ReviewScreen(
         !aiReady && letterEnough && AIWeeklyLetter.isTeaserTime(letterNow) -> WeeklyLetterContent.Teaser
         else -> null
     }
-    val showsLetterArchiveRow = letterOn && letters.isNotEmpty()
+    val showsLetterArchiveRow = keepsLetters && letters.isNotEmpty()
     // Like iOS's “not determined”: notifications not allowed yet and 开启提醒 not tapped before.
     val showsReminder = android.os.Build.VERSION.SDK_INT >= 33 && !notifyAsked &&
         ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
@@ -204,7 +208,9 @@ fun ReviewScreen(
                         content = letterContent,
                         showsReminder = showsReminder,
                         putIntoReflection = { currentLetter?.let { letterReflection = it } },
-                        draftNextWeek = { currentLetter?.let { letter -> aiEntry { letterNextWeek = letter } } },
+                        // Only while the week after the letter's is still ahead (A3).
+                        draftNextWeek = currentLetter?.takeIf { letter -> AIWeeklyLetter.monday(letter.week)?.let { com.raydon.moji.android.ai.AIDrafting.offersNextWeek(it, today) } == true }
+                            ?.let { letter -> { aiEntry { letterNextWeek = letter } } },
                         enableReminder = {
                             if (android.os.Build.VERSION.SDK_INT >= 33) notificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
                             else { letterState.markNotifyAsked(); AIWeeklyLetterNotifier.reschedule(context) }
@@ -234,12 +240,18 @@ fun ReviewScreen(
                         WeeklyBars(snapshot.records)
                         if (pending > 0 || minutes == 0L) {
                         HorizontalDivider(color = iosSeparator.copy(alpha = iosSeparator.alpha * 0.22f), thickness = devicePixel)
-                        Row(Modifier.fillMaxWidth().heightIn(min = 44.dp).clickable { if (pending > 0) viewModel.openPlans() else viewModel.openFocus() }, verticalAlignment = Alignment.CenterVertically) {
+                        Row(Modifier.fillMaxWidth().heightIn(min = 44.dp).clickable {
+                            if (carried != null) viewModel.focusOn(carried.first) else if (pending > 0) viewModel.openPlans() else viewModel.openFocus()
+                        }, verticalAlignment = Alignment.CenterVertically) {
                             Box(Modifier.width(24.dp), contentAlignment = Alignment.Center) {
-                                if (pending > 0) MojiLineIcon(MojiIcon.TabChecklist, 19.dp, MaterialTheme.colorScheme.primary)
+                                if (pending > 0 && carried == null) MojiLineIcon(MojiIcon.TabChecklist, 19.dp, MaterialTheme.colorScheme.primary)
                                 else MojiLineIcon(MojiIcon.Timer, 21.dp, MaterialTheme.colorScheme.primary)
                             }
-                            Text(if (pending > 0) "下一步：完成剩余 $pending 项计划" else "下一步：开始一个 25 分钟专注", modifier = Modifier.weight(1f).padding(start = 10.dp), fontSize = 15.sp, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.primary)
+                            Text(when {
+                                carried != null -> com.raydon.moji.android.ai.ReviewNextStep.text(carried.first.title, carried.second)
+                                pending > 0 -> "下一步：完成剩余 $pending 项计划"
+                                else -> "下一步：开始一个 25 分钟专注"
+                            }, modifier = Modifier.weight(1f).padding(start = 10.dp), fontSize = 15.sp, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.primary)
                             Box(Modifier.offset(x = 6.dp)) { MojiLineIcon(MojiIcon.ArrowUpRight, 24.dp, MaterialTheme.colorScheme.secondary) }
                         }
                         }
@@ -270,10 +282,7 @@ fun ReviewScreen(
     }
     // 拟下周计划: the existing 下周草稿, for the week after the letter's.
     letterNextWeek?.let { letter ->
-        val monday = AIWeeklyLetter.monday(letter.week) ?: letterMonday
-        PlanDraftSheet(viewModel, "下周草稿", "按这一周的记录和“下周关注”拟的", waitingText = "正在拟下周",
-            origin = com.raydon.moji.android.ai.AIWriteText.nextWeekOrigin, summary = { count, _ -> com.raydon.moji.android.ai.AIWriteText.nextWeek(count) },
-            load = { com.raydon.moji.android.ai.AIAssistant.shared.draftNextWeek(viewModel.snapshot.value, monday, aiCategories(viewModel)) }) { letterNextWeek = null }
+        NextWeekDraftSheet(viewModel, AIWeeklyLetter.monday(letter.week) ?: letterMonday) { letterNextWeek = null }
     }
 }
 
@@ -343,7 +352,7 @@ private fun ReviewActionRow(icon: @Composable () -> Unit, title: String, detail:
 
 /** SF Symbol list.bullet.rectangle, 19.33 × 15.33 pt: rounded frame, four bullets, long/short lines alternating. */
 @Composable
-private fun ListBulletRectangleIcon(color: Color) {
+internal fun ListBulletRectangleIcon(color: Color) {
     androidx.compose.foundation.Canvas(Modifier.size(width = 19.33.dp, height = 15.33.dp)) {
         val u = 1.dp.toPx()
         val frame = 1.43f * u

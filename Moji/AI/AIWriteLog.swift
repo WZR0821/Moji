@@ -12,14 +12,34 @@ struct AIWriteEntry: Codable, Identifiable, Equatable {
     var before: [CheckInItem]
     var after: [CheckInItem]
     var undone: Bool
+    /// Memos the write created, e.g. steps kept as a checklist. Older entries have none.
+    var addedMemos: [MemoItem] = []
+
+    private enum CodingKeys: String, CodingKey {
+        case id, at, summary, added, before, after, undone, addedMemos
+    }
 
     var date: Date { Date(timeIntervalSince1970: at) }
 
     var undo: PlanDraftUndo {
-        PlanDraftUndo(added: added, changed: PlanWorkflowUndo(before: before, after: after))
+        PlanDraftUndo(added: added, changed: PlanWorkflowUndo(before: before, after: after), addedMemos: addedMemos)
     }
 
-    var total: Int { added.count + before.count }
+    var total: Int { added.count + before.count + addedMemos.count }
+}
+
+extension AIWriteEntry {
+    init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        id = try values.decode(UUID.self, forKey: .id)
+        at = try values.decode(Double.self, forKey: .at)
+        summary = try values.decode(String.self, forKey: .summary)
+        added = try values.decode([CheckInItem].self, forKey: .added)
+        before = try values.decode([CheckInItem].self, forKey: .before)
+        after = try values.decode([CheckInItem].self, forKey: .after)
+        undone = try values.decode(Bool.self, forKey: .undone)
+        addedMemos = try values.decodeIfPresent([MemoItem].self, forKey: .addedMemos) ?? []
+    }
 }
 
 /// The words for 留痕: where a plan came from and what one write did.
@@ -42,6 +62,34 @@ enum AIWriteText {
 
     static func entrySplit(count: Int, original: String) -> String {
         "拆成 \(count) 条：「\(AIDailyBrief.shortTitle(original))」"
+    }
+
+    /// 放下「归纳昨日待办」, from the carry-over seal.
+    static func dropped(title: String) -> String { "放下「\(AIDailyBrief.shortTitle(title))」" }
+
+    /// The steps appended to a plan's note: a blank line after what was there,
+    /// then 步骤： and one numbered line per step.
+    static func stepsNote(original: String, steps: [String]) -> String {
+        let lines = ["步骤："] + steps.enumerated().map { "\($0.offset + 1). \($0.element)" }
+        let kept = original.trimmingCharacters(in: .whitespacesAndNewlines)
+        return (kept.isEmpty ? "" : kept + "\n\n") + lines.joined(separator: "\n")
+    }
+
+    /// 把 3 步写进「准备季度汇报」的说明
+    static func stepsIntoNote(count: Int, title: String) -> String {
+        "把 \(count) 步写进「\(AIDailyBrief.shortTitle(title))」的说明"
+    }
+
+    /// 把「准备季度汇报」拆成清单备忘（4 项）
+    static func stepsAsChecklist(count: Int, title: String) -> String {
+        "把「\(AIDailyBrief.shortTitle(title))」拆成清单备忘（\(count) 项）"
+    }
+
+    static let prefillOrigin = "按备忘预填"
+
+    /// 按预填把「打印准考证」转成计划
+    static func prefillConversion(title: String) -> String {
+        "按预填把「\(AIDailyBrief.shortTitle(title))」转成计划"
     }
 
     /// What a suggestion changed, in the order 日期、时间、时长、类型、重复、标题.
@@ -135,9 +183,9 @@ final class AIWriteLog: ObservableObject {
 
     @discardableResult
     func record(summary: String, added: [CheckInItem], before: [CheckInItem], after: [CheckInItem],
-                at date: Date = Date()) -> UUID {
+                addedMemos: [MemoItem] = [], at date: Date = Date()) -> UUID {
         let entry = AIWriteEntry(id: UUID(), at: date.timeIntervalSince1970, summary: summary,
-                                 added: added, before: before, after: after, undone: false)
+                                 added: added, before: before, after: after, undone: false, addedMemos: addedMemos)
         entries = Self.pruned(entries + [entry], now: date)
         save()
         return entry.id

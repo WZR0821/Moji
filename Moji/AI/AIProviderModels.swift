@@ -418,7 +418,7 @@ enum AIRequestError: LocalizedError, Equatable {
         case .unreadableAnswer: return "模型没有按要求的格式回答，这次没有生成草稿。请重试或换一个模型。"
         case .http(let status): return Self.httpMessage(status)
         case .httpDetail(let status, let detail): return Self.httpMessage(status) + "\n服务商原话：\(detail)"
-        case .network: return "无法连接 AI 服务，请检查网络和 API 地址。"
+        case .network: return "无法连接模型服务，请检查网络和 API 地址。"
         case .timeout: return "等待超时。请稍后重试，或选择响应更快的模型。"
         case .credentialUnavailable: return "无法访问安全存储。请解锁手机后重试，或重新保存 API Key。"
         case .persistence: return "无法保存设置，请检查设备的可用空间。"
@@ -432,7 +432,7 @@ enum AIRequestError: LocalizedError, Equatable {
         case 403: return "此账户无权使用该服务或模型。（HTTP 403）"
         case 404: return "接口或模型不存在，请检查 API 地址和模型名称。（HTTP 404）"
         case 429: return "请求过于频繁或额度不足，请稍后重试。（HTTP 429）"
-        case 500...599: return "AI 服务暂时不可用，请稍后重试。（HTTP \(status)）"
+        case 500...599: return "模型服务暂时不可用，请稍后重试。（HTTP \(status)）"
         default: return "请求被接口拒绝，请检查模型、接口格式及账户权限。（HTTP \(status)）"
         }
     }

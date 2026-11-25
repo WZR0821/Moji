@@ -86,16 +86,21 @@ struct AIAssistant {
     func draftReflection(snapshot: PlanSnapshot, week: Date, now: Date = Date()) async throws -> ReflectionDraft {
         let record = AIDrafting.weekRecord(snapshot: snapshot, week: week, now: now)
         guard !record.plans.isEmpty else { throw AIRequestError.emptyText }
+        // Numbers the record does not have are taken out on the device.
         return try AIDrafting.reflection(from: try await ask(AIDrafting.reflectionInstructions, record.text),
-                                         plans: record.plans)
+                                         plans: record.plans, record: record.text)
     }
 
     func draftNextWeek(snapshot: PlanSnapshot, week: Date,
                        categories: [RecordCategory] = AIAssistant.categories(),
                        now: Date = Date()) async throws -> [PlanDraft] {
+        // A week without plans has nothing to draft from: nothing is sent.
+        guard !AIDrafting.weekRecord(snapshot: snapshot, week: week, now: now).plans.isEmpty else {
+            throw AIDraftCheckError.emptyWeek
+        }
         let answer = try await ask(AIDrafting.nextWeekInstructions(categories: categories),
                                    AIDrafting.nextWeekInput(snapshot: snapshot, week: week, now: now))
-        return try AIDrafting.nextWeekDrafts(from: answer, week: week, fallbackCategory: Self.defaultCategory,
+        return try AIDrafting.nextWeekDrafts(from: answer, week: week, now: now, fallbackCategory: Self.defaultCategory,
                                              categories: categories)
     }
 

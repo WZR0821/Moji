@@ -317,12 +317,33 @@ struct MemosView: View {
     }
 
 #if DEBUG
+    /// memo-original: a checklist made by 整理成清单 that kept the text it came from.
+    private func qaChecklistWithOriginal() -> MemoItem {
+        let now = Date()
+        let memo = MemoItem(
+            id: UUID(uuidString: "00000309-0000-4000-8000-000000000000") ?? UUID(),
+            title: "考前准备",
+            content: "下周六考试，前一天把准考证打印出来，查好去考场的路线和要多久，"
+                + "笔带两支黑色签字笔。\n还想再过一遍损害保险的三个判例，尤其是保险利益那一个。\n"
+                + "考完那天晚上和室友去吃火锅。",
+            mode: .checklist,
+            checklistItems: ["打印准考证", "确认考场路线和到达时间", "准备黑色签字笔两支", "复习损害保险的三个判例"]
+                .map { MemoChecklistItem(text: $0) },
+            createdAt: now.addingTimeInterval(-3_600),
+            updatedAt: now.addingTimeInterval(-600)
+        )
+        store.saveMemo(memo)
+        return memo
+    }
+
     private func runQAScenarioIfNeeded() {
         if !didRunQAScenario, let route = ProcessInfo.processInfo.environment["MOJI_QA_SCENARIO"], route.hasPrefix("ai-memo-") {
             didRunQAScenario = true
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
-                if route == "ai-memo-convert" {
+                if route == "ai-memo-convert" || route == "ai-memo-convert-edit" {
                     convertingMemo = store.memos.first(where: { $0.mode == .checklist })
+                } else if route == "ai-memo-original" {
+                    editorRoute = MemoEditorRoute(memo: qaChecklistWithOriginal())
                 } else {
                     editorRoute = MemoEditorRoute(memo: store.memos.first(where: { $0.mode == .note && !$0.content.isEmpty }))
                 }
@@ -416,6 +437,11 @@ private struct MemoEditorView: View {
     /// The text a drafted checklist replaced, kept until the memo is saved or
     /// the mode is switched by hand.
     @State private var textBeforeChecklistDraft: String?
+    /// 原文 under a checklist: shown in full once 展开 is tapped.
+    @State private var showsFullOriginal = false
+    @State private var originalFullHeight: CGFloat = 0
+    @State private var originalShownHeight: CGFloat = 0
+    @State private var confirmsBackToText = false
 
     init(store: PlanStore, memo: MemoItem? = nil) {
         self.store = store
@@ -602,6 +628,12 @@ private struct MemoEditorView: View {
             }
             .confirmDiscardEdits(isDirty: hasEdits, isPresented: $confirmsDiscard)
             .aiIntroSheet(isPresented: $showsAIIntro)
+            .alert("转回正文？", isPresented: $confirmsBackToText) {
+                Button("取消", role: .cancel) {}
+                Button("转回正文") { backToOriginalText() }
+            } message: {
+                Text("清单会去掉，原文放回正文。")
+            }
             .sheet(isPresented: $showsChecklistDraft) {
                 let memoTitle = cleanTitle
                 let text = content
@@ -721,18 +753,90 @@ private struct MemoEditorView: View {
             }
             .padding(.horizontal, 8)
             .padding(.bottom, 14)
+
+            if !cleanContent.isEmpty {
+                originalTextSection
+                    .padding(.horizontal, 14)
+                    .padding(.bottom, 18)
+            }
         }
         .scrollDismissesKeyboard(.interactively)
         .accessibilityIdentifier("memo.editor.checklist")
+    }
+
+    /// 原文: the text a checklist was made from, kept under it, read-only.
+    private var originalTextSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            InkBrushDivider(animated: false, seed: 23).opacity(0.3)
+            Text("原文")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(Color.planSecondary)
+            Text(cleanContent)
+                .font(.subheadline)
+                .foregroundStyle(Color.planSecondary)
+                .lineSpacing(3)
+                .lineLimit(showsFullOriginal ? nil : 4)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .textSelection(.enabled)
+                .background(alignment: .topLeading) {
+                    // The whole text, measured out of sight, says whether four lines hide any.
+                    Text(cleanContent)
+                        .font(.subheadline)
+                        .lineSpacing(3)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .hidden()
+                        .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { full in
+                            originalFullHeight = full
+                        }
+                }
+                .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { shown in
+                    originalShownHeight = shown
+                }
+                .accessibilityIdentifier("memo.editor.original")
+            HStack(spacing: 18) {
+                if originalIsLong || showsFullOriginal {
+                    Button(showsFullOriginal ? "收起" : "展开") {
+                        withAnimation(.easeOut(duration: 0.2)) { showsFullOriginal.toggle() }
+                    }
+                    .foregroundStyle(Color.planPrimary)
+                }
+                Spacer(minLength: 0)
+                Button("转回正文") { IMETextInput.commit { confirmsBackToText = true } }
+                    .foregroundStyle(Color.planPrimary)
+                    .accessibilityIdentifier("memo.editor.backToText")
+                Button("删去原文") { content = ""; showsFullOriginal = false }
+                    .foregroundStyle(Color.planSecondary)
+                    .accessibilityIdentifier("memo.editor.dropOriginal")
+            }
+            .font(.footnote.weight(.semibold))
+            .buttonStyle(.plain)
+            .frame(minHeight: 32)
+        }
+    }
+
+    /// Four lines hide some of the 原文.
+    private var originalIsLong: Bool {
+        originalFullHeight > originalShownHeight + 1
     }
 
     private func useChecklistDraft(_ items: [String]) {
         guard !items.isEmpty else { return }
         textBeforeChecklistDraft = content
         checklistItems = items.map { MemoChecklistItem(text: $0) }
-        content = ""
+        // The text stays as 原文 under the checklist.
         mode = .checklist
         isTitleFocused = false
+    }
+
+    /// 转回正文: the checklist goes, the 原文 is the text again.
+    private func backToOriginalText() {
+        let restored = MemoTextRules.backToText(original: content)
+        focusedChecklistItemID = nil
+        checklistItems = restored.items
+        content = restored.content
+        mode = restored.mode
+        textBeforeChecklistDraft = nil
+        showsFullOriginal = false
     }
 
     private func restoreTextBeforeChecklistDraft() {
@@ -758,9 +862,8 @@ private struct MemoEditorView: View {
                 focusedChecklistItemID = firstID
             }
         } else {
-            content = cleanedChecklistItems.map {
-                "\($0.isCompleted ? "✓" : "•") \($0.text)"
-            }.joined(separator: "\n")
+            // A 原文 kept under the checklist follows the lines after a blank line.
+            content = MemoTextRules.noteText(from: cleanedChecklistItems, original: content)
             focusedChecklistItemID = nil
             mode = .note
         }
@@ -916,19 +1019,9 @@ private struct MemoEditorView: View {
         dismiss()
     }
 
+    /// A checklist keeps its 原文 in `content`.
     private var normalizedText: (title: String, content: String) {
-        if mode == .checklist {
-            return (cleanTitle, "")
-        }
-        guard cleanTitle.isEmpty else {
-            return (cleanTitle, cleanContent)
-        }
-        let lines = cleanContent.components(separatedBy: .newlines)
-        let inferredTitle = lines.first?
-            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        let remainingContent = lines.dropFirst().joined(separator: "\n")
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-        return (inferredTitle, remainingContent)
+        MemoTextRules.normalized(title: title, content: content, mode: mode)
     }
 }
 

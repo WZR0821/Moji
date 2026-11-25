@@ -15,7 +15,9 @@ struct PlanDraft: Identifiable, Equatable {
     var reason = ""
     var isSelected = true
 
-    func plan(note: String = "", calendar: Calendar = .current) -> CheckInItem {
+    /// `fallbackMinutes` is kept as the plan's length when the draft has none:
+    /// the usual length of its type (it stays switched off, as before).
+    func plan(note: String = "", fallbackMinutes: Int? = nil, calendar: Calendar = .current) -> CheckInItem {
         var components = calendar.dateComponents([.era, .year, .month, .day], from: day)
         components.hour = scheduleKind.representativeHour ?? min(23, max(0, hour))
         components.minute = scheduleKind == .exactTime ? min(59, max(0, minute)) : 0
@@ -24,7 +26,7 @@ struct PlanDraft: Identifiable, Equatable {
             title: title,
             category: category,
             scheduledStart: calendar.date(from: components) ?? day,
-            plannedMinutes: minutes ?? 25,
+            plannedMinutes: minutes ?? fallbackMinutes ?? 25,
             note: note,
             scheduleKind: scheduleKind,
             plannedDurationEnabled: minutes != nil
@@ -118,6 +120,73 @@ struct EntrySuggestion: Equatable {
         if let title, title == plan.title { value.title = nil }
         return value
     }
+
+    /// 拆成 N 条: the first part takes the plan's place, the rest are new
+    /// plans; every field the suggestion read besides the title goes on all
+    /// of them. Nil when there is nothing to split.
+    func split(_ plan: CheckInItem, origin: String? = nil, calendar: Calendar = .current) -> (first: CheckInItem, rest: [CheckInItem])? {
+        guard parts.count >= 2, plan.kind == .planned else { return nil }
+        var fields = self
+        fields.title = nil
+        fields.parts = []
+        var first = plan
+        first.title = parts[0]
+        first = fields.applied(to: first, calendar: calendar) ?? first
+        let rest = parts.dropFirst().map { part -> CheckInItem in
+            var item = CheckInItem(
+                title: part,
+                category: plan.category,
+                scheduledStart: plan.scheduledStart,
+                plannedMinutes: plan.plannedMinutes,
+                scheduleKind: plan.effectiveScheduleKind,
+                detailsConfigured: plan.hasConfiguredDetails,
+                plannedDurationEnabled: plan.plannedDurationEnabled
+            )
+            item = fields.applied(to: item, calendar: calendar) ?? item
+            item.aiOrigin = origin
+            return item
+        }
+        return (first, Array(rest))
+    }
+}
+
+/// What a plan said when a suggestion was made for it. Once any of these is
+/// changed the suggestion is stale and is dropped.
+struct EntrySuggestionBasis: Equatable {
+    var title: String
+    var status: CheckInStatus
+    var day: Date
+    var scheduleKind: ScheduleKind
+    var hour: Int
+    var minute: Int
+    var minutes: Int?
+    var category: RecordCategory
+    var repeatRule: PlanRepeatRule
+
+    init(_ plan: CheckInItem, calendar: Calendar = .current) {
+        title = plan.title
+        status = plan.status
+        day = calendar.startOfDay(for: plan.scheduledStart)
+        scheduleKind = plan.effectiveScheduleKind
+        let time = calendar.dateComponents([.hour, .minute], from: plan.scheduledStart)
+        hour = scheduleKind == .exactTime ? time.hour ?? 0 : 0
+        minute = scheduleKind == .exactTime ? time.minute ?? 0 : 0
+        minutes = plan.plannedDurationMinutes
+        category = plan.category
+        repeatRule = plan.effectiveRepeatRule
+    }
+
+    func stillHolds(for plan: CheckInItem, calendar: Calendar = .current) -> Bool {
+        EntrySuggestionBasis(plan, calendar: calendar) == self
+    }
+}
+
+/// A suggestion kept under a row: where it came from and what the plan said then.
+struct ShownEntrySuggestion: Equatable {
+    var suggestion: EntrySuggestion
+    var basis: EntrySuggestionBasis
+    /// Read on the device; a model's reading may still replace it.
+    var isLocal: Bool
 }
 
 struct ReflectionDraft: Equatable {
@@ -126,6 +195,8 @@ struct ReflectionDraft: Equatable {
         var point: String
         /// Titles of the plans the point rests on, looked up locally.
         var planTitles: [String]
+        /// The same plans, for opening them under the point. Empty for a letter's points.
+        var planIDs: [UUID] = []
         static func == (lhs: Evidence, rhs: Evidence) -> Bool {
             lhs.point == rhs.point && lhs.planTitles == rhs.planTitles
         }
@@ -154,13 +225,17 @@ struct LibraryFilter: Equatable {
     var to: Date?
 }
 
-/// Plans a draft added or changed: one step of undo.
+/// Plans a draft added or changed, and memos it created: one step of undo.
 struct PlanDraftUndo {
     var added: [CheckInItem]
     var changed: PlanWorkflowUndo
+    var addedMemos: [MemoItem] = []
+
+    var total: Int { added.count + changed.before.count + addedMemos.count }
 
     /// Takes back only what has not been touched since. A plan that was edited,
-    /// started or finished after the draft was accepted stays as it is.
+    /// started or finished after the draft was accepted stays as it is, and so
+    /// does a memo edited since.
     @discardableResult
     func apply(to state: inout PlanSnapshot, blockedID: UUID? = nil) -> Int {
         var count = changed.apply(to: &state, blockedID: blockedID)
@@ -172,7 +247,43 @@ struct PlanDraftUndo {
             state.checkInItems.remove(at: index)
             count += 1
         }
+        for memo in addedMemos {
+            guard let index = state.memos.firstIndex(where: { $0.id == memo.id }), state.memos[index] == memo else { continue }
+            state.memos.remove(at: index)
+            count += 1
+        }
         return count
+    }
+}
+
+/// A draft checked on the device and found not to hold.
+enum AIDraftCheckError: LocalizedError, Equatable {
+    /// Every sentence of a reflection named a number the week's record does not have.
+    case reflectionMismatch
+    /// The week has no plans, so there is nothing to draft from.
+    case emptyWeek
+
+    var errorDescription: String? {
+        switch self {
+        case .reflectionMismatch: return "这次起草的内容和本周记录对不上，再试一次。"
+        case .emptyWeek: return "这一周还没有计划记录，没有可以拟的内容。"
+        }
+    }
+}
+
+/// The numbers of one week, worked out on the device: the same ones the
+/// record sent to the model says, and the line shown under a drafted reflection.
+struct WeekRecordStats: Equatable {
+    /// 完成、没做完、跳过 together: every plan the record lists.
+    var planned: Int
+    var completed: Int
+    var open: Int
+    var skipped: Int
+    var actualMinutes: Int
+
+    /// 本周排了 6 件，完成 3 件，没做完 2 件；专注 1 小时 20 分钟
+    var line: String {
+        "本周排了 \(planned) 件，完成 \(completed) 件，没做完 \(open) 件；专注 \(DurationText.full(minutes: actualMinutes))"
     }
 }
 
@@ -334,6 +445,31 @@ enum AIDrafting {
         return cues.contains { clean.contains($0) }
     }
 
+    /// 11月18日 周三
+    static func monthDayWeekday(_ day: Date, calendar: Calendar = .current) -> String {
+        let c = calendar.dateComponents([.month, .day], from: day)
+        let names = ["周一", "周二", "周三", "周四", "周五", "周六", "周日"]
+        let weekday = (calendar.component(.weekday, from: day) + 5) % 7
+        return "\(c.month ?? 1)月\(c.day ?? 1)日 \(names[weekday])"
+    }
+
+    /// One plan opened under a point of a drafted reflection:
+    /// 背单词 · 11月18日 周三 · 已完成
+    static func evidencePlanLine(_ plan: CheckInItem, now: Date, calendar: Calendar = .current) -> String {
+        let state: String
+        switch plan.status {
+        case .completed: state = "已完成"
+        case .skipped: state = "已跳过"
+        case .planned, .inProgress:
+            if let days = CarryOverSeal.daysLate(scheduledStart: plan.scheduledStart, on: now, calendar: calendar) {
+                state = "顺延 \(days) 天"
+            } else {
+                state = "没做完"
+            }
+        }
+        return "\(plan.title) · \(monthDayWeekday(plan.scheduledStart, calendar: calendar)) · \(state)"
+    }
+
     static func dayText(_ day: Date, now: Date = Date(), calendar: Calendar = .current) -> String {
         let start = calendar.startOfDay(for: day)
         let today = calendar.startOfDay(for: now)
@@ -493,30 +629,94 @@ enum AIDrafting {
     static func conversionHints(from answer: String, rowCount: Int, now: Date,
                                 categories: [RecordCategory], calendar: Calendar = .current) throws -> [Int: ConversionHint] {
         let object = try object(in: answer)
+        let today = calendar.startOfDay(for: now)
         var hints: [Int: ConversionHint] = [:]
         for raw in object["rows"] as? [Any] ?? [] {
             guard let row = raw as? [String: Any], let index = integer(row["index"]), (0..<rowCount).contains(index) else { continue }
-            let hint = ConversionHint(day: day(in: row, now: now, calendar: calendar),
+            // A row is never turned into a plan for a day already gone.
+            let hint = ConversionHint(day: day(in: row, now: now, calendar: calendar).map { max(today, $0) },
                                       category: category(row["category"], in: categories))
             if hint.day != nil || hint.category != nil { hints[index] = hint }
         }
         return hints
     }
 
-    static func reflection(from answer: String, plans: [CheckInItem]) throws -> ReflectionDraft {
+    /// `record` is the text the model was given. With it, a sentence naming a
+    /// number the record does not have is taken out; nothing left of the note
+    /// means the draft does not hold.
+    static func reflection(from answer: String, plans: [CheckInItem], record: String? = nil) throws -> ReflectionDraft {
         let object = try object(in: answer)
-        guard let note = string(object["note"]) else { throw AIRequestError.unreadableAnswer }
+        guard var note = string(object["note"]) else { throw AIRequestError.unreadableAnswer }
+        var nextFocus = string(object["next_focus"]) ?? ""
+        if let record {
+            let allowed = allowedNumbers(record: record)
+            note = keepingRecordedNumbers(note, allowed: allowed)
+            nextFocus = keepingRecordedNumbers(nextFocus, allowed: allowed)
+            guard !note.isEmpty else { throw AIDraftCheckError.reflectionMismatch }
+        }
         let evidence = (object["evidence"] as? [Any] ?? []).compactMap { raw -> ReflectionDraft.Evidence? in
             guard let item = raw as? [String: Any], let point = string(item["point"]) else { return nil }
-            let titles = (item["plans"] as? [Any] ?? []).compactMap { integer($0) }
-                .filter { $0 >= 1 && $0 <= plans.count }.map { plans[$0 - 1].title }
+            let cited = (item["plans"] as? [Any] ?? []).compactMap { integer($0) }
+                .filter { $0 >= 1 && $0 <= plans.count }.map { plans[$0 - 1] }
             // A point that rests on nothing in the record is not shown.
-            guard !titles.isEmpty else { return nil }
-            return ReflectionDraft.Evidence(point: String(point.prefix(80)), planTitles: Array(titles.prefix(4)))
+            guard !cited.isEmpty else { return nil }
+            let kept = Array(cited.prefix(4))
+            return ReflectionDraft.Evidence(point: String(point.prefix(80)), planTitles: kept.map(\.title),
+                                            planIDs: kept.map(\.id))
         }
         return ReflectionDraft(note: String(note.prefix(600)),
-                               nextFocus: String((string(object["next_focus"]) ?? "").prefix(120)),
+                               nextFocus: String(nextFocus.prefix(120)),
                                evidence: Array(evidence.prefix(3)))
+    }
+
+    // MARK: Numbers in a drafted reflection
+
+    /// Ends a sentence; the mark stays with it.
+    static let sentenceEnds: Set<Character> = ["。", "！", "？", "；", "!", "?", ";", "\n"]
+
+    static func sentences(_ text: String) -> [String] {
+        var result: [String] = []
+        var current = ""
+        for character in text {
+            current.append(character)
+            if sentenceEnds.contains(character) {
+                result.append(current)
+                current = ""
+            }
+        }
+        if !current.isEmpty { result.append(current) }
+        return result
+    }
+
+    private static let digitNumber = try! NSRegularExpression(pattern: #"[0-9]+(?:\.[0-9]+)?"#)
+    private static let chineseCount = try! NSRegularExpression(
+        pattern: "([零一二两三四五六七八九十百]+)(?=件|项|条|次|天|个|周|小时|分钟)")
+
+    /// Numbers written in a sentence: runs of digits (with a decimal point),
+    /// and Chinese numerals right before 件 项 条 次 天 个 周 小时 分钟 (not a bare 分:
+    /// 十分顺利 means "very smooth").
+    static func numbers(in text: String) -> [Double] {
+        let ns = text as NSString
+        let whole = NSRange(location: 0, length: ns.length)
+        var found = digitNumber.matches(in: text, range: whole).compactMap { Double(ns.substring(with: $0.range)) }
+        for match in chineseCount.matches(in: text, range: whole) {
+            if let value = QuickEntryParser.number(ns.substring(with: match.range(at: 1))) { found.append(Double(value)) }
+        }
+        return found
+    }
+
+    /// Every number the record sent to the model has (titles included), and 1 to 7.
+    static func allowedNumbers(record: String) -> Set<Double> {
+        // The [3] in front of each plan only numbers it for citing; it is not a fact of the week.
+        let facts = record.replacingOccurrences(of: #"\[[0-9]+\]"#, with: " ", options: .regularExpression)
+        return Set(numbers(in: facts)).union((1...7).map(Double.init))
+    }
+
+    /// The text without the sentences that name a number not in `allowed`.
+    static func keepingRecordedNumbers(_ text: String, allowed: Set<Double>) -> String {
+        sentences(text).filter { numbers(in: $0).allSatisfy(allowed.contains) }
+            .joined()
+            .trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     private static func planDrafts(in object: [String: Any], limit: Int, fallbackCategory: RecordCategory,
@@ -536,13 +736,35 @@ enum AIDrafting {
         return Array(drafts.prefix(limit))
     }
 
-    static func nextWeekDrafts(from answer: String, week: Date, fallbackCategory: RecordCategory,
+    /// The week after `week`. A day of it already gone moves to today.
+    static func nextWeekDrafts(from answer: String, week: Date, now: Date, fallbackCategory: RecordCategory,
                                categories: [RecordCategory], calendar: Calendar = .current) throws -> [PlanDraft] {
         let monday = PlanWorkflow.weekStart(week, calendar: calendar)
+        let today = calendar.startOfDay(for: now)
         return try planDrafts(in: object(in: answer), limit: 8, fallbackCategory: fallbackCategory, categories: categories) { item in
-            guard let weekday = integer(item["weekday"]), (1...7).contains(weekday) else { return nil }
-            return calendar.date(byAdding: .day, value: 7 + weekday - 1, to: monday)
+            guard let weekday = integer(item["weekday"]), (1...7).contains(weekday),
+                  let day = calendar.date(byAdding: .day, value: 7 + weekday - 1, to: monday) else { return nil }
+            return max(today, day)
         }
+    }
+
+    /// 下周 is the week after the one reviewed, offered only while it has not
+    /// passed: the reviewed week is this week or last week.
+    static func canDraftNextWeek(week: Date, now: Date, calendar: Calendar = .current) -> Bool {
+        let reviewed = PlanWorkflow.weekStart(week, calendar: calendar)
+        let current = PlanWorkflow.weekStart(now, calendar: calendar)
+        guard let previous = calendar.date(byAdding: .day, value: -7, to: current) else { return reviewed == current }
+        return reviewed == current || reviewed == previous
+    }
+
+    /// The offer under 周复盘 after it was saved: once per week, while the
+    /// week can still be drafted for and the entry points are shown.
+    static func showsNextWeekOffer(reflection: WeeklyReflection?, week: Date, now: Date, showsEntries: Bool,
+                                   handled: Bool, calendar: Calendar = .current) -> Bool {
+        guard showsEntries, !handled, let reflection,
+              !(reflection.note.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                && reflection.nextFocus.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty) else { return false }
+        return canDraftNextWeek(week: week, now: now, calendar: calendar)
     }
 
     static func preparationDrafts(from answer: String, target: Date, now: Date, fallbackCategory: RecordCategory,
@@ -570,10 +792,23 @@ enum AIDrafting {
                               calendar: Calendar = .current) throws -> LibraryFilter {
         let object = try object(in: answer)
         var filter = LibraryFilter()
-        filter.keyword = String((string(object["keyword"]) ?? "").prefix(30))
-        if let category = category(object["category"], in: categories) { filter.category = category.rawValue }
-        if let status = string(object["status"]),
-           ["planned", "inProgress", "completed", "skipped", "archived"].contains(status) { filter.status = status }
+        // “全部”-like answers say “no limit”; they are read, not refused.
+        var understood = false
+        let keyword = string(object["keyword"]) ?? ""
+        if unlimitedWords.contains(keyword.lowercased()) {
+            understood = true
+        } else {
+            filter.keyword = String(keyword.prefix(30))
+        }
+        if let category = category(object["category"], in: categories) {
+            filter.category = category.rawValue
+        } else if let word = string(object["category"]), unlimitedWords.contains(word.lowercased()) {
+            understood = true
+        }
+        if let status = string(object["status"]) {
+            if ["planned", "inProgress", "completed", "skipped", "archived"].contains(status) { filter.status = status }
+            else if unlimitedWords.contains(status.lowercased()) { understood = true }
+        }
         let today = calendar.startOfDay(for: now)
         let monday = PlanWorkflow.weekStart(today, calendar: calendar)
         func week(_ offset: Int) {
@@ -588,6 +823,7 @@ enum AIDrafting {
                   let end = calendar.date(byAdding: .day, value: -1, to: next) else { return }
             filter.period = "range"; filter.from = start; filter.to = end
         }
+        if let period = string(object["period"]), unlimitedWords.contains(period.lowercased()) { understood = true }
         switch string(object["period"]) {
         case "past": filter.period = "past"
         case "today": filter.period = "today"
@@ -604,9 +840,13 @@ enum AIDrafting {
             }
         default: break
         }
-        guard filter != LibraryFilter() else { throw AIRequestError.unreadableAnswer }
+        guard filter != LibraryFilter() || understood else { throw AIRequestError.unreadableAnswer }
         return filter
     }
+
+    /// Answers meaning “any”: 全部类型, all, 不限…
+    static let unlimitedWords: Set<String> = ["all", "any", "全部", "所有", "全部类型", "所有类型", "全部状态", "所有状态",
+                                              "全部日期", "所有日期", "全部计划", "所有计划", "不限"]
 
     // MARK: What is sent
 
@@ -626,6 +866,14 @@ enum AIDrafting {
 
     /// One week as plain facts, with the plans numbered so that a point in the
     /// draft can cite them. Every number in it is computed here.
+    static func weekStats(snapshot: PlanSnapshot, week: Date, calendar: Calendar = .current) -> WeekRecordStats {
+        let summary = WorkflowWeekSummary.make(snapshot: snapshot, week: week, calendar: calendar)
+        let skipped = summary.scheduled.filter { $0.status == .skipped }.count
+        let open = summary.carryover.count + summary.pending.count
+        return WeekRecordStats(planned: summary.completed.count + open + skipped, completed: summary.completed.count,
+                               open: open, skipped: skipped, actualMinutes: summary.actualMinutes)
+    }
+
     static func weekRecord(snapshot: PlanSnapshot, week: Date, now: Date,
                            calendar: Calendar = .current) -> (text: String, plans: [CheckInItem]) {
         let summary = WorkflowWeekSummary.make(snapshot: snapshot, week: week, calendar: calendar)

@@ -87,7 +87,8 @@ class AIAssistant(val store: AISettingsStore, val client: AIClient = AIClient())
     suspend fun draftReflection(snapshot: PlanSnapshot, week: LocalDate, now: ZonedDateTime = ZonedDateTime.now()): ReflectionDraft {
         val record = AIDrafting.weekRecord(snapshot, week, now)
         if (record.plans.isEmpty()) throw AIRequestError.emptyText
-        return AIDrafting.reflection(ask(AIDrafting.reflectionInstructions, record.text), record.plans)
+        // Sentences with numbers the record does not have are taken out on the device (A8).
+        return AIDrafting.checkedReflection(ask(AIDrafting.reflectionInstructions, record.text), record)
     }
 
     suspend fun draftNextWeek(
@@ -97,8 +98,10 @@ class AIAssistant(val store: AISettingsStore, val client: AIClient = AIClient())
         now: ZonedDateTime = ZonedDateTime.now(),
         fallbackCategory: String = defaultCategory,
     ): List<PlanDraft> {
+        // A week with no plans at all has nothing to go on; nothing is sent (A3).
+        if (AIDrafting.weekRecord(snapshot, week, now).plans.isEmpty()) throw AIRequestError.emptyWeek
         val answer = ask(AIDrafting.nextWeekInstructions(categories), AIDrafting.nextWeekInput(snapshot, week, now))
-        return AIDrafting.nextWeekDrafts(answer, week, fallbackCategory, categories)
+        return AIDrafting.nextWeekDrafts(answer, week, fallbackCategory, categories, now.toLocalDate())
     }
 
     suspend fun draftPreparation(

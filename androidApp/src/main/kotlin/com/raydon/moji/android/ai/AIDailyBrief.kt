@@ -218,6 +218,8 @@ class AIProactiveStore(private val prefs: AIPreferences) {
     private val dismissedState = MutableStateFlow(prefs.getString(dismissedDayKey)?.takeIf { it.isNotEmpty() })
     private val orderState = MutableStateFlow(readOrder())
     private val carryState = MutableStateFlow(readCarry())
+    private val shareIntroducedState = MutableStateFlow(readList(shareIntroKey))
+    private val nextWeekHandledState = MutableStateFlow(readList(nextWeekOfferKey))
 
     val brief: StateFlow<BriefCache?> = briefState.asStateFlow()
     /** The day × was tapped on the brief. */
@@ -225,6 +227,8 @@ class AIProactiveStore(private val prefs: AIPreferences) {
     val todayOrder: StateFlow<TodayOrder?> = orderState.asStateFlow()
     /** Plans whose carry note was answered with 不用. */
     val carryDismissed: StateFlow<List<String>> = carryState.asStateFlow()
+    /** Weeks (their Monday, yyyy-MM-dd) whose 下周 offer was closed with × or taken up. */
+    val nextWeekHandled: StateFlow<List<String>> = nextWeekHandledState.asStateFlow()
 
     private val loadingState = MutableStateFlow(false)
     /** True while today's order is being asked for. */
@@ -305,6 +309,38 @@ class AIProactiveStore(private val prefs: AIPreferences) {
         orderState.value = order
     }
 
+    /**
+     * Something shared in while not set up opens the introduction once (A4); after
+     * that it waits in the inbox without asking again, 隐藏这些入口 or not.
+     */
+    fun shouldIntroduceShare(itemID: String): Boolean = itemID !in shareIntroducedState.value
+
+    /** Of the inbox's items, oldest first, the first that has not had its introduction yet. */
+    fun shareToIntroduce(itemIDs: List<String>): String? = itemIDs.firstOrNull(::shouldIntroduceShare)
+
+    fun markShareIntroduced(itemID: String) {
+        if (itemID in shareIntroducedState.value) return
+        shareIntroducedState.value = save(shareIntroKey, shareIntroducedState.value + itemID)
+    }
+
+    /** The 下周 offer under a saved 周复盘, closed with × or taken up for that week ("2026-11-23") (B3). */
+    fun isNextWeekOfferHandled(week: String): Boolean = week in nextWeekHandledState.value
+
+    fun markNextWeekOfferHandled(week: String) {
+        if (week !in nextWeekHandledState.value) nextWeekHandledState.value = save(nextWeekOfferKey, nextWeekHandledState.value + week)
+    }
+
+    private fun save(key: String, values: List<String>): List<String> {
+        val list = values.takeLast(rememberedLimit)
+        prefs.putString(key, buildJsonArray { list.forEach { add(JsonPrimitive(it)) } }.toString())
+        return list
+    }
+
+    private fun readList(key: String): List<String> {
+        val text = prefs.getString(key)?.takeIf { it.isNotEmpty() } ?: return emptyList()
+        return strings(runCatching { Json.parseToJsonElement(text) }.getOrNull())
+    }
+
     fun dismissCarryNote(planID: String) {
         if (planID in carryState.value) return
         val list = (carryState.value + planID).takeLast(carryDismissedLimit)
@@ -341,6 +377,10 @@ class AIProactiveStore(private val prefs: AIPreferences) {
         const val todayOrderKey = "moji.ai.todayOrder.v1"
         const val carryDismissedKey = "moji.ai.carryNotes.dismissed.v1"
         const val carryDismissedLimit = 300
+        // Same keys and limit as iOS AISettingsStore: beside the settings, not in the snapshot or backups.
+        const val shareIntroKey = "moji.ai.shareIntroShown.v1"
+        const val nextWeekOfferKey = "moji.ai.nextWeekOffer.v1"
+        const val rememberedLimit = 200
 
         @Volatile private var installed: AIProactiveStore? = null
         @Volatile private var fixture: AIProactiveStore? = null

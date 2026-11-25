@@ -190,6 +190,16 @@ object QuickEntryParser {
             "$S?(?:分钟|(?i:mins|min)(?![a-zA-Z]))"
     )
 
+    /** Words after a repeat that go with it when the repeat is adopted, longest first. */
+    internal val repeatTails = listOf("都要", "都得", "也要", "都")
+
+    /**
+     * Every chip the device read, as if all were adopted: the local suggestion
+     * shown under a row added without tapping any chip. Null when nothing was read.
+     */
+    fun localSuggestion(text: String, tokens: List<QuickEntryToken>): EntrySuggestion? =
+        suggestion(text, tokens, tokens.map { it.id }.toSet())
+
     /** After these, “N点” is a count of points, not a time: 提三点意见. */
     internal val pointNouns = listOf("意见", "建议", "想法", "内容", "要求", "原因", "理由", "问题", "看法", "心得", "体会", "收获")
 
@@ -239,7 +249,9 @@ private class Scan(private val text: String, private val today: LocalDate) {
     fun readRepeat() {
         val match = QuickEntryParser.repeatPattern.matcher(text)
         while (match.find()) {
-            val span = match.span()
+            // 「都要」「都得」「也要」「都」 after the repeat word belong to it: 工作日都要 goes as a whole.
+            val tail = QuickEntryParser.repeatTails.firstOrNull { text.startsWith(it, match.end()) }
+            val span = QuickEntryToken.Span(match.start(), match.end() + (tail?.length ?: 0))
             if (!isFree(span)) continue
             val rule = when {
                 match.named("workday") != null -> "weekdays"

@@ -699,7 +699,7 @@ private fun AIModelSettingsPage(
             })
         }
 
-        val placesFooter = listOf(AIFooter("日期、钟点和时长在本机识别。开着今日提要或晚间收尾时，当天第一次显示会把今天计划的标题、时间和最近的倒数日发给模型；本周来信每周把这一周的计划记录发一次。没开启 AI 整理时，点入口会先介绍怎么开启。"))
+        val placesFooter = listOf(AIFooter("日期、钟点和时长在本机识别。开着今日提要或晚间收尾时，当天第一次显示会把今天计划的标题、时间和最近的倒数日发给模型；本周来信每周把这一周的计划记录发一次。没开启 AI 整理时，今日提要、晚间收尾、本周来信和顺延旁批不出现；其余入口点了会先介绍怎么开启。"))
         AISection(flow.place("在哪里出现", true), "在哪里出现", placesFooter) {
             FormToggle("识别首页写下的计划", settings.readsQuickEntry, { value -> setNotice(store.tryChange { it.copy(readsQuickEntry = value) }) })
             FormSeparator()
@@ -1438,7 +1438,7 @@ private val aiHelpPlaces: List<Triple<MojiIcon, String, String>> = listOf(
     Triple(MojiIcon.MoonStars, "晚间收尾", "21 点以后在今日计划上方：今天完成几件、专注多久；剩下的每件给一个安排（顺延到明天、明早先做、拆小、放下），照此处理前可以逐条改。"),
     Triple(MojiIcon.TextAppend, "顺延旁批", "同一条计划顺延满 3 天，行下出一行朱字，点开就是拆小的草稿；点过“不用”就不再提。"),
     Triple(MojiIcon.Envelope, "本周来信", "周日 20:00 起在回顾页：一个题签、几句这一周的情况和依据；可以放进复盘、拟下周计划，往期来信都留在本机。"),
-    Triple(MojiIcon.DocMagnify, "回顾 › 周复盘 › 起草复盘", "按这一周的记录起草两栏文字，并注明依据的计划；还可以拟下周草稿。"),
+    Triple(MojiIcon.DocMagnify, "回顾 › 周复盘", "打开时先按这一周的记录放一份草稿进两栏，并注明依据的计划，可以直接改或清空；复盘存好后，会提议按“下周关注”拟下周草稿。"),
     Triple(MojiIcon.TabChecklist, "备忘 › 备忘操作 › 整理成清单", "把正文里要做的事整理成清单；转为计划时预填日期和类型。"),
     Triple(MojiIcon.TimerSF, "时刻 › 新建后 › 准备计划", "为一个重要的日子拟几条提前要做的事。"),
     Triple(MojiIcon.FilterLines, "计划库 › 搜索框", "写一句“上周没做完的学习计划”，替你设好筛选。"),

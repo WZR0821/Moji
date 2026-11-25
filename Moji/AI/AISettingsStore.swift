@@ -94,6 +94,40 @@ final class AISettingsStore: ObservableObject {
         try save(value)
     }
 
+    // MARK: Remembered beside the settings (not in the snapshot or backups)
+
+    static let shareIntroKey = "moji.ai.shareIntroShown.v1"
+    static let nextWeekOfferKey = "moji.ai.nextWeekOffer.v1"
+    static let rememberedLimit = 200
+
+    /// The introduction opens by itself at most once for each shared item
+    /// while nothing is set up; the item stays in the inbox for later.
+    func shouldIntroduceShare(_ itemID: String) -> Bool {
+        !(defaults.stringArray(forKey: Self.shareIntroKey) ?? []).contains(itemID)
+    }
+
+    func markShareIntroduced(_ itemID: String) {
+        remember(itemID, forKey: Self.shareIntroKey)
+    }
+
+    /// The 下周 offer under 周复盘, closed or taken up for that week ("2026-11-23").
+    func isNextWeekOfferHandled(_ weekKey: String) -> Bool {
+        (defaults.stringArray(forKey: Self.nextWeekOfferKey) ?? []).contains(weekKey)
+    }
+
+    func markNextWeekOfferHandled(_ weekKey: String) {
+        objectWillChange.send()
+        remember(weekKey, forKey: Self.nextWeekOfferKey)
+    }
+
+    private func remember(_ value: String, forKey key: String) {
+        var list = defaults.stringArray(forKey: key) ?? []
+        guard !list.contains(value) else { return }
+        list.append(value)
+        if list.count > Self.rememberedLimit { list.removeFirst(list.count - Self.rememberedLimit) }
+        defaults.set(list, forKey: key)
+    }
+
     /// What a request needs. Throws the reason nothing can be sent.
     func credentials() throws -> (entryID: String, configuration: ProviderConfiguration, apiKey: String) {
         guard settings.isEnabled else { throw AIRequestError.disabled }

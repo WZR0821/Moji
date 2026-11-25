@@ -176,6 +176,19 @@ struct CountdownEditorView: View {
         }
     }
 
+    /// The icon follows the title (生日 → gift, 考试 → pencil.and.outline …) for a
+    /// new day, and for one still wearing its type's default whose title changed.
+    private var symbolName: String {
+        guard let event else {
+            return MojiLocalRules.countdownSymbol(title: cleanTitle, fallback: context.defaultSymbolName)
+        }
+        let titleChanged = cleanTitle != event.title.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard titleChanged, MojiLocalRules.countdownDefaultSymbols.contains(event.symbolName) else {
+            return event.symbolName
+        }
+        return MojiLocalRules.countdownSymbol(title: cleanTitle, fallback: event.symbolName)
+    }
+
     @MainActor
     private func save() async {
         guard !cleanTitle.isEmpty else { return }
@@ -185,7 +198,7 @@ struct CountdownEditorView: View {
             id: event?.id ?? UUID(),
             title: cleanTitle,
             targetDate: Calendar.current.startOfDay(for: targetDate),
-            symbolName: event?.symbolName ?? context.defaultSymbolName,
+            symbolName: symbolName,
             colorName: event?.colorName ?? "vermilion",
             isPinned: isPinned,
             createdAt: event?.createdAt ?? Date(),

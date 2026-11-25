@@ -1,6 +1,7 @@
 package com.raydon.moji.android.ai
 
 import com.raydon.moji.core.CheckInItem
+import com.raydon.moji.core.MemoItem
 import com.raydon.moji.core.MojiJson
 import com.raydon.moji.core.PlanWorkflowUndo
 import java.time.Instant
@@ -37,10 +38,12 @@ data class AIWriteEntry(
     val before: List<CheckInItem>,
     val after: List<CheckInItem>,
     val undone: Boolean = false,
+    /** Memos the write added (存成清单); empty in entries written before 1.10.0. */
+    val addedMemos: List<MemoItem> = emptyList(),
 ) {
-    val undo: PlanDraftUndo get() = PlanDraftUndo(added, PlanWorkflowUndo(before, after))
+    val undo: PlanDraftUndo get() = PlanDraftUndo(added, PlanWorkflowUndo(before, after), addedMemos)
 
-    val total: Int get() = added.size + before.size
+    val total: Int get() = added.size + before.size + addedMemos.size
 
     val instant: Instant get() = Instant.ofEpochMilli((at * 1000).toLong())
 
@@ -62,6 +65,19 @@ object AIWriteText {
 
     fun breakdown(count: Int, title: String, archived: Boolean): String =
         "拆成 $count 步：「${AIDailyBrief.shortTitle(title)}」" + if (archived) "，原计划已归档" else ""
+
+    /** 拆成步骤 › 写进说明 */
+    fun stepsIntoNote(count: Int, title: String): String = "把 $count 步写进「${AIDailyBrief.shortTitle(title)}」的说明"
+
+    /** 拆成步骤 › 存成清单 */
+    fun stepsIntoChecklist(title: String, count: Int): String = "把「${AIDailyBrief.shortTitle(title)}」拆成清单备忘（$count 项）"
+
+    /** 顺延印 › 放下: archived, like 晚间收尾's 放下. */
+    fun dropped(title: String): String = "放下「${AIDailyBrief.shortTitle(title)}」"
+
+    /** 备忘转计划 with a row's own date and type. */
+    const val memoHintOrigin = "按备忘预填"
+    fun memoHinted(title: String): String = "按预填把「${AIDailyBrief.shortTitle(title)}」转成计划"
 
     fun entrySplit(count: Int, original: String): String = "拆成 $count 条：「${AIDailyBrief.shortTitle(original)}」"
 
@@ -124,8 +140,8 @@ class AIWriteLog(private val prefs: AIPreferences, now: Instant = Instant.now(),
     val entries: StateFlow<List<AIWriteEntry>> = state.asStateFlow()
 
     fun record(summary: String, added: List<CheckInItem>, before: List<CheckInItem>, after: List<CheckInItem>,
-               at: Instant = Instant.now()): String {
-        val entry = AIWriteEntry(UUID.randomUUID().toString(), at.toEpochMilli() / 1000.0, summary, added, before, after, false)
+               at: Instant = Instant.now(), addedMemos: List<MemoItem> = emptyList()): String {
+        val entry = AIWriteEntry(UUID.randomUUID().toString(), at.toEpochMilli() / 1000.0, summary, added, before, after, false, addedMemos)
         state.value = pruned(state.value + entry, at, zone)
         save()
         return entry.id
@@ -172,6 +188,7 @@ class AIWriteLog(private val prefs: AIPreferences, now: Instant = Instant.now(),
 
         private val codec = Json(MojiJson.codec) { prettyPrint = false }
         private val plansSerializer = ListSerializer(CheckInItem.serializer())
+        private val memosSerializer = ListSerializer(MemoItem.serializer())
 
         /** Entries from the last seven days, at most 200, oldest dropped first. */
         fun pruned(entries: List<AIWriteEntry>, now: Instant, zone: ZoneId = ZoneId.systemDefault()): List<AIWriteEntry> {
@@ -195,6 +212,7 @@ class AIWriteLog(private val prefs: AIPreferences, now: Instant = Instant.now(),
                 put("before", codec.encodeToJsonElement(plansSerializer, entry.before))
                 put("after", codec.encodeToJsonElement(plansSerializer, entry.after))
                 put("undone", entry.undone)
+                if (entry.addedMemos.isNotEmpty()) put("addedMemos", codec.encodeToJsonElement(memosSerializer, entry.addedMemos))
             })
         }.toString()
 
@@ -207,8 +225,9 @@ class AIWriteLog(private val prefs: AIPreferences, now: Instant = Instant.now(),
                 val at = (item["at"] as? JsonPrimitive)?.takeIf { !it.isString }?.doubleOrNull ?: return@mapNotNull null
                 fun plans(name: String): List<CheckInItem> =
                     item[name]?.let { runCatching { codec.decodeFromJsonElement(plansSerializer, it) }.getOrNull() }.orEmpty()
+                val memos = item["addedMemos"]?.let { runCatching { codec.decodeFromJsonElement(memosSerializer, it) }.getOrNull() }.orEmpty()
                 AIWriteEntry(id, at, item["summary"].aiString() ?: "", plans("added"), plans("before"), plans("after"),
-                    item["undone"].aiBool() ?: false)
+                    item["undone"].aiBool() ?: false, memos)
             }
         }
 

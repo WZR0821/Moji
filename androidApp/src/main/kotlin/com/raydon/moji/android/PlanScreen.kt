@@ -63,9 +63,11 @@ fun PlanScreen(viewModel: MojiViewModel) {
     var showsCompleted by remember { mutableStateOf(false) }
     var addMenu by remember { mutableStateOf(false) }
     val aiReady = rememberAIReady()
-    // What was read out of plans typed a moment ago, by plan id. Never saved.
-    val entrySuggestions = remember { mutableStateMapOf<String, com.raydon.moji.android.ai.EntrySuggestion>() }
-    val readingEntryIds = remember { mutableStateListOf<String>() }
+    // What was read out of plans typed a moment ago, by plan id, and the 存为模板 hint. Never saved;
+    // kept in the view model so a tab switch or a rotation does not lose them (A10).
+    val entrySuggestions by viewModel.entrySuggestions.collectAsStateWithLifecycle()
+    val readingEntryIds by viewModel.readingEntryIds.collectAsStateWithLifecycle()
+    val templateHints by viewModel.templateHints.collectAsStateWithLifecycle()
     var breakdown by remember { mutableStateOf<Pair<CheckInItem, Boolean>?>(null) }
     var showsImport by remember { mutableStateOf(false) }
     // 分享: what came in from another app, drafted on the import page (which reads it, then takes it out of the inbox).
@@ -136,23 +138,27 @@ fun PlanScreen(viewModel: MojiViewModel) {
             ChecklistPolicy.isVisible(it.scheduledStart, it.status, now.toString(), viewModel.carriesOver, zone.id)
     }.sortedWith(compareBy<CheckInItem> { it.scheduledStart }.thenBy { it.createdAt })
     // After 按建议排序 the list keeps that order for the day; plans not in it follow in their own order.
-    val suggestedOrder = todayOrder?.takeIf { it.day == todayKey && aiSettings.dailyBrief && showsEntries }?.ids
+    // Only while the brief itself can show (B6): no card, no order taken from it.
+    val suggestedOrder = todayOrder?.takeIf { it.day == todayKey && aiSettings.dailyBrief && aiReady }?.ids
     val pending = if (suggestedOrder != null) com.raydon.moji.android.ai.AIDailyBrief.sorted(schedulePending, suggestedOrder) else schedulePending
     // 晚间收尾 takes the place of 今日提要 from 21:00 on (a photographed run stands the clock at 21:30).
     val wrapNow = com.raydon.moji.android.ai.AIClock.now()
     val wrapDay = wrapNow.toLocalDate()
     val wrapDayKey = com.raydon.moji.android.ai.AIDailyBrief.dayKey(wrapDay)
     val wrapFacts = com.raydon.moji.android.ai.AIEveningWrap.facts(snapshot.checkInItems, snapshot.records, today, zone)
-    val showsWrap = aiSettings.eveningWrap && showsEntries && com.raydon.moji.android.ai.AIEveningWrap.isEvening(wrapNow) &&
+    // 收尾 and 提要 appear only once a model is set up (B6); the entry points still show without one.
+    val showsWrap = aiSettings.eveningWrap && aiReady && com.raydon.moji.android.ai.AIEveningWrap.isEvening(wrapNow) &&
         wrapDismissedDay != wrapDayKey && com.raydon.moji.android.ai.AIEveningWrap.shouldShow(wrapFacts, pending.size)
-    val showsBrief = !showsWrap && aiSettings.dailyBrief && showsEntries && briefDismissedDay != todayKey &&
+    val showsBrief = !showsWrap && aiSettings.dailyBrief && aiReady && briefDismissedDay != todayKey &&
         com.raydon.moji.android.ai.AIDailyBrief.shouldShow(schedulePending, snapshot.countdowns, nowZoned)
     val quickCategories = aiCategories(viewModel)
     val quickDefaultCategory = viewModel.defaultCategory
     // What the words in the field already say, read on the device; nothing is sent for this.
+    fun readQuickTokens(text: String): List<com.raydon.moji.android.ai.QuickEntryToken> =
+        if (!aiSettings.readsQuickEntry || !showsEntries || text.isBlank()) emptyList()
+        else com.raydon.moji.android.ai.QuickEntryParser.tokens(text, ZonedDateTime.now(), quickCategories, quickDefaultCategory)
     val quickTokens = remember(quickTitle, today, aiSettings.readsQuickEntry, showsEntries, quickCategories, quickDefaultCategory) {
-        if (!aiSettings.readsQuickEntry || !showsEntries || quickTitle.isBlank()) emptyList()
-        else com.raydon.moji.android.ai.QuickEntryParser.tokens(quickTitle, ZonedDateTime.now(), quickCategories, quickDefaultCategory)
+        readQuickTokens(quickTitle)
     }
     // Asked for once a day while the card is on screen: when the page appears, comes back to the
     // foreground, or the card starts to show. The store keeps the rest of the rules.
@@ -182,12 +188,20 @@ fun PlanScreen(viewModel: MojiViewModel) {
         if (!resumed || waitsForQaSeed) return@LaunchedEffect
         val inbox = com.raydon.moji.android.ai.ShareInbox.of(context)
         fun busy() = sharedItem != null || showsImport || AIIntro.page.value != null
-        if (busy() || inbox.oldest() == null) return@LaunchedEffect
+        // Set up: the oldest. Not set up: the oldest not introduced yet, so a second share still gets its one introduction.
+        fun next(): com.raydon.moji.android.ai.ShareInboxItem? {
+            val items = inbox.items()
+            if (com.raydon.moji.android.ai.AISettingsStore.shared.isReady) return items.firstOrNull()
+            val id = proactive.shareToIntroduce(items.map { it.id }) ?: return null
+            return items.firstOrNull { it.id == id }
+        }
+        if (busy() || next() == null) return@LaunchedEffect
         kotlinx.coroutines.delay(400)
         if (busy()) return@LaunchedEffect
-        val item = inbox.oldest() ?: return@LaunchedEffect
+        val item = next() ?: return@LaunchedEffect
         if (com.raydon.moji.android.ai.AISettingsStore.shared.isReady) { sharedItem = item; showsImport = true }
-        else AIIntro.open(forShare = true)
+        // Not set up: the introduction once for each thing shared; it stays in the inbox for later (A4).
+        else { proactive.markShareIntroduced(item.id); AIIntro.open(forShare = true) }
     }
     val total = pending.size + completed.size
     val toolbarPixels = with(androidx.compose.ui.platform.LocalDensity.current) { 44.dp.roundToPx() }
@@ -201,68 +215,21 @@ fun PlanScreen(viewModel: MojiViewModel) {
             if (target >= 0) listState.animateScrollToItem(target, -toolbarPixels)
         }
     }
-    /**
-     * The plan is already saved, with any chips tapped before adding. If the sentence as typed
-     * carries a time, a length or several things, ask what it says and offer under the row only
-     * what would still change the plan as it now is ([savedTitle] is its title after the chips).
-     */
-    fun readQuickEntry(id: String, text: String, savedTitle: String) {
-        if (!aiReady || !com.raydon.moji.android.ai.AISettingsStore.shared.settings.value.readsQuickEntry || !com.raydon.moji.android.ai.AIDrafting.isWorthReading(text)) return
-        readingEntryIds += id
-        scope.launch {
-            // A failed reading is not worth a message: the plan is there either way.
-            val reading = try { com.raydon.moji.android.ai.AIAssistant.shared.readEntry(text, aiCategories(viewModel)) }
-                catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled } catch (error: Throwable) { null }
-            readingEntryIds.remove(id)
-            val current = viewModel.snapshot.value.checkInItems.firstOrNull { it.id == id && it.title == savedTitle && it.status == "planned" } ?: return@launch
-            val suggestion = reading?.removingMatches(current) ?: return@launch
-            if (suggestion.isEmpty) return@launch
-            entrySuggestions[id] = suggestion
-        }
-    }
-    fun applySuggestion(suggestion: com.raydon.moji.android.ai.EntrySuggestion, id: String) {
-        entrySuggestions.remove(id)
-        val plan = viewModel.snapshot.value.checkInItems.firstOrNull { it.id == id } ?: return
-        val updated = suggestion.applied(plan) ?: return
-        val notice = suggestion.day?.let { "已移到${com.raydon.moji.android.ai.AIDrafting.dayText(it, LocalDate.now())}，可在日历查看" } ?: "已按建议调整"
-        val fields = com.raydon.moji.android.ai.AIWriteText.changedFields(plan, updated)
-        viewModel.commitDrafts(changed = listOf(updated), notice = notice,
-            summary = if (fields.isEmpty()) null else com.raydon.moji.android.ai.AIWriteText.entryChange(plan.title, fields))
-    }
-    fun splitEntry(suggestion: com.raydon.moji.android.ai.EntrySuggestion, id: String) {
-        entrySuggestions.remove(id)
-        if (suggestion.parts.size < 2) return
-        val plan = viewModel.snapshot.value.checkInItems.firstOrNull { it.id == id && it.kind == "planned" } ?: return
-        val now = Instant.now().toString()
-        val rest = suggestion.parts.drop(1).map { part ->
-            CheckInItem(id = java.util.UUID.randomUUID().toString(), title = part, category = plan.category, scheduledStart = plan.scheduledStart,
-                plannedMinutes = plan.plannedMinutes, createdAt = now, scheduleKind = plan.scheduleKind, detailsConfigured = plan.detailsConfigured,
-                plannedDurationEnabled = plan.plannedDurationEnabled, aiOrigin = com.raydon.moji.android.ai.AIWriteText.splitOrigin(plan.title))
-        }
-        viewModel.commitDrafts(added = rest, changed = listOf(plan.copy(title = suggestion.parts[0])), notice = "已拆成 ${suggestion.parts.size} 条",
-            summary = com.raydon.moji.android.ai.AIWriteText.entrySplit(suggestion.parts.size, plan.title))
-    }
     fun addQuickPlan() {
         val submitted = quickTitle.trim()
         if (submitted.isEmpty()) return
         val id = quickDraftId
-        // The chips the user tapped go on in the same save; the rest are ignored.
-        val tokens = quickTokens
+        // The chips the user tapped go on in the same save; the rest are ignored. Read from the words
+        // as they are now, as iOS does: a caller may set them just before (the QA routes do).
+        val tokens = readQuickTokens(quickTitle)
         val adopted = adoptedChips.intersect(tokens.map { it.id }.toSet())
         val chosen = if (adopted.isEmpty()) null else com.raydon.moji.android.ai.QuickEntryParser.suggestion(quickTitle, tokens, adopted)
-        val movedTo = chosen?.day?.takeIf { it != today }
-        var savedTitle = submitted
-        viewModel.savePlan(existingId = id, title = submitted, note = "", date = today, time = LocalTime.MIDNIGHT,
-            scheduleKind = "allDay", category = viewModel.defaultCategory, plannedMinutes = 25,
-            repeatRule = "never", weekdays = emptyList(), reminderMinutes = null, calendarSync = false, plannedDurationEnabled = false,
-            transform = chosen?.let { suggestion -> { plan -> (suggestion.applied(plan) ?: plan).also { savedTitle = it.title } } },
-            onSaved = {
-                if (quickTitle.trim() == submitted) { quickTitle = ""; adoptedChips = emptySet() }
-                quickDraftId = java.util.UUID.randomUUID().toString()
-                movedTo?.let { viewModel.message.value = "已加到${com.raydon.moji.android.ai.AIDrafting.dayText(it, LocalDate.now())}，可在日历查看" }
-                // A plan moved off today has no row here to hang a suggestion under.
-                if (movedTo == null) readQuickEntry(id, submitted, savedTitle)
-            })
+        // None tapped, but the device read something: that goes under the new row at once (A2).
+        val local = if (adopted.isEmpty()) com.raydon.moji.android.ai.QuickEntryParser.localSuggestion(quickTitle, tokens) else null
+        viewModel.addQuickPlan(id, submitted, today, chosen, local, aiCategories(viewModel)) {
+            if (quickTitle.trim() == submitted) { quickTitle = ""; adoptedChips = emptySet() }
+            quickDraftId = java.util.UUID.randomUUID().toString()
+        }
     }
     /**
      * 照此处理: one write for every plan left, undoable, kept in 今天的整理. Plans past the six
@@ -327,7 +294,19 @@ fun PlanScreen(viewModel: MojiViewModel) {
                 quickTitle = if (qaRoute == "ai-entry-split") "买菜、取快递、交电费" else "明天下午三点交保险计划书 45分钟"
                 addQuickPlan()
             }
-            "ai-breakdown", "ai-breakdown-carry" -> pending.firstOrNull()?.let { breakdown = it to (qaRoute == "ai-breakdown-carry") }
+            // Added without tapping a chip while no model is set up: the strip read on the device.
+            "ai-entry-local" -> {
+                quickTitle = "明早八点背单词半小时，工作日都要"
+                addQuickPlan()
+                focusManager.clearFocus()
+            }
+            // The sample data has 「背单词」 twice from earlier days; a third by hand brings the hint.
+            "ai-plan-template-hint" -> {
+                quickTitle = "背单词"
+                addQuickPlan()
+                focusManager.clearFocus()
+            }
+            "ai-breakdown", "ai-breakdown-carry", "ai-breakdown-note" -> pending.firstOrNull()?.let { breakdown = it to (qaRoute == "ai-breakdown-carry") }
             "ai-import", "ai-import-drafts", "ai-import-ocr" -> showsImport = true
             "ai-library-filter", "ai-library-filter-applied" -> showLibrary = true
             "ai-entry-chips" -> {
@@ -364,13 +343,15 @@ fun PlanScreen(viewModel: MojiViewModel) {
         }
     }
     LaunchedEffect(qaRoute, entrySuggestions.size) {
-        if (BuildConfig.DEBUG && qaRoute == "ai-entry-applied") entrySuggestions.entries.firstOrNull()?.let { (id, suggestion) ->
-            kotlinx.coroutines.delay(1_200); applySuggestion(suggestion, id)
+        if (BuildConfig.DEBUG && qaRoute == "ai-entry-applied") entrySuggestions.keys.firstOrNull()?.let { id ->
+            kotlinx.coroutines.delay(1_200); viewModel.applyEntrySuggestion(id)
         }
     }
     val openRecord = { addMenu = false; editing = null; editorKind = "completed"; showEditor = true }
     val openPlan = { addMenu = false; editing = null; editorKind = "planned"; showEditor = true }
     val openImport = { addMenu = false; aiEntry { showsImport = true } }
+    // 今天的整理 in the ＋ menu while today has a write not taken back (A9).
+    val openWrites = if (com.raydon.moji.android.ai.AIWriteLog.activeCount(writeEntries, today, zone) > 0) { { addMenu = false; showsWrites = true } } else null
     MojiScreen(opaqueTopInset = true) {
         Box(Modifier.fillMaxSize()) {
         LazyColumn(Modifier.fillMaxSize(), state = listState) {
@@ -381,7 +362,7 @@ fun PlanScreen(viewModel: MojiViewModel) {
                         NavigationBarHairline()
                     }
                     Box(Modifier.align(Alignment.TopEnd).padding(end = 18.dp, top = 40.dp)) {
-                        PlanAddMenu(addMenu && listState.firstVisibleItemIndex == 0, { addMenu = false }, openRecord, openPlan, if (showsEntries) openImport else null)
+                        PlanAddMenu(addMenu && listState.firstVisibleItemIndex == 0, { addMenu = false }, openRecord, openPlan, if (showsEntries) openImport else null, openWrites)
                     }
                 }
             }
@@ -499,14 +480,21 @@ fun PlanScreen(viewModel: MojiViewModel) {
                 PlanRow(item, today, expandedId == item.id, false, viewModel,
                     { expandedId = if (expandedId == item.id) null else item.id },
                     { editing = item; showEditor = true }, { copying = item },
-                    breakDown = if (showsEntries) { replaces -> aiEntry { breakdown = item to replaces } } else null) {
-                    val suggestion = entrySuggestions[item.id]
-                    if (suggestion != null) EntrySuggestionStrip(suggestion, { applySuggestion(suggestion, item.id) }, { splitEntry(suggestion, item.id) },
-                        { entrySuggestions.remove(item.id) }, Modifier.padding(start = 46.dp, end = 4.dp, bottom = 8.dp))
+                    breakDown = if (showsEntries) { replaces -> aiEntry { breakdown = item to replaces } } else null,
+                    openWrites = { showsWrites = true }) {
+                    // A strip for the plan as it was when added; one changed since is not shown (A2).
+                    val record = entrySuggestions[item.id]?.takeIf { it.isCurrent(item) }
+                    if (record != null) EntrySuggestionStrip(record.suggestion, { viewModel.applyEntrySuggestion(item.id) }, { viewModel.splitEntry(item.id) },
+                        { viewModel.dropEntrySuggestion(item.id) }, Modifier.padding(start = 46.dp, end = 4.dp, bottom = 8.dp))
                     else if (item.id in readingEntryIds) InkDraftWaiting("在看这句话", Modifier.padding(start = 58.dp, bottom = 8.dp))
-                    // 顺延旁批: an open plan carried three days or more, until 不用.
+                    // 存为模板: a title written by hand for the third time or more (N3).
+                    templateHints[item.id]?.let { count ->
+                        TemplateHintStrip(count, { viewModel.saveHintTemplate(item.id) }, { viewModel.dismissTemplateHint(item.id) },
+                            Modifier.padding(start = 46.dp, end = 4.dp, bottom = 6.dp))
+                    }
+                    // 顺延旁批: an open plan carried three days or more, until 不用; only once a model is set up (B6).
                     val late = com.raydon.moji.android.ai.AIDrafting.daysLate(item.scheduledStart, nowZoned) ?: 0
-                    val showsNote = aiSettings.carryOverNotes && showsEntries && item.status == "planned" && item.id !in carryDismissed &&
+                    val showsNote = aiSettings.carryOverNotes && aiReady && item.status == "planned" && item.id !in carryDismissed &&
                         late >= com.raydon.moji.android.ai.AIDailyBrief.carryNoteDays
                     androidx.compose.animation.AnimatedVisibility(showsNote, enter = fadeIn(tween(200)), exit = fadeOut(tween(200)) + shrinkVertically(tween(200))) {
                         CarryOverNoteLine(late, { aiEntry { breakdown = item to true } }, { proactive.dismissCarryNote(item.id) },
@@ -524,7 +512,7 @@ fun PlanScreen(viewModel: MojiViewModel) {
                 }
                 if (showsCompleted) items(completed, key = { "completed-" + it.id }) { item ->
                     PlanRow(item, today, expandedId == item.id, true, viewModel, { expandedId = if (expandedId == item.id) null else item.id },
-                        { editing = item; showEditor = true }, { copying = item })
+                        { editing = item; showEditor = true }, { copying = item }, openWrites = { showsWrites = true })
                 }
             }
             item { Spacer(Modifier.height(8.dp)) }
@@ -536,14 +524,14 @@ fun PlanScreen(viewModel: MojiViewModel) {
                 Box(Modifier.size(44.dp).clickable { showLibrary = true }, contentAlignment = Alignment.Center) { MojiLineIcon(MojiIcon.GridSF, 28.dp) }
                 Box {
                     Box(Modifier.size(44.dp).clickable { addMenu = true }, contentAlignment = Alignment.Center) { MojiLineIcon(MojiIcon.Plus, 23.dp) }
-                    PlanAddMenu(addMenu, { addMenu = false }, openRecord, openPlan, if (showsEntries) openImport else null)
+                    PlanAddMenu(addMenu, { addMenu = false }, openRecord, openPlan, if (showsEntries) openImport else null, openWrites)
                 }
             }
             NavigationBarHairline()
         }
         }
     }
-    if (showEditor) PlanEditorScreenDialog(editing, today, viewModel, initialKind = editorKind) { showEditor = false; editing = null }
+    if (showEditor) PlanEditorScreenDialog(editing, today, viewModel, initialKind = editorKind, offersTemplateHint = true) { showEditor = false; editing = null }
     if (showLibrary) PlanLibraryDialog(viewModel) { showLibrary = false }
     if (showsImport) PlanImportDialog(viewModel, sharedItem) { showsImport = false; sharedItem = null }
     if (showsWrites) AIWritesSheet(viewModel) { showsWrites = false }
@@ -558,11 +546,14 @@ fun PlanScreen(viewModel: MojiViewModel) {
 }
 
 @Composable
-private fun PlanAddMenu(expanded: Boolean, onDismiss: () -> Unit, onRecord: () -> Unit, onPlan: () -> Unit, onImport: (() -> Unit)? = null) {
+private fun PlanAddMenu(expanded: Boolean, onDismiss: () -> Unit, onRecord: () -> Unit, onPlan: () -> Unit, onImport: (() -> Unit)? = null,
+                        onWrites: (() -> Unit)? = null) {
     DropdownMenu(expanded, onDismiss) {
         DropdownMenuItem({ Text("记录已做") }, onRecord)
         DropdownMenuItem({ Text("详细添加计划") }, onPlan)
         if (onImport != null) DropdownMenuItem({ Text("从文字或截图添加") }, onImport)
+        // iOS list.bullet.rectangle, the same drawing as 时间记录 on the review page.
+        if (onWrites != null) DropdownMenuItem({ Text("今天的整理") }, onWrites, leadingIcon = { ListBulletRectangleIcon(LocalContentColor.current) })
     }
 }
 
@@ -656,6 +647,8 @@ private fun PlanRow(plan: CheckInItem, today: LocalDate, expanded: Boolean, arch
                      * the argument says whether the steps replace this plan.
                      */
                     breakDown: ((Boolean) -> Unit)? = null,
+                    /** Opens 今天的整理 from the vermilion 墨记… mark (A9). */
+                    openWrites: (() -> Unit)? = null,
                     below: @Composable () -> Unit = {}) {
     var menu by remember { mutableStateOf(false) }
     var sealMenu by remember { mutableStateOf(false) }
@@ -704,20 +697,21 @@ private fun PlanRow(plan: CheckInItem, today: LocalDate, expanded: Boolean, arch
                     }
                     if (!expanded) {
                         PlanMetaLine(plan.scheduleKind == "exactTime", schedule, if (hasDuration) editorDuration(plan.plannedMinutes.toLong()) else null,
-                            categoryName(plan.category), plan.aiOrigin?.takeIf { it.isNotEmpty() }?.let { com.raydon.moji.android.ai.AIWriteText.mark(it) })
+                            categoryName(plan.category), plan.aiOrigin?.takeIf { it.isNotEmpty() }?.let { com.raydon.moji.android.ai.AIWriteText.mark(it) }, openWrites)
                         if (plan.note.isNotEmpty()) Text(plan.note, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, color = LocalContentColor.current.copy(alpha = 0.5f))
                     }
                 }
                 if (daysLate > 0 && !finished) {
                     val seal = if (daysLate > 99) "99+" else daysLate.toString()
                     // A plan that keeps being carried over is usually too big, on the wrong day,
-                    // or no longer wanted: the seal offers all three.
-                    if (breakDown != null && plan.status == "planned") Box {
+                    // or no longer wanted: the seal offers all three. 改期 and 放下 never need a
+                    // model; 拆小一点 shows with the other entry points (A6). 放下 archives, undoably (A7).
+                    if (plan.status == "planned") Box {
                         Box(Modifier.size(22.dp, 44.dp).clickable { sealMenu = true }.semantics { contentDescription = "已顺延 $daysLate 天，处理这个计划" }, contentAlignment = Alignment.Center) { InkSeal(seal, 22) }
                         DropdownMenu(sealMenu, { sealMenu = false }) {
-                            DropdownMenuItem({ Text("拆小一点") }, { sealMenu = false; breakDown(true) })
+                            if (breakDown != null) DropdownMenuItem({ Text("拆小一点") }, { sealMenu = false; breakDown(true) })
                             DropdownMenuItem({ Text("改期") }, { sealMenu = false; quickField = PlanQuickField.DATE })
-                            DropdownMenuItem({ Text("放下") }, { sealMenu = false; viewModel.skipPlan(plan.id) })
+                            DropdownMenuItem({ Text("放下") }, { sealMenu = false; viewModel.dropPlan(plan.id) })
                         }
                     } else InkSeal(seal, 22)
                 }
@@ -802,7 +796,7 @@ private fun PlanRow(plan: CheckInItem, today: LocalDate, expanded: Boolean, arch
  * keeps 11sp, so plans without a long line look as before.
  */
 @Composable
-private fun PlanMetaLine(exactTime: Boolean, schedule: String, duration: String?, category: String, origin: String?) {
+private fun PlanMetaLine(exactTime: Boolean, schedule: String, duration: String?, category: String, origin: String?, openOrigin: (() -> Unit)? = null) {
     val secondary = MaterialTheme.colorScheme.secondary
     val measurer = rememberTextMeasurer()
     val style = LocalTextStyle.current
@@ -840,7 +834,8 @@ private fun PlanMetaLine(exactTime: Boolean, schedule: String, duration: String?
             // 留痕: where Moji got this plan from; it gives way first when even 0.78 is too wide.
             if (origin != null) {
                 Text("·", fontSize = size, color = secondary)
-                Text(origin, Modifier.weight(1f, fill = false), fontSize = size, maxLines = 1, overflow = TextOverflow.Ellipsis, color = mojiVermilion)
+                Text(origin, Modifier.weight(1f, fill = false).then(if (openOrigin != null) Modifier.clickable(onClick = openOrigin) else Modifier),
+                    fontSize = size, maxLines = 1, overflow = TextOverflow.Ellipsis, color = mojiVermilion)
             }
         }
     }
@@ -891,5 +886,5 @@ private fun PlanRowMenu(expanded: Boolean, onDismiss: () -> Unit, plan: CheckInI
     }
 }
 
-private fun com.raydon.moji.android.data.PomodoroState.hasActiveFocus(): Boolean =
+internal fun com.raydon.moji.android.data.PomodoroState.hasActiveFocus(): Boolean =
     running || accumulatedSeconds > 0 || pendingNextPhase != null || linkedPlanId.isNotBlank() || remainingSeconds < phaseDurationSeconds
